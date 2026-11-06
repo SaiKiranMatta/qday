@@ -119,6 +119,16 @@ export class QDayDevice {
     throw new DeviceError(`The device didn't answer after ${STATUS_TRIES} tries`);
   }
 
+  /**
+   * Asks the device to review and sign an unsigned frame transaction. Waits for the person to approve,
+   * up to LONG_WAIT_MS. Returns the 2,500-byte signature as 0x hex.
+   */
+  async signFrame(raw: Uint8Array): Promise<`0x${string}`> {
+    const response = await this.request({ kind: "signFrame", raw }, LONG_WAIT_MS);
+    if (response.kind !== "sig") throw new DeviceError("The device gave the wrong response");
+    return response.signature;
+  }
+
   /** Sends one request and waits for its response, failing on a device error. */
   async request(request: Request, timeoutMs = LONG_WAIT_MS): Promise<Response> {
     const response = await this.exchange(request, timeoutMs);
