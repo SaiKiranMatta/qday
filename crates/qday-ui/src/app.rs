@@ -2,24 +2,27 @@
 
 use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
-use qday_wallet::activity::{Activity, Entry, Summary};
 use qday_wallet::backup::{BackupCheck, Progress, seed_to_words};
 use qday_wallet::counter::OneWayCounter;
 use qday_wallet::flash::Flash;
-use qday_wallet::input::{Approval, Debouncer, Decision, KeyState, Role};
+use qday_wallet::frame::{Action as TxAction, Address, CHAIN_ID, FrameTx};
+use qday_wallet::input::{APPROVAL_TIMEOUT_MS, Approval, Debouncer, Decision, KeyState, Role};
 use qday_wallet::passcode::{Attempt, CODE_DIGITS, Code, MAX_FAILURES, Proof, shuffled_digits};
 use qday_wallet::protocol::{Line, NextKey, Request, Response, parse_request, response_line};
 use qday_wallet::rng::Rng;
-use qday_wallet::settings::{CROSSES, Calibration, Settings, ThemeChoice};
+use qday_wallet::settings::{CROSSES, Calibration, Settings};
 use qday_wallet::wallet::{RESTORE_SKIP, Review, Wallet, WalletError};
 use qday_xmss::{Hash, LEAVES};
 
+use crate::canvas::Canvas;
 use crate::fb::Framebuffer;
-use crate::format::key_number;
-use crate::keys::{Action, KeyBar, Tab};
-use crate::screens::{ACTIVITY_ROWS, DEVICE_ROWS, Home, Screen, keypad_hit};
-use crate::theme::{Theme, theme_for};
+use crate::format::{checksum_address, eth, short_address, wait_text};
+use crate::nav::{self, Action, Keys, Scroll, Setting};
+use crate::screens::{self, ACTIVITY_ROWS, Activity, DeviceInfo, Passcode, ReviewInfo, Status};
+use crate::theme::{self, Theme};
+use crate::widgets::{Tab, digit_in_slot, key_rect};
 
 /// The status light.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -57,6 +60,8 @@ pub trait Host {
     fn set_light(&mut self, light: Light);
     /// Writes a line to the laptop.
     fn send(&mut self, line: &str);
+    /// Waits, so a message stays on screen.
+    fn pause(&mut self, ms: u32);
     /// Restarts the device. On hardware this doesn't return.
     fn restart(&mut self);
 }
@@ -64,8 +69,18 @@ pub trait Host {
 const RESULT_MS: u64 = 2500;
 const PASSCODE_IDLE_MS: u64 = 60_000;
 const BACKUP_IDLE_MS: u64 = 120_000;
+/// How long a message stays up before a restart.
+const RESTART_PAUSE_MS: u32 = 1500;
 /// Leaves between screen updates while a tree builds.
 const PROGRESS_STEP: u32 = 16;
+/// Entries kept for the Activity tab.
+const ACTIVITY_KEPT: usize = 20;
+/// The longest values the review screen shows whole in every theme, with their unit. Anything
+/// longer is refused, because a screen must never show part of what's being signed.
+const LONGEST_AMOUNT: usize = 24;
+const LONGEST_CALL_VALUE: usize = 16;
+const LONGEST_FEE: usize = 12;
+const FIRMWARE: &str = concat!("qday ", env!("CARGO_PKG_VERSION"));
 
 /// A restore waiting for approval.
 #[derive(Clone, Copy)]
@@ -75,11 +90,142 @@ struct RestoreJob {
     chain_next_index: u32,
 }
 
+/// One line of the Activity tab.
+struct LogEntry {
+    approved: bool,
+    title: String,
+    detail: String,
+    index: Option<u32>,
+}
+
+impl LogEntry {
+    fn item(&self) -> Activity<'_> {
+        Activity {
+            approved: self.approved,
+            title: &self.title,
+            detail: &self.detail,
+            index: self.index,
+        }
+    }
+}
+
+/// What the review screen shows, all decoded on the device.
+pub struct Shown {
+    kind: ShownKind,
+    a: String,
+    b: String,
+    c: String,
+    fee: String,
+    rotation: bool,
+    /// Short lines for the Activity tab.
+    summary: String,
+    detail: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShownKind {
+    Send,
+    Call,
+    UnknownCall,
+}
+
+fn selector_text(data: &[u8]) -> String {
+    match data {
+        [a, b, c, d, ..] => format!("0x{a:02x}{b:02x}{c:02x}{d:02x}"),
+        _ => "Plain call".to_string(),
+    }
+}
+
+impl Shown {
+    /// Describes a transaction. `None` if it can't be shown whole, so it mustn't be signed.
+    #[must_use]
+    pub fn from_tx(tx: &FrameTx) -> Option<Self> {
+        let fee = eth(tx.max_fee_wei());
+        if fee.len() > LONGEST_FEE {
+            return None;
+        }
+        match &tx.action {
+            TxAction::Transfer { to, value } => {
+                let amount = eth(*value);
+                if amount.len() > LONGEST_AMOUNT {
+                    return None;
+                }
+                Some(Self {
+                    kind: ShownKind::Send,
+                    summary: format!("Sent {amount}"),
+                    detail: format!("to {}", short_address(to)),
+                    a: amount.trim_end_matches(" ETH").to_string(),
+                    b: checksum_address(to),
+                    c: String::new(),
+                    fee,
+                    rotation: false,
+                })
+            }
+            TxAction::Rotate { .. } => Some(Self {
+                kind: ShownKind::Call,
+                a: checksum_address(&tx.sender),
+                b: eth(0),
+                c: "Rotate keys".to_string(),
+                fee,
+                rotation: true,
+                summary: "Rotated keys".to_string(),
+                detail: "to the next tree".to_string(),
+            }),
+            TxAction::Other {
+                target,
+                value,
+                data,
+                ..
+            } => {
+                let amount = eth(*value);
+                if amount.len() > LONGEST_CALL_VALUE {
+                    return None;
+                }
+                let target: Address = target.unwrap_or(tx.sender);
+                let function = selector_text(data);
+                Some(Self {
+                    kind: ShownKind::UnknownCall,
+                    summary: "Unknown call".to_string(),
+                    detail: format!("{function} at {}", short_address(&target)),
+                    a: checksum_address(&target),
+                    b: amount,
+                    c: function,
+                    fee,
+                    rotation: false,
+                })
+            }
+        }
+    }
+
+    /// The screen's view of this.
+    #[must_use]
+    pub fn review(&self) -> screens::Review<'_> {
+        match self.kind {
+            ShownKind::Send => screens::Review::Send {
+                amount: &self.a,
+                unit: "ETH",
+                to: &self.b,
+            },
+            ShownKind::Call => screens::Review::Call {
+                contract: &self.a,
+                value: &self.b,
+                function: &self.c,
+            },
+            ShownKind::UnknownCall => screens::Review::UnknownCall {
+                contract: &self.a,
+                value: &self.b,
+                function: &self.c,
+            },
+        }
+    }
+}
+
 /// Why a passcode is being entered.
+#[allow(clippy::large_enum_variant, reason = "there is only ever one of these")]
 enum Purpose {
     Create,
     CreateConfirm(Code),
-    Sign(Review),
+    Sign(Review, Shown),
     ChangeOld,
     ChangeNew(Proof),
     ChangeConfirm(Proof, Code),
@@ -90,20 +236,21 @@ enum Purpose {
 impl Purpose {
     fn title(&self) -> &'static str {
         match self {
-            Self::Create | Self::ChangeNew(_) => "New passcode",
-            Self::CreateConfirm(_) | Self::ChangeConfirm(..) => "Repeat passcode",
-            Self::Sign(_) | Self::ChangeOld | Self::Backup | Self::Restore(_) => "Enter passcode",
+            Self::Create => "Create a passcode",
+            Self::ChangeNew(_) => "New passcode",
+            Self::CreateConfirm(_) | Self::ChangeConfirm(..) => "Enter it again",
+            Self::Sign(..) | Self::ChangeOld | Self::Backup | Self::Restore(_) => "Enter passcode",
         }
     }
 
-    fn hint(&self) -> &'static str {
+    fn hint(&self) -> String {
         match self {
-            Self::Create | Self::ChangeNew(_) => "Choose 6 digits",
-            Self::CreateConfirm(_) | Self::ChangeConfirm(..) => "Enter it again",
-            Self::Sign(_) => "To sign this",
-            Self::ChangeOld => "To change it",
-            Self::Backup => "To show the words",
-            Self::Restore(_) => "To restore",
+            Self::Create | Self::ChangeNew(_) => "6 digits".to_string(),
+            Self::CreateConfirm(_) | Self::ChangeConfirm(..) => "to confirm".to_string(),
+            Self::Sign(review, _) => format!("for key #{:04}", review.tx.index),
+            Self::ChangeOld => "to change it".to_string(),
+            Self::Backup => "to show the words".to_string(),
+            Self::Restore(_) => "to restore".to_string(),
         }
     }
 }
@@ -114,16 +261,18 @@ enum Mode {
     Calibrate {
         step: usize,
         raw: [(i32, i32); 3],
+        retry: bool,
     },
     Home(Tab),
     ActivityList {
         top: usize,
     },
     DeviceMenu {
-        selected: usize,
+        setting: Setting,
     },
     Review {
         review: Review,
+        shown: Shown,
         approval: Approval,
     },
     RestoreConfirm {
@@ -137,11 +286,11 @@ enum Mode {
         count: usize,
         digits: [u8; 10],
         touched_ms: u64,
-        hint: Option<String>,
+        error: Option<String>,
     },
     Result {
         success: bool,
-        title: &'static str,
+        title: String,
         detail: String,
         until_ms: u64,
     },
@@ -162,15 +311,23 @@ enum Mode {
     },
     Notice {
         title: &'static str,
-        first: &'static str,
-        second: &'static str,
+        detail: &'static str,
     },
 }
 
-fn roles(bar: &KeyBar) -> [Role; 4] {
-    bar.keys.map(|key| match key.action {
-        Action::Approve => Role::Approve,
-        Action::Reject => Role::Reject,
+/// What the tabs show, refreshed when something changes rather than on every frame.
+struct View {
+    status: Status,
+    root: Hash,
+    counter: u32,
+    next_ready: bool,
+    log: Vec<LogEntry>,
+}
+
+fn roles(keys: &Keys) -> [Role; 4] {
+    keys.map(|key| match key.map(|key| key.action) {
+        Some(Action::Approve) => Role::Approve,
+        Some(Action::Reject) => Role::Reject,
         _ => Role::Ignore,
     })
 }
@@ -179,21 +336,155 @@ fn seconds_left(approval: &Approval, now_ms: u64) -> u32 {
     u32::try_from(approval.remaining_ms(now_ms).div_ceil(1000)).unwrap_or(0)
 }
 
+const TIMEOUT_SECONDS: u32 = (APPROVAL_TIMEOUT_MS / 1000) as u32;
+
+/// What K1 to K4 do in a mode. The screens draw from the same `nav` tables.
+fn keys_for(mode: &Mode) -> Keys {
+    const NONE: Keys = [None; 4];
+    match mode {
+        Mode::Home(tab) => nav::tab_keys(*tab, false, Setting::Theme),
+        Mode::ActivityList { .. } => nav::tab_keys(Tab::Activity, true, Setting::Theme),
+        Mode::DeviceMenu { setting } => nav::tab_keys(Tab::Device, true, *setting),
+        Mode::Review { .. } | Mode::RestoreConfirm { .. } => nav::review_keys(),
+        Mode::Passcode { .. } => nav::passcode_keys(),
+        Mode::SeedWords { page, .. } => nav::seed_keys(*page),
+        Mode::BackupCheck { check, .. } => nav::check_keys(&check.question().choices),
+        Mode::Calibrate { .. }
+        | Mode::Result { .. }
+        | Mode::Locked { .. }
+        | Mode::Notice { .. } => NONE,
+    }
+}
+
+/// Draws a mode. A free function, so drawing can borrow the framebuffer alongside it.
+fn draw(
+    c: &mut Canvas,
+    mode: &Mode,
+    view: &View,
+    lock_ms: u64,
+    now_ms: u64,
+    flash: Option<usize>,
+    slot: Option<usize>,
+) {
+    let status = view.status;
+    let device = DeviceInfo {
+        firmware: FIRMWARE,
+        root: &view.root,
+        counter: view.counter,
+    };
+    let items = || view.log.iter().map(LogEntry::item).collect::<Vec<_>>();
+    match mode {
+        Mode::Calibrate { step, retry, .. } => {
+            screens::calibrate(c, (*step).min(2), *retry, "");
+        }
+        Mode::Home(Tab::Home) => {
+            let latest = view.log.first().map(LogEntry::item);
+            screens::home(
+                c,
+                &status,
+                &view.root,
+                view.next_ready,
+                latest.as_ref(),
+                flash,
+            );
+        }
+        Mode::Home(Tab::Keys) => screens::keys(c, &status, view.next_ready, flash),
+        Mode::Home(Tab::Activity) => screens::activity(c, &status, &items(), 0, false, flash),
+        Mode::Home(Tab::Device) => {
+            screens::device(c, &status, &device, Setting::Theme, false, flash);
+        }
+        Mode::ActivityList { top } => screens::activity(c, &status, &items(), *top, true, flash),
+        Mode::DeviceMenu { setting } => screens::device(c, &status, &device, *setting, true, flash),
+        Mode::Review {
+            review,
+            shown,
+            approval,
+        } => {
+            let info = ReviewInfo {
+                review: shown.review(),
+                fee: &shown.fee,
+                chain_id: CHAIN_ID,
+                index: review.tx.index,
+                rotation: shown.rotation,
+                seconds_left: seconds_left(approval, now_ms),
+                timeout: TIMEOUT_SECONDS,
+            };
+            screens::review(c, &info, flash);
+        }
+        Mode::RestoreConfirm {
+            job,
+            first_index,
+            approval,
+        } => {
+            let seconds = seconds_left(approval, now_ms);
+            screens::restore_confirm(c, job.tree, *first_index, seconds, TIMEOUT_SECONDS, flash);
+        }
+        Mode::Passcode {
+            purpose,
+            count,
+            digits,
+            error,
+            ..
+        } => {
+            let hint = purpose.hint();
+            let pc = Passcode {
+                title: purpose.title(),
+                hint: &hint,
+                entered: *count,
+                error: error.as_deref(),
+                digits,
+                pressed: slot,
+            };
+            screens::passcode(c, &pc, flash);
+        }
+        Mode::Result {
+            success,
+            title,
+            detail,
+            ..
+        } => screens::result(c, *success, title, detail),
+        Mode::SeedWords { words, page, .. } => screens::seed_words(c, words, *page, flash),
+        Mode::BackupCheck { check, .. } => {
+            let question = check.question();
+            let number = check.number();
+            screens::seed_check(
+                c,
+                number,
+                question.position,
+                &question.choices,
+                false,
+                flash,
+            );
+        }
+        Mode::Locked { tries_left } => screens::locked(c, &wait_text(lock_ms), *tries_left),
+        Mode::Notice { title, detail } => screens::notice(c, title, detail),
+    }
+}
+
+/// The keypad slot under a pixel.
+fn slot_at(digits: &[u8; 10], x: i32, y: i32) -> Option<usize> {
+    #[allow(clippy::cast_precision_loss, reason = "screen positions are small")]
+    let (x, y) = (x as f32, y as f32);
+    (0..12).find(|&slot| {
+        let rect = key_rect(slot);
+        let inside = x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h;
+        inside && digit_in_slot(digits, slot).is_some()
+    })
+}
+
 /// The device.
 pub struct App<F, C, R> {
     wallet: Wallet<F, C>,
     settings: Settings<F>,
     rng: R,
     fb: Framebuffer,
-    activity: Activity,
-    home: Home,
-    choice: ThemeChoice,
+    view: View,
     calibration: Calibration,
-    usb: bool,
     mode: Mode,
     debouncer: Debouncer,
     keys: KeyState,
     touching: bool,
+    touched_slot: Option<usize>,
     dirty: bool,
     drawn_tick: u64,
 }
@@ -207,39 +498,39 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         calibrate: bool,
         host: &mut impl Host,
     ) -> Self {
-        let choice = settings.theme().unwrap_or_default();
-        let saved = settings.calibration().ok().flatten();
+        let saved = settings.theme().ok().and_then(Theme::from_u8);
+        theme::set(saved.unwrap_or(Theme::StandardLight));
+        let calibration = settings.calibration().ok().flatten();
         let mut app = Self {
             wallet,
             settings,
             rng,
             fb: Framebuffer::new(),
-            activity: Activity::default(),
-            home: Home {
-                key: [0; 32],
-                usb: false,
-                next_index: 0,
-                tree: 0,
+            view: View {
+                status: Status {
+                    tree: 0,
+                    next_index: 0,
+                    connected: false,
+                },
+                root: [0; 32],
                 counter: 0,
-                version: env!("CARGO_PKG_VERSION"),
-                latest: None,
-                theme: choice,
                 next_ready: false,
+                log: Vec::new(),
             },
-            choice,
-            calibration: saved.unwrap_or_else(Calibration::factory),
-            usb: false,
-            mode: Mode::Home(Tab::Wallet),
+            calibration: calibration.unwrap_or_else(Calibration::factory),
+            mode: Mode::Home(Tab::Home),
             debouncer: Debouncer::default(),
             keys: [false; 4],
             touching: false,
+            touched_slot: None,
             dirty: true,
             drawn_tick: 0,
         };
-        if calibrate || saved.is_none() {
+        if calibrate || calibration.is_none() {
             app.mode = Mode::Calibrate {
                 step: 0,
                 raw: [(0, 0); 3],
+                retry: false,
             };
         } else {
             app.after_calibration(host);
@@ -251,24 +542,24 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
     /// Continues the first boot, or goes to the wallet.
     fn after_calibration(&mut self, host: &mut impl Host) {
         if !self.wallet.has_key() {
+            let lines = [
+                "Building your 1,024 keys.",
+                "Once per key tree,",
+                "about 3 minutes.",
+            ];
             let created = {
                 let Self {
-                    wallet,
-                    rng,
-                    fb,
-                    choice,
-                    ..
+                    wallet, rng, fb, ..
                 } = self;
-                let theme = theme_for(*choice);
                 wallet.create(rng, |done| {
-                    show_progress(fb, theme, &mut *host, "Building keys", done);
+                    show_progress(fb, &mut *host, "Setting up", &lines, done);
                 })
             };
-            self.mode = Mode::Home(Tab::Wallet);
+            self.mode = Mode::Home(Tab::Home);
             if created.is_ok() {
                 host.restart();
             } else {
-                self.show_notice("Storage failed", "The keys could not be saved.", "");
+                self.show_notice("Device error", "The keys could not be saved.");
             }
             return;
         }
@@ -277,40 +568,33 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             self.ask_passcode(Purpose::Create, None, now);
             return;
         }
-        self.go_home(Tab::Wallet);
+        self.go_home(Tab::Home);
     }
 
-    fn show_notice(&mut self, title: &'static str, first: &'static str, second: &'static str) {
-        self.mode = Mode::Notice {
-            title,
-            first,
-            second,
-        };
+    fn show_notice(&mut self, title: &'static str, detail: &'static str) {
+        self.mode = Mode::Notice { title, detail };
         self.dirty = true;
     }
 
     /// Goes to a home tab with fresh figures.
     fn go_home(&mut self, tab: Tab) {
-        self.refresh_home();
+        self.refresh_view();
         self.mode = Mode::Home(tab);
         self.dirty = true;
     }
 
-    fn refresh_home(&mut self) {
+    fn refresh_view(&mut self) {
         if let Some(active) = self.wallet.active() {
-            self.home.key = active.key.root;
-            self.home.tree = active.tree;
-            self.home.next_index = self.wallet.next_index().unwrap_or(0);
-            self.home.counter = self.home.next_index + active.counter_base
-                - active.first_index.min(self.home.next_index);
+            let next_index = self.wallet.next_index().unwrap_or(0);
+            self.view.root = active.key.root;
+            self.view.status.tree = active.tree;
+            self.view.status.next_index = next_index;
+            self.view.counter = active.counter_base + next_index.saturating_sub(active.first_index);
         }
-        self.home.usb = self.usb;
-        self.home.latest = self.activity.get(0);
-        self.home.theme = self.choice;
-        self.home.next_ready = self.wallet.next_key_ready().is_some();
+        self.view.next_ready = self.wallet.next_key_ready().is_some();
     }
 
-    fn ask_passcode(&mut self, purpose: Purpose, hint: Option<String>, now_ms: u64) {
+    fn ask_passcode(&mut self, purpose: Purpose, error: Option<String>, now_ms: u64) {
         let digits = shuffled_digits(&mut self.rng);
         self.mode = Mode::Passcode {
             purpose,
@@ -318,15 +602,15 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             count: 0,
             digits,
             touched_ms: now_ms,
-            hint,
+            error,
         };
         self.dirty = true;
     }
 
     /// Starts entry unless it's locked, in which case the action is refused.
     fn ask_or_lock(&mut self, host: &mut impl Host, purpose: Purpose, now_ms: u64) {
-        if self.wallet.passcode().locked_for(now_ms) > 0 {
-            self.abandon(host, purpose);
+        if self.wallet.locked_for(now_ms) > 0 {
+            self.abandon(host, purpose, false);
             self.show_locked();
         } else {
             self.ask_passcode(purpose, None, now_ms);
@@ -351,18 +635,25 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             .map(|next| (next.key.root, next.key.pub_seed))
     }
 
-    fn show_result(
-        &mut self,
-        host: &mut impl Host,
-        success: bool,
-        title: &'static str,
-        detail: String,
-    ) {
+    fn remember(&mut self, approved: bool, title: String, detail: String, index: Option<u32>) {
+        self.view.log.insert(
+            0,
+            LogEntry {
+                approved,
+                title,
+                detail,
+                index,
+            },
+        );
+        self.view.log.truncate(ACTIVITY_KEPT);
+    }
+
+    fn show_result(&mut self, host: &mut impl Host, success: bool, title: &str, detail: String) {
         host.set_light(if success { Light::Green } else { Light::Red });
         let until_ms = host.now_ms() + RESULT_MS;
         self.mode = Mode::Result {
             success,
-            title,
+            title: title.to_string(),
             detail,
             until_ms,
         };
@@ -370,38 +661,38 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
     }
 
     /// Tells the laptop a signature was refused, and records it.
-    fn refuse(&mut self, host: &mut impl Host, review: &Review) {
-        self.activity.push(Entry {
-            signed: false,
-            index: review.tx.index,
-            summary: Summary::of(&review.tx.action),
-        });
+    fn refuse(&mut self, host: &mut impl Host, review: &Review, timed_out: bool) {
+        let (title, why) = if timed_out {
+            ("Timed out", "No decision in 30 s")
+        } else {
+            ("Rejected", "You rejected it")
+        };
         Self::respond(host, &Response::Err(WalletError::Rejected));
-        self.show_result(host, false, "Refused", "Nothing was signed".to_string());
+        let detail = format!("No signature. Key #{:04} is still unused.", review.tx.index);
+        self.show_result(host, false, title, detail);
+        self.remember(false, title.to_string(), why.to_string(), None);
     }
 
     /// Ends a passcode entry without doing what it was for.
-    fn abandon(&mut self, host: &mut impl Host, purpose: Purpose) {
+    fn abandon(&mut self, host: &mut impl Host, purpose: Purpose, timed_out: bool) {
         match purpose {
-            Purpose::Sign(review) => self.refuse(host, &review),
+            Purpose::Sign(review, _) => self.refuse(host, &review, timed_out),
             Purpose::Restore(_) => {
                 Self::respond(host, &Response::Err(WalletError::Rejected));
-                self.show_result(
-                    host,
-                    false,
-                    "Refused",
-                    "The keys were not changed".to_string(),
-                );
+                let detail = "The device's keys are unchanged.".to_string();
+                self.show_result(host, false, "Restore cancelled", detail);
             }
             Purpose::Create | Purpose::CreateConfirm(_) => {
                 let now = host.now_ms();
-                self.ask_passcode(Purpose::Create, None, now);
+                self.ask_passcode(Purpose::Create, Some("Start again".to_string()), now);
             }
             Purpose::ChangeOld
             | Purpose::ChangeNew(_)
             | Purpose::ChangeConfirm(..)
             | Purpose::Backup => {
-                self.mode = Mode::DeviceMenu { selected: 0 };
+                self.mode = Mode::DeviceMenu {
+                    setting: Setting::Theme,
+                };
                 self.dirty = true;
             }
         }
@@ -413,30 +704,30 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             Purpose::CreateConfirm(first) if first == code => {
                 let created = self.wallet.passcode().create(&code, &mut self.rng);
                 if created.is_ok() {
-                    self.go_home(Tab::Wallet);
+                    self.go_home(Tab::Home);
                 } else {
-                    self.show_notice("Storage failed", "The passcode was not saved.", "");
+                    self.show_notice("Device error", "Saving the passcode failed.");
                 }
             }
             Purpose::CreateConfirm(_) => {
-                let hint = Some("Those did not match".to_string());
-                self.ask_passcode(Purpose::Create, hint, now_ms);
+                let error = Some("Codes didn't match".to_string());
+                self.ask_passcode(Purpose::Create, error, now_ms);
             }
             Purpose::ChangeNew(proof) => {
                 self.ask_passcode(Purpose::ChangeConfirm(proof, code), None, now_ms);
             }
             Purpose::ChangeConfirm(proof, first) if first == code => {
                 let changed = self.wallet.passcode().change(proof, &code, &mut self.rng);
-                let (success, title) = if changed.is_ok() {
-                    (true, "Passcode changed")
+                if changed.is_ok() {
+                    let detail = "Asked for every signature".to_string();
+                    self.show_result(host, true, "Passcode changed", detail);
                 } else {
-                    (false, "Storage failed")
-                };
-                self.show_result(host, success, title, String::new());
+                    self.show_result(host, false, "Device error", "Nothing changed".to_string());
+                }
             }
             Purpose::ChangeConfirm(proof, _) => {
-                let hint = Some("Those did not match".to_string());
-                self.ask_passcode(Purpose::ChangeNew(proof), hint, now_ms);
+                let error = Some("Codes didn't match".to_string());
+                self.ask_passcode(Purpose::ChangeNew(proof), error, now_ms);
             }
             purpose => self.check_code(host, purpose, code, now_ms),
         }
@@ -450,23 +741,31 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
                 wait_ms: 0,
                 ..
             }) => {
-                let hint = format!("Wrong: {tries_left} tries left");
-                self.ask_passcode(purpose, Some(hint), now_ms);
+                let word = if tries_left == 1 { "try" } else { "tries" };
+                let error = format!("Wrong code, {tries_left} {word} left");
+                self.ask_passcode(purpose, Some(error), now_ms);
             }
             Ok(Attempt::Wrong { .. } | Attempt::Locked { .. }) => {
-                self.abandon(host, purpose);
+                self.abandon(host, purpose, false);
                 self.show_locked();
             }
             Ok(Attempt::Exhausted) => {
-                self.abandon(host, purpose);
-                self.show_notice("Wallet erased", "Too many wrong passcodes.", "");
+                self.abandon(host, purpose, false);
+                self.show_result(
+                    host,
+                    false,
+                    "Keys erased",
+                    "Too many wrong passcodes".to_string(),
+                );
+                self.redraw(host);
+                host.pause(RESTART_PAUSE_MS);
                 host.restart();
             }
             Err(error) => {
-                if let Purpose::Sign(_) | Purpose::Restore(_) = purpose {
+                if let Purpose::Sign(..) | Purpose::Restore(_) = purpose {
                     Self::respond(host, &Response::Err(error));
                 }
-                self.show_result(host, false, "Storage failed", String::new());
+                self.show_result(host, false, "Device error", "Storage failed".to_string());
             }
         }
     }
@@ -474,7 +773,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
     /// Does what a correct passcode was entered for.
     fn finish(&mut self, host: &mut impl Host, purpose: Purpose, proof: Proof) {
         match purpose {
-            Purpose::Sign(review) => self.sign(host, &review, proof),
+            Purpose::Sign(review, shown) => self.sign(host, &review, &shown, proof),
             Purpose::ChangeOld => {
                 let now = host.now_ms();
                 self.ask_passcode(Purpose::ChangeNew(proof), None, now);
@@ -489,7 +788,9 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
                     };
                     self.dirty = true;
                 }
-                Err(_) => self.show_result(host, false, "Storage failed", String::new()),
+                Err(_) => {
+                    self.show_result(host, false, "Device error", "Storage failed".to_string());
+                }
             },
             Purpose::Restore(job) => self.restore(host, job, proof),
             Purpose::Create
@@ -499,7 +800,8 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         }
     }
 
-    fn sign(&mut self, host: &mut impl Host, review: &Review, proof: Proof) {
+    fn sign(&mut self, host: &mut impl Host, review: &Review, shown: &Shown, proof: Proof) {
+        let index = review.tx.index;
         match self.wallet.sign(review, proof) {
             Ok(signature) => {
                 let response = Response::Sig {
@@ -507,56 +809,54 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
                     next: self.next_pair(),
                 };
                 Self::respond(host, &response);
-                self.activity.push(Entry {
-                    signed: true,
-                    index: review.tx.index,
-                    summary: Summary::of(&review.tx.action),
-                });
-                let (grey, plain) = key_number(review.tx.index);
-                let detail = format!("Key {grey}{plain} used");
-                self.show_result(host, true, "Signed", detail);
+                self.remember(
+                    true,
+                    shown.summary.clone(),
+                    shown.detail.clone(),
+                    Some(index),
+                );
+                self.show_result(host, true, "Signed", format!("Key #{index:04} used"));
             }
             Err(error) => {
                 Self::respond(host, &Response::Err(error));
-                self.show_result(host, false, "Refused", "Nothing was signed".to_string());
+                let detail = format!("No signature. Key #{index:04} is still unused.");
+                self.show_result(host, false, "Not signed", detail);
             }
         }
     }
 
     fn restore(&mut self, host: &mut impl Host, job: RestoreJob, proof: Proof) {
+        let lines = ["Rebuilding keys from", "the seed. About 3 minutes."];
         let result = {
-            let Self {
-                wallet, fb, choice, ..
-            } = self;
-            let theme = theme_for(*choice);
+            let Self { wallet, fb, .. } = self;
             wallet.restore(&job.seed, job.tree, job.chain_next_index, proof, |done| {
-                show_progress(fb, theme, &mut *host, "Restoring keys", done);
+                show_progress(fb, &mut *host, "Restoring", &lines, done);
             })
         };
         match result {
             Ok(()) => {
                 Self::respond(host, &Response::Ok);
-                self.go_home(Tab::Wallet);
+                self.show_result(host, true, "Keys restored", "Restarting...".to_string());
+                self.redraw(host);
+                host.pause(RESTART_PAUSE_MS);
                 host.restart();
             }
             Err(error) => {
                 Self::respond(host, &Response::Err(error));
-                self.show_result(
-                    host,
-                    false,
-                    "Refused",
-                    "The keys were not changed".to_string(),
-                );
+                let detail = "The device's keys are unchanged.".to_string();
+                self.show_result(host, false, "Not restored", detail);
             }
         }
     }
 
     fn prepare(&mut self, host: &mut impl Host) -> Result<(), WalletError> {
-        let Self {
-            wallet, fb, choice, ..
-        } = self;
-        let theme = theme_for(*choice);
-        wallet.prepare(|done| show_progress(fb, theme, &mut *host, "Building next keys", done))?;
+        let lines = [
+            "Preparing 1,024 new keys.",
+            "Signatures will move the",
+            "account to them.",
+        ];
+        let Self { wallet, fb, .. } = self;
+        wallet.prepare(|done| show_progress(fb, &mut *host, "Next key tree", &lines, done))?;
         Ok(())
     }
 
@@ -566,7 +866,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         if self.wallet.should_prepare() == Ok(true) {
             let _ = self.prepare(host);
         }
-        self.go_home(Tab::Wallet);
+        self.go_home(Tab::Home);
     }
 
     /// Takes the raw keys and touch, as often as possible.
@@ -575,9 +875,15 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         let settled = self.debouncer.update(now_ms, raw);
         let previous = self.keys;
         self.keys = settled;
+        if settled != previous {
+            self.dirty = true;
+        }
         let pressed = (0..4).find(|&key| settled[key] && !previous[key]);
         let touched = touch.filter(|_| !self.touching);
         self.touching = touch.is_some();
+        if touch.is_none() && self.touched_slot.take().is_some() {
+            self.dirty = true;
+        }
 
         self.expire(host, now_ms);
         // A press on a signing screen belongs to the approval logic, and must not also act on
@@ -588,10 +894,20 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             self.on_touch(host, raw_touch, now_ms);
         }
         if let (Some(key), false) = (pressed, deciding) {
-            let action = self.bar(now_ms).action(key);
-            self.act(host, action, now_ms);
+            self.press(host, key, now_ms);
         }
         self.redraw(host);
+    }
+
+    fn press(&mut self, host: &mut impl Host, key: usize, now_ms: u64) {
+        if matches!(
+            self.mode,
+            Mode::Result { .. } | Mode::Notice { .. } | Mode::Locked { .. }
+        ) {
+            self.dismiss(host);
+        } else if let Some(soft) = keys_for(&self.mode)[key] {
+            self.act(host, soft.action, now_ms);
+        }
     }
 
     /// Runs the timers.
@@ -599,9 +915,13 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         match &mut self.mode {
             Mode::Result { until_ms, .. } if now_ms >= *until_ms => self.leave_result(host),
             Mode::Passcode {
-                touched_ms, count, ..
-            } if now_ms.saturating_sub(*touched_ms) >= PASSCODE_IDLE_MS => {
-                *touched_ms = now_ms;
+                touched_ms,
+                purpose,
+                count,
+                ..
+            } if !matches!(purpose, Purpose::Create | Purpose::CreateConfirm(_))
+                && now_ms.saturating_sub(*touched_ms) >= PASSCODE_IDLE_MS =>
+            {
                 *count = 0;
                 self.dirty = true;
                 self.cancel_passcode(host);
@@ -610,55 +930,60 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
                 if now_ms.saturating_sub(*touched_ms) >= BACKUP_IDLE_MS =>
             {
                 self.mode = Mode::DeviceMenu {
-                    selected: DEVICE_ROWS - 1,
+                    setting: Setting::Backup,
                 };
                 self.dirty = true;
             }
-            Mode::Locked { .. } if self.wallet.passcode().locked_for(now_ms) == 0 => {
+            Mode::Locked { .. } if self.wallet.locked_for(now_ms) == 0 => {
                 host.set_light(Light::Off);
-                self.go_home(Tab::Wallet);
+                self.go_home(Tab::Home);
             }
             _ => {}
         }
     }
 
     fn cancel_passcode(&mut self, host: &mut impl Host) {
-        let mode = core::mem::replace(&mut self.mode, Mode::Home(Tab::Wallet));
+        let mode = core::mem::replace(&mut self.mode, Mode::Home(Tab::Home));
         if let Mode::Passcode { purpose, .. } = mode {
-            self.abandon(host, purpose);
+            self.abandon(host, purpose, false);
         }
     }
 
     /// Asks the approval logic whether the screen on show has been decided.
     fn decide(&mut self, host: &mut impl Host, now_ms: u64) {
         let keys = self.keys;
-        let key_roles = roles(&self.bar(now_ms));
-        let decision = match &mut self.mode {
-            Mode::Review { approval, .. } | Mode::RestoreConfirm { approval, .. } => {
-                approval.update(now_ms, keys, key_roles)
-            }
+        let key_roles = roles(&keys_for(&self.mode));
+        let (decision, timed_out) = match &mut self.mode {
+            Mode::Review { approval, .. } | Mode::RestoreConfirm { approval, .. } => (
+                approval.update(now_ms, keys, key_roles),
+                approval.remaining_ms(now_ms) == 0,
+            ),
             _ => return,
         };
         if decision == Decision::Waiting {
             return;
         }
         let approved = decision == Decision::Approved;
-        match core::mem::replace(&mut self.mode, Mode::Home(Tab::Wallet)) {
-            Mode::Review { review, .. } if approved => {
-                self.ask_or_lock(host, Purpose::Sign(review), now_ms);
+        match core::mem::replace(&mut self.mode, Mode::Home(Tab::Home)) {
+            Mode::Review { review, shown, .. } if approved => {
+                self.ask_or_lock(host, Purpose::Sign(review, shown), now_ms);
             }
-            Mode::Review { review, .. } => self.refuse(host, &review),
+            Mode::Review { review, .. } => self.refuse(host, &review, timed_out),
             Mode::RestoreConfirm { job, .. } if approved => {
                 self.ask_or_lock(host, Purpose::Restore(job), now_ms);
             }
-            Mode::RestoreConfirm { job, .. } => self.abandon(host, Purpose::Restore(job)),
+            Mode::RestoreConfirm { job, .. } => {
+                self.abandon(host, Purpose::Restore(job), timed_out);
+            }
             _ => {}
         }
     }
 
     fn on_touch(&mut self, host: &mut impl Host, raw: (i32, i32), now_ms: u64) {
         match &mut self.mode {
-            Mode::Calibrate { step, raw: points } => {
+            Mode::Calibrate {
+                step, raw: points, ..
+            } => {
                 points[*step] = raw;
                 *step += 1;
                 self.dirty = true;
@@ -667,9 +992,11 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
                     self.finish_calibration(host, points);
                 }
             }
-            Mode::Passcode { .. } => {
+            Mode::Passcode { digits, .. } => {
+                let digits = *digits;
                 let (x, y) = self.calibration.to_screen(raw.0, raw.1);
-                if let Some(slot) = keypad_hit(x, y) {
+                if let Some(slot) = slot_at(&digits, x, y) {
+                    self.touched_slot = Some(slot);
                     self.press_digit(host, slot, now_ms);
                 }
             }
@@ -682,6 +1009,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             self.mode = Mode::Calibrate {
                 step: 0,
                 raw: [(0, 0); 3],
+                retry: true,
             };
             return;
         };
@@ -696,20 +1024,25 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             count,
             digits,
             touched_ms,
+            error,
             ..
         } = &mut self.mode
         else {
             return;
         };
-        entered[*count] = digits[slot];
+        let Some(digit) = digit_in_slot(digits, slot) else {
+            return;
+        };
+        entered[*count] = digit;
         *count += 1;
         *touched_ms = now_ms;
+        *error = None;
         self.dirty = true;
         if *count < CODE_DIGITS {
             return;
         }
         let code = *entered;
-        let mode = core::mem::replace(&mut self.mode, Mode::Home(Tab::Wallet));
+        let mode = core::mem::replace(&mut self.mode, Mode::Home(Tab::Home));
         if let Mode::Passcode { purpose, .. } = mode {
             self.code_entered(host, purpose, code, now_ms);
         }
@@ -719,10 +1052,14 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
     fn act(&mut self, host: &mut impl Host, action: Action, now_ms: u64) {
         self.dirty = true;
         match action {
-            Action::Tab(tab) => self.choose_tab(tab),
+            Action::Goto(tab) => self.go_home(tab),
+            Action::Open => self.open_tab(),
             Action::Back => self.go_back(),
-            Action::Up | Action::Down => self.scroll(action == Action::Down),
-            Action::Select => self.select(host, now_ms),
+            Action::ScrollUp | Action::ScrollDown => self.scroll(action == Action::ScrollDown),
+            Action::PrevSetting | Action::NextSetting => {
+                self.move_setting(action == Action::NextSetting)
+            }
+            Action::Change => self.change(host, now_ms),
             Action::Cancel => self.cancel_passcode(host),
             Action::Delete => {
                 if let Mode::Passcode {
@@ -744,18 +1081,19 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             }
             Action::Done => self.start_check(now_ms),
             Action::Pick(choice) => self.pick(host, usize::from(choice), now_ms),
-            Action::Dismiss => self.dismiss(host),
-            Action::Nothing | Action::Reject | Action::Approve => {}
+            Action::Reject | Action::Approve => {}
         }
     }
 
-    fn choose_tab(&mut self, tab: Tab) {
-        match (&self.mode, tab) {
-            (Mode::Home(Tab::Activity), Tab::Activity) => {
-                self.mode = Mode::ActivityList { top: 0 };
+    fn open_tab(&mut self) {
+        match self.mode {
+            Mode::Home(Tab::Activity) => self.mode = Mode::ActivityList { top: 0 },
+            Mode::Home(Tab::Device) => {
+                self.mode = Mode::DeviceMenu {
+                    setting: Setting::Theme,
+                }
             }
-            (Mode::Home(Tab::Device), Tab::Device) => self.mode = Mode::DeviceMenu { selected: 0 },
-            _ => self.go_home(tab),
+            _ => {}
         }
     }
 
@@ -766,45 +1104,47 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             Mode::SeedWords { page: page @ 1, .. } => *page = 0,
             Mode::SeedWords { .. } => {
                 self.mode = Mode::DeviceMenu {
-                    selected: DEVICE_ROWS - 1,
-                };
+                    setting: Setting::Backup,
+                }
             }
             _ => {}
         }
     }
 
     fn scroll(&mut self, down: bool) {
-        let entries = self.activity.len();
-        match &mut self.mode {
-            Mode::ActivityList { top } if down => {
-                if *top + ACTIVITY_ROWS < entries {
-                    *top += 1;
-                }
-            }
-            Mode::ActivityList { top } => *top = top.saturating_sub(1),
-            Mode::DeviceMenu { selected } if down => {
-                *selected = (*selected + 1).min(DEVICE_ROWS - 1);
-            }
-            Mode::DeviceMenu { selected } => *selected = selected.saturating_sub(1),
-            _ => {}
+        let len = self.view.log.len();
+        if let Mode::ActivityList { top } = &mut self.mode {
+            let scroll = Scroll {
+                offset: *top,
+                len,
+                visible: ACTIVITY_ROWS,
+            };
+            *top = if down { scroll.down() } else { scroll.up() }.offset;
         }
     }
 
-    fn select(&mut self, host: &mut impl Host, now_ms: u64) {
-        let Mode::DeviceMenu { selected } = self.mode else {
+    fn move_setting(&mut self, forward: bool) {
+        if let Mode::DeviceMenu { setting } = &mut self.mode {
+            *setting = if forward {
+                setting.next()
+            } else {
+                setting.prev()
+            };
+        }
+    }
+
+    fn change(&mut self, host: &mut impl Host, now_ms: u64) {
+        let Mode::DeviceMenu { setting } = self.mode else {
             return;
         };
-        match selected {
-            0 => {
-                self.choice = match self.choice {
-                    ThemeChoice::Light => ThemeChoice::Dark,
-                    ThemeChoice::Dark => ThemeChoice::Light,
-                };
-                self.home.theme = self.choice;
-                let _ = self.settings.set_theme(self.choice);
+        match setting {
+            Setting::Theme => {
+                let next = theme::current().next();
+                theme::set(next);
+                let _ = self.settings.set_theme(next as u8);
             }
-            1 => self.ask_or_lock(host, Purpose::ChangeOld, now_ms),
-            _ => self.ask_or_lock(host, Purpose::Backup, now_ms),
+            Setting::Passcode => self.ask_or_lock(host, Purpose::ChangeOld, now_ms),
+            Setting::Backup => self.ask_or_lock(host, Purpose::Backup, now_ms),
         }
     }
 
@@ -853,7 +1193,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             Mode::Result { .. } => self.leave_result(host),
             Mode::Notice { .. } | Mode::Locked { .. } => {
                 host.set_light(Light::Off);
-                self.go_home(Tab::Wallet);
+                self.go_home(Tab::Home);
             }
             _ => {}
         }
@@ -909,31 +1249,22 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         let now_ms = host.now_ms();
         match request {
             Request::PubKey => {}
-            Request::SignFrame(raw) => match self.wallet.review(&raw) {
-                Ok(review) => {
-                    host.set_light(Light::Amber);
-                    let approval = Approval::new(now_ms, self.keys);
-                    self.mode = Mode::Review { review, approval };
-                    self.dirty = true;
-                }
-                Err(error) => {
-                    Self::respond(host, &Response::Err(error));
-                    if error == WalletError::RotationNeeded {
-                        let second = "Rotate to the next tree to keep signing.";
-                        self.show_notice("Rotation needed", "Only reserved keys are left.", second);
-                    }
-                }
-            },
+            Request::SignFrame(raw) => self.start_review(host, &raw, now_ms),
             Request::Prepare => {
                 let response = self
                     .prepare(host)
                     .map_or_else(Response::Err, |()| Response::Ok);
                 Self::respond(host, &response);
-                self.go_home(Tab::Wallet);
+                self.go_home(Tab::Home);
             }
             Request::Activate(tree) => match self.wallet.activate(tree) {
                 Ok(()) => {
                     Self::respond(host, &Response::Ok);
+                    let title = format!("Now on tree {tree}");
+                    let detail = "Restarting onto the new keys...".to_string();
+                    self.show_result(host, true, &title, detail);
+                    self.redraw(host);
+                    host.pause(RESTART_PAUSE_MS);
                     host.restart();
                 }
                 Err(error) => Self::respond(host, &Response::Err(error)),
@@ -964,27 +1295,41 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         }
     }
 
-    /// Sets whether a laptop is connected.
-    pub fn set_usb(&mut self, connected: bool) {
-        if self.usb != connected {
-            self.usb = connected;
-            self.home.usb = connected;
-            self.dirty = true;
+    fn start_review(&mut self, host: &mut impl Host, raw: &[u8], now_ms: u64) {
+        match self.wallet.review(raw) {
+            Ok(review) => {
+                let Some(shown) = Shown::from_tx(&review.tx) else {
+                    Self::respond(host, &Response::Err(WalletError::BadRequest));
+                    self.show_notice("Not shown", "That amount is too long to show whole.");
+                    return;
+                };
+                host.set_light(Light::Amber);
+                let approval = Approval::new(now_ms, self.keys);
+                self.mode = Mode::Review {
+                    review,
+                    shown,
+                    approval,
+                };
+                self.dirty = true;
+            }
+            Err(error) => {
+                Self::respond(host, &Response::Err(error));
+                if error == WalletError::RotationNeeded {
+                    self.show_notice(
+                        "Rotation needed",
+                        "Rotate to the next tree to keep signing.",
+                    );
+                }
+            }
         }
     }
 
-    fn bar(&self, now_ms: u64) -> KeyBar {
-        self.screen(now_ms).keys()
-    }
-
-    /// The screen for the current mode.
-    fn screen(&self, now_ms: u64) -> Screen<'_> {
-        let lock_ms = self.wallet_lock(now_ms);
-        screen_for(&self.mode, &self.home, &self.activity, lock_ms, now_ms)
-    }
-
-    fn wallet_lock(&self, now_ms: u64) -> u64 {
-        self.wallet.locked_for(now_ms)
+    /// Sets whether a laptop is connected.
+    pub fn set_usb(&mut self, connected: bool) {
+        if self.view.status.connected != connected {
+            self.view.status.connected = connected;
+            self.dirty = true;
+        }
     }
 
     /// A number that changes when a countdown on screen needs redrawing.
@@ -993,7 +1338,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             Mode::Review { approval, .. } | Mode::RestoreConfirm { approval, .. } => {
                 u64::from(seconds_left(approval, now_ms))
             }
-            Mode::Locked { .. } => self.wallet_lock(now_ms).div_ceil(1000),
+            Mode::Locked { .. } => self.wallet.locked_for(now_ms).div_ceil(1000),
             _ => 0,
         }
     }
@@ -1006,9 +1351,18 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         }
         self.dirty = false;
         self.drawn_tick = tick;
-        let lock_ms = self.wallet_lock(now_ms);
-        let screen = screen_for(&self.mode, &self.home, &self.activity, lock_ms, now_ms);
-        screen.draw(&mut self.fb, theme_for(self.choice));
+        let lock_ms = self.wallet.locked_for(now_ms);
+        let flash = (0..4).find(|&key| self.keys[key]);
+        let mut canvas = self.fb.canvas();
+        draw(
+            &mut canvas,
+            &self.mode,
+            &self.view,
+            lock_ms,
+            now_ms,
+            flash,
+            self.touched_slot,
+        );
         host.present(&mut self.fb);
     }
 
@@ -1017,7 +1371,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
     pub fn screen_name(&self) -> &'static str {
         match &self.mode {
             Mode::Calibrate { .. } => "calibrate",
-            Mode::Home(Tab::Wallet) => "wallet",
+            Mode::Home(Tab::Home) => "wallet",
             Mode::Home(Tab::Keys) => "keys",
             Mode::Home(Tab::Activity) => "activity",
             Mode::Home(Tab::Device) => "device",
@@ -1073,95 +1427,17 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
     }
 }
 
-/// The screen for a mode. A free function, so drawing can borrow the framebuffer alongside it.
-fn screen_for<'a>(
-    mode: &'a Mode,
-    home: &'a Home,
-    activity: &'a Activity,
-    lock_ms: u64,
-    now_ms: u64,
-) -> Screen<'a> {
-    match mode {
-        Mode::Calibrate { step, .. } => Screen::Calibrate {
-            step: (*step).min(2),
-        },
-        Mode::Home(tab) => Screen::Tab(*tab, home, activity),
-        Mode::ActivityList { top } => Screen::ActivityList(activity, *top),
-        Mode::DeviceMenu { selected } => Screen::DeviceMenu(home, *selected),
-        Mode::Review { review, approval } => {
-            Screen::Review(&review.tx, seconds_left(approval, now_ms))
-        }
-        Mode::RestoreConfirm {
-            job,
-            first_index,
-            approval,
-        } => Screen::RestoreConfirm {
-            tree: job.tree,
-            first_index: *first_index,
-            seconds: seconds_left(approval, now_ms),
-        },
-        Mode::Passcode {
-            purpose,
-            count,
-            digits,
-            hint,
-            ..
-        } => Screen::Passcode {
-            title: purpose.title(),
-            hint: hint.as_deref().unwrap_or_else(|| purpose.hint()),
-            entered: *count,
-            digits,
-        },
-        Mode::Result {
-            success,
-            title,
-            detail,
-            ..
-        } => Screen::Result {
-            success: *success,
-            title,
-            detail,
-        },
-        Mode::SeedWords { words, page, .. } => Screen::SeedWords { words, page: *page },
-        Mode::BackupCheck { check, .. } => {
-            let question = check.question();
-            Screen::BackupCheck {
-                number: check.number(),
-                position: question.position,
-                choices: question.choices,
-            }
-        }
-        Mode::Locked { tries_left } => Screen::Locked {
-            wait_ms: lock_ms,
-            tries_left: *tries_left,
-        },
-        Mode::Notice {
-            title,
-            first,
-            second,
-        } => Screen::Notice {
-            title,
-            first,
-            second,
-        },
-    }
-}
-
 /// Draws a progress screen straight away, because tree building blocks the main loop.
 fn show_progress(
     fb: &mut Framebuffer,
-    theme: &Theme,
     host: &mut impl Host,
     title: &str,
+    lines: &[&str],
     done: u32,
 ) {
     if done % PROGRESS_STEP == 0 {
-        Screen::Progress {
-            title,
-            done,
-            total: LEAVES,
-        }
-        .draw(fb, theme);
+        let mut canvas = fb.canvas();
+        screens::progress(&mut canvas, title, lines, done, LEAVES);
         host.present(fb);
     }
 }

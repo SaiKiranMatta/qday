@@ -11,10 +11,12 @@ pub const SCREEN_WIDTH: i64 = 320;
 pub const SCREEN_HEIGHT: i64 = 240;
 
 /// Where the three calibration crosses are drawn: top left, top right, bottom left.
-pub const CROSSES: [(i32, i32); 3] = [(20, 20), (300, 20), (20, 220)];
+pub const CROSSES: [(i32, i32); 3] = [(30, 30), (290, 30), (30, 210)];
 
 /// Readings measured on the wired panel, used until a calibration has run.
 const FACTORY_RAW: [(i32, i32); 3] = [(523, 567), (523, 3673), (3523, 567)];
+/// The pixels those readings were taken at.
+const FACTORY_POINTS: [(i32, i32); 3] = [(20, 20), (300, 20), (20, 220)];
 
 /// Turns raw touch readings into pixels with an affine map, which also handles swapped axes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,6 +31,11 @@ impl Calibration {
     /// on a line, which a real panel can't produce.
     #[must_use]
     pub fn from_points(raw: [(i32, i32); 3]) -> Option<Self> {
+        Self::between(raw, CROSSES)
+    }
+
+    /// The map that takes each raw reading to the matching pixel.
+    fn between(raw: [(i32, i32); 3], pixels: [(i32, i32); 3]) -> Option<Self> {
         let [p0, p1, p2] = raw.map(|(x, y)| (i64::from(x), i64::from(y)));
         let divisor = (p1.0 - p0.0) * (p2.1 - p0.1) - (p2.0 - p0.0) * (p1.1 - p0.1);
         if divisor == 0 {
@@ -39,7 +46,7 @@ impl Calibration {
             let b = (t2 - t0) * (p1.0 - p0.0) - (t1 - t0) * (p2.0 - p0.0);
             [a, b, t0 * divisor - a * p0.0 - b * p0.1]
         };
-        let [c0, c1, c2] = CROSSES.map(|(x, y)| (i64::from(x), i64::from(y)));
+        let [c0, c1, c2] = pixels.map(|(x, y)| (i64::from(x), i64::from(y)));
         let x = solve(c0.0, c1.0, c2.0);
         let y = solve(c0.1, c1.1, c2.1);
         // A positive divisor keeps the rounding in `to_screen` simple.
@@ -54,7 +61,7 @@ impl Calibration {
     /// The panel's measured values, for use until a calibration has run.
     #[must_use]
     pub fn factory() -> Self {
-        Self::from_points(FACTORY_RAW).unwrap_or(Self {
+        Self::between(FACTORY_RAW, FACTORY_POINTS).unwrap_or(Self {
             x: [0; 3],
             y: [0; 3],
             divisor: 1,
@@ -114,16 +121,6 @@ const CALIBRATION_BODY: usize = 60;
 /// Bytes of keccak256 that follow each record.
 const CHECK: usize = 8;
 
-/// The two themes.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ThemeChoice {
-    /// Standard Light.
-    #[default]
-    Light,
-    /// Standard Dark.
-    Dark,
-}
-
 /// Small saved records. A damaged record reads as missing.
 pub struct Settings<F> {
     flash: F,
@@ -135,32 +132,28 @@ impl<F: Flash> Settings<F> {
         Self { flash }
     }
 
-    /// The saved theme, or the default.
+    /// The saved theme's number, or 0 if none was saved.
     ///
     /// # Errors
     ///
     /// Fails if the flash can't be read.
-    pub fn theme(&mut self) -> Result<ThemeChoice, StoreError> {
+    pub fn theme(&mut self) -> Result<u8, StoreError> {
         let mut body = [0; THEME_BODY];
         if !self.read_record(layout::SETTINGS, &mut body)? || !body.starts_with(THEME_MAGIC) {
-            return Ok(ThemeChoice::default());
+            return Ok(0);
         }
-        Ok(if body[4] == 1 {
-            ThemeChoice::Dark
-        } else {
-            ThemeChoice::Light
-        })
+        Ok(body[4])
     }
 
-    /// Saves the theme.
+    /// Saves the theme's number.
     ///
     /// # Errors
     ///
     /// Fails if the flash can't be written.
-    pub fn set_theme(&mut self, theme: ThemeChoice) -> Result<(), StoreError> {
+    pub fn set_theme(&mut self, theme: u8) -> Result<(), StoreError> {
         let mut body = [0; THEME_BODY];
         body[..4].copy_from_slice(THEME_MAGIC);
-        body[4] = u8::from(theme == ThemeChoice::Dark);
+        body[4] = theme;
         self.write_record(layout::SETTINGS, &body)
     }
 
