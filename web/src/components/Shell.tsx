@@ -71,20 +71,17 @@ export function Shell({
   );
 }
 
-/** The account switcher. One account for now; the list comes with multi-account support. */
+/** The current account. Becomes a switcher once there is more than one. */
 function AccountPill({ account, fallbackId }: { account: AccountView; fallbackId: string }) {
   const id = account.address === "0x" ? fallbackId : account.address;
   return (
-    <button className="flex items-center gap-3 rounded-2xl bg-surface py-2 pr-4 pl-2 text-left hover:bg-surface-2">
+    <div className="flex items-center gap-3 rounded-2xl bg-surface py-2 pr-5 pl-2">
       <span className="chrome grain size-9 shrink-0 overflow-hidden rounded-full" />
       <span className="min-w-0">
         <span className="block text-sm font-semibold">{account.name}</span>
         <span className="block font-mono text-xs text-muted">{shortHex(id, 6, 4)}</span>
       </span>
-      <svg viewBox="0 0 16 16" className="size-3.5 text-muted" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <path d="m4 6 4 4 4-4" />
-      </svg>
-    </button>
+    </div>
   );
 }
 

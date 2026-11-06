@@ -6,6 +6,8 @@ import { TokenLogo } from "./components/TokenLogo";
 import { Button, StatusDot } from "./components/ui";
 import { capacity } from "./lib/capacity";
 import { groupThousands, shortHex } from "./lib/format";
+import { isAddress } from "./lib/tokens";
+import type { ChainState } from "./lib/useAccount";
 import type { TokenList } from "./lib/useTokens";
 import type { AccountView } from "./lib/wallet";
 
@@ -14,11 +16,17 @@ export function WalletPage({
   account,
   status,
   tokens,
+  chain,
+  warning,
+  onLink,
   onOpenActivity,
 }: {
   account: AccountView;
   status: DeviceStatus;
   tokens: TokenList;
+  chain: ChainState;
+  warning: string | null;
+  onLink: (address: `0x${string}`) => void;
   onOpenActivity: () => void;
 }) {
   const [managing, setManaging] = useState(false);
@@ -27,12 +35,17 @@ export function WalletPage({
       <div className="space-y-6">
         <section className="chrome-wide grain overflow-hidden rounded-3xl p-8">
           <div className="relative z-10 flex flex-wrap items-end justify-between gap-6">
-            <div>
-              <div className="text-sm text-alabaster/80">Total balance</div>
-              <div className="mt-2 text-5xl font-semibold tracking-tight">
-                {account.balance} <span className="text-alabaster/60">ETH</span>
+            {chain === "unlinked" ? (
+              <LinkAccount onLink={onLink} />
+            ) : (
+              <div>
+                <div className="text-sm text-alabaster/80">Total balance</div>
+                <div className="mt-2 text-5xl font-semibold tracking-tight">
+                  {chain === "loading" ? "…" : account.balance} <span className="text-alabaster/60">ETH</span>
+                </div>
+                {chain === "error" && <div className="mt-2 text-xs text-bad">Couldn't reach the devnet. Retrying.</div>}
               </div>
-            </div>
+            )}
             <div className="flex gap-3">
               <Button variant="onyx" disabled title="Coming next">
                 Send
@@ -43,6 +56,8 @@ export function WalletPage({
             </div>
           </div>
         </section>
+
+        {warning && <div className="rounded-2xl bg-warn/10 p-4 text-sm text-warn">{warning}</div>}
 
         <section className="rounded-3xl bg-surface p-6">
           <div className="flex items-center justify-between">
@@ -92,10 +107,33 @@ export function WalletPage({
         <section className="rounded-3xl bg-surface p-6">
           <h2 className="text-base font-semibold">Receive address</h2>
           <p className="mt-3 break-all font-mono text-xs leading-relaxed text-alabaster/80">
-            {account.address === "0x" ? "Not set up yet" : account.address}
+            {account.address === "0x" ? "Link your account to see its address" : account.address}
           </p>
         </section>
       </aside>
+    </div>
+  );
+}
+
+/** Links the device to its account contract on the devnet. */
+function LinkAccount({ onLink }: { onLink: (address: `0x${string}`) => void }) {
+  const [value, setValue] = useState("");
+  const ok = isAddress(value);
+  return (
+    <div className="w-full max-w-lg">
+      <div className="text-sm text-alabaster/80">Link your account</div>
+      <p className="mt-1 text-xs text-alabaster/60">Paste the address of the account this device controls.</p>
+      <div className="mt-3 flex gap-2">
+        <input
+          value={value}
+          onChange={(e) => setValue(e.target.value.trim())}
+          placeholder="0x…"
+          className="min-w-0 flex-1 rounded-full bg-onyx/70 px-4 py-2.5 font-mono text-xs outline-none placeholder:text-muted focus:ring-1 focus:ring-slate"
+        />
+        <Button variant="onyx" disabled={!ok} onClick={() => ok && onLink(value)}>
+          Link
+        </Button>
+      </div>
     </div>
   );
 }

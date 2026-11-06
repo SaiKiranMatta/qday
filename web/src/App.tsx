@@ -1,22 +1,32 @@
 import { useState } from "react";
 import { type Page, Shell } from "./components/Shell";
 import { Badge, Button, StatusDot, Wordmark } from "./components/ui";
+import { useAccount } from "./lib/useAccount";
 import { useDevice } from "./lib/useDevice";
 import { useTokens } from "./lib/useTokens";
-import { EMPTY_ACCOUNT, MOCK, MOCK_ACCOUNT } from "./lib/wallet";
+import { MOCK, MOCK_ACCOUNT } from "./lib/wallet";
 import { ActivityPage, DevicePage, WalletPage } from "./pages";
 
 export function App() {
   const { state, log, connect, refresh, disconnect } = useDevice();
   const [page, setPage] = useState<Page>("wallet");
-  const account = MOCK ? MOCK_ACCOUNT : EMPTY_ACCOUNT;
   const tokens = useTokens();
+  const live = useAccount(!MOCK && state.kind === "connected" ? state.status : null, tokens.selected);
+  const account = MOCK ? MOCK_ACCOUNT : live.account;
+  const chain = MOCK ? "live" : live.chain;
 
   if (state.kind === "connected") {
     const { status } = state;
     return (
       <Shell page={page} onNavigate={setPage} status={status} account={account} onDisconnect={disconnect}>
-        {page === "wallet" && <WalletPage account={account} status={status} tokens={tokens} onOpenActivity={() => setPage("activity")} />}
+        {page === "wallet" && <WalletPage
+            account={account}
+            status={status}
+            tokens={tokens}
+            chain={chain}
+            warning={MOCK ? null : live.warning}
+            onLink={(address) => live.linkAddress(address)}
+            onOpenActivity={() => setPage("activity")} />}
         {page === "activity" && <ActivityPage account={account} tokens={tokens} />}
         {page === "device" && <DevicePage status={status} log={log} onRefresh={refresh} />}
       </Shell>
