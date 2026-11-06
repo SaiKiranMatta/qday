@@ -1,6 +1,6 @@
 # Devnet notes
 
-What the laptop-key run on 2026-11-06 ran against. The device has not been on this chain yet.
+What the runs on 2026-11-06 ran against.
 
 | Field | Value |
 |-------|-------|
@@ -32,6 +32,10 @@ Refused by the chain, with a valid signature in each case:
 |---|---|
 | Reusing spent key 0 on tree 1 | `KeyAlreadyUsed` |
 | Signing with key 5 of retired tree 0 | `BadSignature` |
+
+The device signed its first transfer on this chain the same day: 0.0025 ETH, approved on K4 with the
+passcode, mined with 468,765 gas in total and 113,915 in the VERIFY frame. The recipient gained exactly
+that amount, and the device and the chain both moved to key 1.
 
 ## Public reference network (not our target)
 

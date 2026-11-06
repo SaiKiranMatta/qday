@@ -22,10 +22,8 @@ and skips ahead 64 keys. Keys 1008-1023 are reserved for rotating to a new tree 
 
 ## Status
 
-Steps 1 to 6 of 8 are done. A laptop key has deployed an account, sent transfers and rotated on a local
-EIP-8141 chain, with the results in [docs/devnet.md](docs/devnet.md).
-
-The firmware compiles but has not run on the device yet. Steps 7 and 8 are the on-device runs.
+Steps 1 to 7 of 8 are done. The device has signed a real transfer on a local EIP-8141 chain, with the
+results in [docs/devnet.md](docs/devnet.md). Step 8, rotating keys on the device, is still to do.
 
 ## Repository layout
 
