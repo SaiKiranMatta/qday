@@ -8,7 +8,7 @@ use crate::wots::{CHAINS, MAX_DIGIT, advance, leaf_hash};
 pub struct KeySet {
     sk_seed: Hash,
     pub_seed: Hash,
-    prf_key: Hash,
+    pub(crate) prf_key: Hash,
 }
 
 impl KeySet {
@@ -42,7 +42,7 @@ impl KeySet {
     }
 
     /// The secret value at step 0 of a chain.
-    fn chain_start(&self, leaf: u32, chain: u32) -> Hash {
+    pub(crate) fn chain_start(&self, leaf: u32, chain: u32) -> Hash {
         keccak256(&[&self.sk_seed, &Adrs::secret(leaf, chain)])
     }
 }

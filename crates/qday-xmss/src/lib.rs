@@ -7,11 +7,13 @@ extern crate alloc;
 mod adrs;
 mod hash;
 mod keys;
+mod sign;
 mod tree;
 mod wots;
 
 pub use adrs::Adrs;
 pub use hash::{Hash, keccak256};
 pub use keys::KeySet;
+pub use sign::{PublicKey, SIG_BYTES, SignError, verify};
 pub use tree::{HEIGHT, LEAVES, NODES, Tree, node_slot};
 pub use wots::{CHAINS, digits};
