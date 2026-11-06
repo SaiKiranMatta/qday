@@ -10,6 +10,7 @@ use qday_mldsa::{KeySeed, Signer, StandardSigner};
 use qday_wallet::backup::words_to_seed;
 use qday_wallet::frame::{Address, FrameTx, MlFrameTx};
 use qday_wallet::hex;
+use qday_wallet::invoice::{Spend, keys_for, spend_hash};
 use qday_wallet::protocol::scheme_name;
 use qday_xmss::{Hash, KeySet, Tree};
 
@@ -76,6 +77,8 @@ enum Command {
     MlFrameRaw(SignedMlTransfer),
     /// Print the device's keys, then any prepared next key
     DevicePubkey { port: String },
+    #[command(flatten)]
+    Invoice(InvoiceCommand),
     /// Print the device's signing scheme
     DeviceScheme { port: String },
     /// Print the device's stored ML-DSA public key
@@ -103,6 +106,92 @@ enum Command {
         tree: u32,
         chain_next_index: u32,
     },
+}
+
+/// Fresh one-time keys, paid through the hash pool.
+#[derive(Subcommand)]
+enum InvoiceCommand {
+    /// Print an invoice's leaf and public seed, from a laptop key
+    InvoiceKey {
+        seed: String,
+        number: u32,
+        #[arg(long, default_value_t = 0)]
+        account: u32,
+    },
+    /// Sign a spend of an invoice's whole note with a laptop key
+    InvoiceSign {
+        seed: String,
+        #[command(flatten)]
+        spend: InvoiceSpend,
+        #[arg(long, default_value_t = 0)]
+        account: u32,
+    },
+    /// Ask the device for an invoice's leaf and public seed
+    DeviceInvoice { port: String, number: u32 },
+    /// Sign a spend of an invoice's whole note on the device
+    DeviceInvoiceSpend {
+        port: String,
+        #[command(flatten)]
+        spend: InvoiceSpend,
+    },
+}
+
+#[derive(Args)]
+struct InvoiceSpend {
+    number: u32,
+    pool: String,
+    to: String,
+    fee_wei: u128,
+}
+
+impl InvoiceSpend {
+    fn parsed(&self) -> Result<Spend> {
+        Ok(Spend {
+            number: self.number,
+            pool: address(&self.pool)?,
+            to: address(&self.to)?,
+            fee: self.fee_wei,
+        })
+    }
+}
+
+fn run_invoice(command: InvoiceCommand) -> Result<String> {
+    match command {
+        InvoiceCommand::InvoiceKey {
+            seed,
+            number,
+            account,
+        } => {
+            let keys = keys_for(&hash(&seed)?, account, number);
+            Ok(format!(
+                "{} {}",
+                hex::encode(&keys.leaf(0)),
+                hex::encode(keys.pub_seed())
+            ))
+        }
+        InvoiceCommand::InvoiceSign {
+            seed,
+            spend,
+            account,
+        } => {
+            let spend = spend.parsed()?;
+            let keys = keys_for(&hash(&seed)?, account, spend.number);
+            let message = spend_hash(&spend.pool, &keys.leaf(0), &spend.to, spend.fee);
+            Ok(hex::encode(&keys.sign_one_time(&message)))
+        }
+        InvoiceCommand::DeviceInvoice { port, number } => {
+            let invoice = device::open(&port)?.invoice(number)?;
+            Ok(format!(
+                "{} {}",
+                hex::encode(&invoice.leaf),
+                hex::encode(&invoice.pub_seed)
+            ))
+        }
+        InvoiceCommand::DeviceInvoiceSpend { port, spend } => {
+            let signature = device::open(&port)?.spend_invoice(spend.parsed()?)?;
+            Ok(hex::encode(&signature))
+        }
+    }
 }
 
 #[derive(Args)]
@@ -299,6 +388,7 @@ fn run(command: Command) -> Result<String> {
             &args.transfer.tx()?.encode(&signature(&args.signature)?),
         )),
         Command::DevicePubkey { port } => Ok(device::open(&port)?.status()?.line()),
+        Command::Invoice(invoice) => run_invoice(invoice),
         Command::DeviceScheme { port } => {
             Ok(scheme_name(device::open(&port)?.scheme()?).to_string())
         }
