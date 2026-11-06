@@ -57,7 +57,9 @@ the board's own private address and was claimed back to the account that paid it
 Block 822 was the first private payment from an ML-DSA account signed on a real board; it matched the
 simulated run (1,448,125 gas). Both claims paid out the note less the 0.0034 ETH fee, both notes read
 as spent afterwards, and each account's balance came to its funding less the payment and gas, plus the
-claim, to the wei. The chain then expected XMSS key 15, after the payment used key 14.
+claim, to the wei. The chain then expected XMSS key 15, after the payment used key 14. Switched back to
+XMSS, the board reported the same key and tree 0, and next key 15: the ML-DSA round trip left the XMSS
+key and counter as they were, and the board and the chain still agreed.
 
 ## Signed on the device
 
