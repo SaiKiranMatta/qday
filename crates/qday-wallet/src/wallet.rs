@@ -118,6 +118,12 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
         &mut self.passcode
     }
 
+    /// How long passcode entry stays locked.
+    #[must_use]
+    pub fn locked_for(&self, now_ms: u64) -> u64 {
+        self.passcode.locked_for(now_ms)
+    }
+
     /// Enters a passcode, erasing the wallet on the last failure.
     ///
     /// # Errors

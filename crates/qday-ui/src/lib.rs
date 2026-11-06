@@ -4,6 +4,7 @@
 
 extern crate alloc;
 
+pub mod app;
 pub mod fb;
 pub mod fonts;
 pub mod format;

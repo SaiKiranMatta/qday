@@ -57,7 +57,18 @@ pub enum Decision {
     Rejected,
 }
 
-/// Waits for a decision on a signing screen. Only K4 approves, and K3 does nothing.
+/// What a key means on a signing screen. The caller takes these from the same table it draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    /// Nothing happens.
+    Ignore,
+    /// Refuses.
+    Reject,
+    /// Approves.
+    Approve,
+}
+
+/// Waits for a decision on a signing screen.
 pub struct Approval {
     started_ms: u64,
     armed: KeyState,
@@ -73,8 +84,8 @@ impl Approval {
         }
     }
 
-    /// Takes the settled key state.
-    pub fn update(&mut self, now_ms: u64, keys: KeyState) -> Decision {
+    /// Takes the settled key state, and what each key means.
+    pub fn update(&mut self, now_ms: u64, keys: KeyState, roles: [Role; KEYS]) -> Decision {
         let elapsed = now_ms.saturating_sub(self.started_ms);
         if elapsed >= APPROVAL_TIMEOUT_MS {
             return Decision::Rejected;
@@ -90,10 +101,11 @@ impl Approval {
         if guarded {
             return Decision::Waiting;
         }
-        let pressed = |key: usize| keys[key] && self.armed[key];
-        if pressed(0) || pressed(1) {
+        let pressed =
+            |role: Role| (0..KEYS).any(|key| keys[key] && self.armed[key] && roles[key] == role);
+        if pressed(Role::Reject) {
             Decision::Rejected
-        } else if pressed(3) {
+        } else if pressed(Role::Approve) {
             Decision::Approved
         } else {
             Decision::Waiting
@@ -109,8 +121,10 @@ impl Approval {
 
 #[cfg(test)]
 mod tests {
-    use super::{Approval, Debouncer, Decision, KeyState};
+    use super::{Approval, Debouncer, Decision, KeyState, Role};
 
+    /// The review table: K1 and K2 reject, K3 does nothing, K4 approves.
+    const ROLES: [Role; 4] = [Role::Reject, Role::Reject, Role::Ignore, Role::Approve];
     const NONE: KeyState = [false; 4];
     const K1: KeyState = [true, false, false, false];
     const K2: KeyState = [false, true, false, false];
@@ -156,56 +170,56 @@ mod tests {
 
     fn past_guard() -> Approval {
         let mut approval = Approval::new(1000, NONE);
-        assert_eq!(approval.update(1500, NONE), Decision::Waiting);
+        assert_eq!(approval.update(1500, NONE, ROLES), Decision::Waiting);
         approval
     }
 
     #[test]
     fn k4_approves_after_the_guard() {
-        assert_eq!(past_guard().update(1600, K4), Decision::Approved);
+        assert_eq!(past_guard().update(1600, K4, ROLES), Decision::Approved);
     }
 
     #[test]
     fn k1_and_k2_reject() {
-        assert_eq!(past_guard().update(1600, K1), Decision::Rejected);
-        assert_eq!(past_guard().update(1600, K2), Decision::Rejected);
+        assert_eq!(past_guard().update(1600, K1, ROLES), Decision::Rejected);
+        assert_eq!(past_guard().update(1600, K2, ROLES), Decision::Rejected);
     }
 
     #[test]
     fn k3_does_nothing() {
         let mut approval = past_guard();
-        assert_eq!(approval.update(1600, K3), Decision::Waiting);
-        assert_eq!(approval.update(1700, NONE), Decision::Waiting);
+        assert_eq!(approval.update(1600, K3, ROLES), Decision::Waiting);
+        assert_eq!(approval.update(1700, NONE, ROLES), Decision::Waiting);
     }
 
     #[test]
     fn presses_in_the_first_500_ms_are_ignored() {
         let mut approval = Approval::new(1000, NONE);
-        assert_eq!(approval.update(1499, K4), Decision::Waiting);
+        assert_eq!(approval.update(1499, K4, ROLES), Decision::Waiting);
     }
 
     #[test]
     fn a_press_started_in_the_guard_must_be_released_first() {
         let mut approval = Approval::new(1000, NONE);
-        approval.update(1400, K4);
-        assert_eq!(approval.update(1600, K4), Decision::Waiting);
-        assert_eq!(approval.update(1700, NONE), Decision::Waiting);
-        assert_eq!(approval.update(1800, K4), Decision::Approved);
+        approval.update(1400, K4, ROLES);
+        assert_eq!(approval.update(1600, K4, ROLES), Decision::Waiting);
+        assert_eq!(approval.update(1700, NONE, ROLES), Decision::Waiting);
+        assert_eq!(approval.update(1800, K4, ROLES), Decision::Approved);
     }
 
     #[test]
     fn a_key_held_from_before_must_be_released_first() {
         let mut approval = Approval::new(1000, K4);
-        assert_eq!(approval.update(2000, K4), Decision::Waiting);
-        assert_eq!(approval.update(2100, NONE), Decision::Waiting);
-        assert_eq!(approval.update(2200, K4), Decision::Approved);
+        assert_eq!(approval.update(2000, K4, ROLES), Decision::Waiting);
+        assert_eq!(approval.update(2100, NONE, ROLES), Decision::Waiting);
+        assert_eq!(approval.update(2200, K4, ROLES), Decision::Approved);
     }
 
     #[test]
     fn a_held_key_does_not_block_the_others() {
         let mut approval = Approval::new(1000, K4);
         assert_eq!(
-            approval.update(2000, [true, false, false, true]),
+            approval.update(2000, [true, false, false, true], ROLES),
             Decision::Rejected
         );
     }
@@ -213,7 +227,7 @@ mod tests {
     #[test]
     fn k4_with_a_reject_key_rejects() {
         assert_eq!(
-            past_guard().update(1600, [true, false, false, true]),
+            past_guard().update(1600, [true, false, false, true], ROLES),
             Decision::Rejected
         );
     }
@@ -221,14 +235,25 @@ mod tests {
     #[test]
     fn no_decision_in_30_seconds_rejects() {
         let mut approval = Approval::new(1000, NONE);
-        assert_eq!(approval.update(30_999, NONE), Decision::Waiting);
-        assert_eq!(approval.update(31_000, NONE), Decision::Rejected);
+        assert_eq!(approval.update(30_999, NONE, ROLES), Decision::Waiting);
+        assert_eq!(approval.update(31_000, NONE, ROLES), Decision::Rejected);
     }
 
     #[test]
     fn a_late_press_is_still_a_timeout() {
         let mut approval = Approval::new(1000, NONE);
-        assert_eq!(approval.update(31_000, K4), Decision::Rejected);
+        assert_eq!(approval.update(31_000, K4, ROLES), Decision::Rejected);
+    }
+
+    #[test]
+    fn roles_come_from_the_caller() {
+        let roles = [Role::Ignore, Role::Ignore, Role::Approve, Role::Reject];
+        let mut approval = Approval::new(1000, NONE);
+        assert_eq!(approval.update(1600, K4, roles), Decision::Rejected);
+        let mut approval = Approval::new(1000, NONE);
+        assert_eq!(approval.update(1600, K3, roles), Decision::Approved);
+        let mut approval = Approval::new(1000, NONE);
+        assert_eq!(approval.update(1600, K1, roles), Decision::Waiting);
     }
 
     #[test]
