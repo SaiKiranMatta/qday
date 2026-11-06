@@ -40,6 +40,39 @@ Lay the first two wires before plugging in the screen and the short jumpers:
 Never bridge strip 2 or strip 3 across the gap. Strip 2 on the ESP32 side is 5V, and strip 3 is
 GPIO14.
 
+## Button wiring
+
+Four 12 mm tactile buttons sit on a 25 x 6 hole piece of stripboard, to the right of the breadboard
+and under the screen. They need no resistors, because the firmware turns on the internal pull-ups.
+Unplug USB while wiring.
+
+![Button wiring from the stripboard to the breadboard](buttons-wiring.svg)
+
+Hold the piece with the button side up and the two long rails at the top. Count columns 1-25 from
+the left and rows 1-6 from the top. Row 1 is a spare rail, row 2 is the ground rail, and rows 3-6
+are short strips, with each column's four holes joined.
+
+Each button has four legs, in rows 2 and 4. Check with a multimeter first: the two legs that beep
+without pressing are the pair 5 holes apart, and they go in the ground rail.
+
+| Button | Columns | Wire from row 6 | Breadboard | ESP32 pin |
+|---|---|---|---|---|
+| K1 | 1 and 6 | Column 6 | e10 | GPIO3 |
+| K2 | 7 and 12 | Column 12 | e17 | GPIO6 |
+| K3 | 13 and 18 | Column 18 | e16 | GPIO7 |
+| K4 | 19 and 24 | Column 24 | e15 | GPIO15 |
+
+Ground takes two wires:
+
+1. Lift the ESP32 out, lay a jumper from c1 to the minus rail at strip 1, and push the ESP32 back in.
+2. Run a wire from column 25 of the ground rail to the minus rail at strip 28.
+
+The K1 wire runs up the centre gap from strip 19 to strip 10, under the touch jumpers on strips
+11-14. Keep every wire flat, because three of them run under the screen.
+
+Before plugging in USB, check each button with a multimeter. Each signal wire should beep to ground
+only while its own button is pressed.
+
 ## Build and flash
 
 Connect the board with the port labelled **USB**, then run:
