@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { type Page, Shell } from "./components/Shell";
 import { ConnectPanel } from "./components/ConnectPanel";
 import type { DeviceStatus } from "@qday/device";
@@ -49,6 +49,10 @@ function ConnectedApp({
   signFrame: (raw: Uint8Array) => Promise<`0x${string}`>;
 }) {
   const [page, setPage] = useState<Page>("wallet");
+  // A new page starts at its top.
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [page]);
   const tokens = useTokens();
   const live = useAccount(MOCK ? null : status, tokens.selected);
   const setup = useCreateAccount(status, live.onChain?.address ?? null, signFrame, () => void live.refresh());
@@ -63,36 +67,41 @@ function ConnectedApp({
 
   return (
     <Shell page={page} onNavigate={setPage} device={{ connected: true, onDisconnect }}>
-      {page === "wallet" && (
-        <WalletPage
-          account={account}
-          tokens={tokens}
-          chain={MOCK ? "live" : live.chain}
-          error={MOCK ? null : live.error}
-          setup={
-            needsSetup
-              ? {
-                  address: live.onChain?.address ?? null,
-                  balanceWei: live.onChain?.balanceWei ?? 0n,
-                  step: setup.step,
-                  onFund: () => void setup.fund(),
-                  onCreate: () => void setup.create(),
-                }
-              : null
-          }
-          onSend={!MOCK && live.onChain?.deployed ? () => setDialog("send") : null}
-          onReceive={account.address !== "0x" ? () => setDialog("receive") : null}
-          onMintTokens={
-            !MOCK && CAN_MINT_TEST_TOKENS && live.onChain
-              ? async () => {
-                  await requestTestTokens(live.onChain!.address, tokens.selected);
-                  await live.refresh();
-                }
-              : null
-          }
-          onOpenActivity={() => setPage("activity")}
-        />
-      )}
+      {/* Keyed by page, so each page enters on arrival. */}
+      <div key={page} className="animate-enter">
+        {page === "wallet" && (
+          <WalletPage
+            account={account}
+            tokens={tokens}
+            chain={MOCK ? "live" : live.chain}
+            error={MOCK ? null : live.error}
+            setup={
+              needsSetup
+                ? {
+                    address: live.onChain?.address ?? null,
+                    balanceWei: live.onChain?.balanceWei ?? 0n,
+                    step: setup.step,
+                    onFund: () => void setup.fund(),
+                    onCreate: () => void setup.create(),
+                  }
+                : null
+            }
+            onSend={!MOCK && live.onChain?.deployed ? () => setDialog("send") : null}
+            onReceive={account.address !== "0x" ? () => setDialog("receive") : null}
+            onMintTokens={
+              !MOCK && CAN_MINT_TEST_TOKENS && live.onChain
+                ? async () => {
+                    await requestTestTokens(live.onChain!.address, tokens.selected);
+                    await live.refresh();
+                  }
+                : null
+            }
+            onOpenActivity={() => setPage("activity")}
+          />
+        )}
+        {page === "activity" && <ActivityPage account={account} tokens={tokens} />}
+        {page === "device" && <DevicePage status={status} log={log} onRefresh={onRefresh} onDisconnect={onDisconnect} />}
+      </div>
       {dialog === "send" && (
         <SendModal
           step={send.step}
@@ -107,8 +116,6 @@ function ConnectedApp({
         />
       )}
       {dialog === "receive" && account.address !== "0x" && <ReceiveModal address={account.address} onClose={closeDialog} />}
-      {page === "activity" && <ActivityPage account={account} tokens={tokens} />}
-      {page === "device" && <DevicePage status={status} log={log} onRefresh={onRefresh} onDisconnect={onDisconnect} />}
     </Shell>
   );
 }

@@ -1,6 +1,7 @@
 import { txUrl } from "../lib/explorer";
 import type { Token } from "../lib/tokens";
 import type { ActivityItem, ActivityKind } from "../lib/wallet";
+import { Icon, type IconName } from "./icons";
 import { TokenLogo } from "./TokenLogo";
 
 const LABEL: Record<ActivityKind, string> = {
@@ -34,94 +35,122 @@ function timeLabel(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
-/** Transactions grouped by day, newest first. */
+/** Wide screens lay the Activity page out as a table; these columns are shared by its header and rows. */
+const TABLE = "xl:grid xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_6rem_8rem_minmax(9rem,auto)_1rem] xl:items-center xl:gap-x-6";
+
+/**
+ * Transactions grouped by day, newest first. `table` spreads each row into columns on wide screens
+ * (the Activity page); the default is the compact two-line row (cards, phones).
+ */
 export function ActivityList({
   items,
   tokens,
   limit,
+  layout = "compact",
 }: {
   items: ActivityItem[];
   tokens: Map<string, Token>;
   limit?: number;
+  layout?: "compact" | "table";
 }) {
   const shown = limit ? items.slice(0, limit) : items;
+  // Rows ease in once, top first; the stagger is capped so a long list never makes anyone wait.
+  const order = new Map(shown.map((item, i) => [item.id, i]));
   const days = new Map<string, ActivityItem[]>();
   for (const item of shown) {
     const day = dayLabel(item.at);
     days.set(day, [...(days.get(day) ?? []), item]);
   }
+  const table = layout === "table";
 
   return (
-    <div className="divide-y divide-line/60">
-      {[...days].map(([day, rows]) => (
-        <section key={day} className="py-2">
-          <h3 className="pt-2 text-xs font-medium text-muted">{day}</h3>
-          <ul className="divide-y divide-line/40">
-            {rows.map((item) => (
-              <li key={item.id}>
-                {item.txHash ? (
-                  <a
-                    href={txUrl(item.txHash)}
-                    target="_blank"
-                    rel="noreferrer"
-                    title="Open in explorer"
-                    className="group -mx-3 flex items-center gap-4 rounded-2xl px-3 py-3.5 transition-colors hover:bg-surface-2/60 focus-visible:bg-surface-2/60"
-                  >
-                    <Row item={item} tokens={tokens} />
-                    <svg
-                      viewBox="0 0 16 16"
-                      className="-ml-1 size-3.5 shrink-0 text-muted opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      aria-hidden
-                    >
-                      <path d="M5.5 10.5 10.5 5.5M6.5 5.5h4v4" />
-                    </svg>
-                  </a>
+    <div>
+      {table && (
+        <div className={`hidden border-b border-line/60 pt-1 pb-3 text-xs font-medium text-muted ${TABLE}`} aria-hidden>
+          <span>Transaction</span>
+          <span>From or to</span>
+          <span>Time</span>
+          <span>Status</span>
+          <span className="text-right">Amount</span>
+          <span />
+        </div>
+      )}
+      <div className="divide-y divide-line/60">
+        {[...days].map(([day, rows]) => (
+          <section key={day} className="py-2">
+            <h3 className="pt-2 text-xs font-medium text-muted">{day}</h3>
+            <ul className="divide-y divide-line/40">
+              {rows.map((item) => {
+                const content = table ? (
+                  <>
+                    <span className="flex min-w-0 flex-1 items-center gap-4 xl:hidden">
+                      <Row item={item} tokens={tokens} />
+                    </span>
+                    <TableRow item={item} tokens={tokens} linked={!!item.txHash} />
+                  </>
                 ) : (
-                  <div className="flex items-center gap-4 py-3.5">
-                    <Row item={item} tokens={tokens} />
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
+                  <Row item={item} tokens={tokens} />
+                );
+                return (
+                  <li
+                    key={item.id}
+                    className="animate-enter"
+                    style={{ animationDelay: `${Math.min(order.get(item.id) ?? 0, 8) * 30}ms` }}
+                  >
+                    {item.txHash ? (
+                      <a
+                        href={txUrl(item.txHash)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="group -mx-3 flex items-center gap-4 rounded-2xl px-3 py-3.5 transition-colors hover:bg-surface-2/60 focus-visible:bg-surface-2/60"
+                      >
+                        {content}
+                      </a>
+                    ) : (
+                      <div className="flex items-center gap-4 py-3.5">{content}</div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ))}
+      </div>
     </div>
   );
 }
 
-/** One entry's icon, words and amount. The caller supplies the row, which links to the explorer when it can. */
+/** What happened, in the compact form's words. */
+function detail(item: ActivityItem): string {
+  if (item.counterparty) return `${item.kind === "received" ? "From" : "To"} ${item.counterparty}`;
+  return item.kind === "created" ? "Your account is ready" : "New keys are active";
+}
+
+function amountText(item: ActivityItem, token: Token | undefined): string {
+  if (!item.amount) return "";
+  const sign = item.kind === "received" ? "+" : item.kind === "sent" ? "−" : "";
+  return `${sign}${item.amount.value} ${token?.symbol ?? ""}`;
+}
+
+function amountTone(item: ActivityItem): string {
+  if (item.kind === "refused" || item.status === "failed") return "text-muted line-through decoration-muted/60";
+  return item.kind === "received" ? "text-ok" : "";
+}
+
+/** One entry's icon, words and amount on two lines. The caller supplies the row, which links to the explorer when it can. */
 function Row({ item, tokens }: { item: ActivityItem; tokens: Map<string, Token> }) {
   const token = item.amount ? tokens.get(item.amount.tokenId) : undefined;
   // A rejection never reached the chain, so it has no status of its own.
   const status = item.kind === "refused" ? undefined : STATUS[item.status];
-  const struck = item.kind === "refused" || item.status === "failed";
   return (
     <>
       <ItemIcon item={item} token={token} />
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium">{LABEL[item.kind]}</div>
-        <div className="truncate text-xs text-muted">
-          {item.counterparty
-            ? `${item.kind === "received" ? "From" : "To"} ${item.counterparty}`
-            : item.kind === "created"
-              ? "Your account is ready"
-              : "New keys are active"}
-        </div>
+        <div className="truncate text-xs text-muted">{detail(item)}</div>
       </div>
       <div className="shrink-0 text-right">
-        <div
-          className={`text-sm font-medium tabular-nums ${item.kind === "received" ? "text-ok" : ""} ${
-            struck ? "text-muted line-through decoration-muted/60" : ""
-          }`}
-        >
-          {item.amount
-            ? `${item.kind === "received" ? "+" : item.kind === "sent" ? "−" : ""}${item.amount.value} ${token?.symbol ?? ""}`
-            : ""}
-        </div>
+        <div className={`text-sm font-medium tabular-nums ${amountTone(item)}`}>{amountText(item, token)}</div>
         <div className="text-xs text-muted tabular-nums">
           {status && <span className={status.tone}>{status.text} · </span>}
           {timeLabel(item.at)}
@@ -131,29 +160,63 @@ function Row({ item, tokens }: { item: ActivityItem; tokens: Map<string, Token> 
   );
 }
 
-const PATH: Record<ActivityKind, string> = {
-  sent: "M5 11 11 5M6 5h5v5",
-  received: "M11 5 5 11M10 11H5V6",
-  created: "M8 3v10M3 8h10",
-  refresh: "M3.5 8a4.5 4.5 0 0 1 8-2.8M12.5 8a4.5 4.5 0 0 1-8 2.8M11.5 2.5v3h-3M4.5 13.5v-3h3",
-  refused: "m5 5 6 6M11 5l-6 6",
+const TABLE_STATUS: Record<ActivityItem["status"], { text: string; dot: string }> = {
+  confirmed: { text: "Confirmed", dot: "bg-ok" },
+  pending: { text: "Pending", dot: "bg-warn animate-pulse" },
+  failed: { text: "Failed", dot: "bg-bad" },
+};
+
+/** The same entry spread over the table's columns, wide screens only. */
+function TableRow({ item, tokens, linked }: { item: ActivityItem; tokens: Map<string, Token>; linked: boolean }) {
+  const token = item.amount ? tokens.get(item.amount.tokenId) : undefined;
+  const status = item.kind === "refused" ? { text: "Rejected", dot: "bg-muted" } : TABLE_STATUS[item.status];
+  return (
+    <span className={`hidden w-full ${TABLE}`}>
+      <span className="flex min-w-0 items-center gap-4">
+        <ItemIcon item={item} token={token} />
+        <span className="min-w-0">
+          <span className="block text-sm font-medium">{LABEL[item.kind]}</span>
+          <span className="block truncate text-xs text-muted">{token?.name ?? (item.kind === "created" ? "Account" : "Keys")}</span>
+        </span>
+      </span>
+      <span className="truncate text-sm text-muted">
+        {item.counterparty ? `${item.kind === "received" ? "From" : "To"} ${item.counterparty}` : detail(item)}
+      </span>
+      <span className="text-sm text-muted tabular-nums">{timeLabel(item.at)}</span>
+      <span className="flex items-center gap-2 text-sm text-muted">
+        <span className={`size-1.5 rounded-full ${status.dot}`} />
+        {status.text}
+      </span>
+      <span className={`text-right text-sm font-medium tabular-nums ${amountTone(item)}`}>{amountText(item, token)}</span>
+      <span className="text-muted opacity-0 transition-[opacity,transform] duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:opacity-100 group-focus-visible:opacity-100">
+        {linked && <Icon name="external" className="size-3.5" />}
+      </span>
+    </span>
+  );
+}
+
+const GLYPH: Record<ActivityKind, IconName> = {
+  sent: "send",
+  received: "receive",
+  created: "created",
+  refresh: "refresh",
+  refused: "refused",
 };
 
 /** The token's logo with a small badge for what happened; just the badge when no token moved. */
 function ItemIcon({ item, token }: { item: ActivityItem; token: Token | undefined }) {
-  const glyph = (size: string) => (
-    <svg viewBox="0 0 16 16" className={size} fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path d={PATH[item.kind]} />
-    </svg>
-  );
   if (!item.amount) {
-    return <span className="grid size-9 shrink-0 place-items-center rounded-full bg-surface-2 text-alabaster/80">{glyph("size-4")}</span>;
+    return (
+      <span className="grid size-9 shrink-0 place-items-center rounded-full bg-surface-2 text-alabaster/80">
+        <Icon name={GLYPH[item.kind]} className="size-4" />
+      </span>
+    );
   }
   return (
     <span className="relative shrink-0">
       <TokenLogo token={token} size={36} />
       <span className="absolute -right-1 -bottom-1 grid size-[18px] place-items-center rounded-full bg-onyx text-alabaster ring-2 ring-surface">
-        {glyph("size-2.5")}
+        <Icon name={GLYPH[item.kind]} className="size-2.5" />
       </span>
     </span>
   );

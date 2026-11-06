@@ -43,6 +43,9 @@ importers:
       cryptocurrency-icons:
         specifier: ^0.18.1
         version: 0.18.1
+      lucide-react:
+        specifier: 0.511.0
+        version: 0.511.0(react@19.3.1)
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
@@ -690,6 +693,11 @@ packages:
   locate-path@5.0.0:
     resolution: {integrity: sha512-t7hw9pI+WvuwNJXwk5zVHpyhIqzg2qTlklJOf0mVxGSbe3Fp2VieZcduNYjaLDoy6p9uGpQEGWG87WpMKlNq8g==}
     engines: {node: '>=8'}
+
+  lucide-react@0.511.0:
+    resolution: {integrity: sha512-VK5a2ydJ7xm8GvBeKLS9mu1pVK6ucef9780JVUjw6bAjJL/QXnd4Y0p7SPeOUMC27YhzNCZvm5d/QX0Tp3rc0w==}
+    peerDependencies:
+      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
   magic-string@1.4.5:
     resolution: {integrity: sha512-oLLC2+YvQUfAa+vxoufE/yc1icb87M9iXIRqAoR/2EhE/8cb3SF/+Gi0c2By1B+5Vz2e2vQtUvHiu1+63Znh+w==}
@@ -1341,6 +1349,10 @@ snapshots:
   locate-path@5.0.0:
     dependencies:
       p-locate: 4.1.0
+
+  lucide-react@0.511.0(react@19.3.1):
+    dependencies:
+      react: 19.3.1
 
   magic-string@1.4.5:
     dependencies:

@@ -3,9 +3,11 @@ import { type ComponentProps, type ReactNode, useState } from "react";
 import { ActivityList, ActivitySkeleton } from "./components/ActivityList";
 import { ManageTokens } from "./components/ManageTokens";
 import { TokenLogo } from "./components/TokenLogo";
-import { Button, StatusDot } from "./components/ui";
+import { Button } from "./components/ui";
 import { capacity } from "./lib/capacity";
 import { groupThousands, shortHex } from "./lib/format";
+import { DeviceArt } from "./components/DeviceArt";
+import { Icon } from "./components/icons";
 import { SetupCard } from "./components/SetupCard";
 import type { ChainState } from "./lib/useAccount";
 import type { SetupStep } from "./lib/useCreateAccount";
@@ -68,17 +70,20 @@ export function WalletPage({
                 <span className="text-sm font-medium text-alabaster/90">{account.name}</span>
                 {account.address !== "0x" && <CopyAddress address={account.address} />}
               </div>
-              <div className="mt-3 text-5xl font-semibold tracking-tight tabular-nums">
+              {/* Keyed by the amount, so a new balance ticks in and the change is noticed. */}
+              <div key={account.balance} className="mt-3 animate-tick text-5xl font-semibold tracking-tight tabular-nums">
                 {chain === "loading" ? "…" : account.balance} <span className="text-alabaster/60">ETH</span>
               </div>
             </div>
           )}
           {!setup && (
             <div className="flex gap-3">
-              <Button variant="onyx" disabled={!onSend} onClick={() => onSend?.()}>
+              <Button variant="onyx" className="pr-6 pl-5" disabled={!onSend} onClick={() => onSend?.()}>
+                <Icon name="send" className="size-4" />
                 Send
               </Button>
-              <Button variant="onyx" disabled={!onReceive} onClick={() => onReceive?.()}>
+              <Button variant="onyx" className="pr-6 pl-5" disabled={!onReceive} onClick={() => onReceive?.()}>
+                <Icon name="receive" className="size-4" />
                 Receive
               </Button>
             </div>
@@ -188,9 +193,10 @@ function CopyAddress({ address }: { address: string }) {
       onClick={() => void copy()}
       title={address}
       aria-label="Copy address"
-      className="rounded-full bg-onyx/40 px-2.5 py-1 font-mono text-xs text-alabaster/70 transition-colors hover:bg-onyx/60 hover:text-alabaster"
+      className="flex items-center gap-1.5 rounded-full bg-onyx/40 py-1 pr-2 pl-2.5 font-mono text-xs text-alabaster/70 transition-[color,background-color,transform] hover:bg-onyx/60 hover:text-alabaster active:scale-95"
     >
-      {copied ? "Copied" : shortHex(address, 6, 4)}
+      {copied ? <span className="font-sans">Copied</span> : shortHex(address, 6, 4)}
+      <Icon name={copied ? "check" : "copy"} className={`size-3 ${copied ? "text-ok" : ""}`} />
     </button>
   );
 }
@@ -214,7 +220,7 @@ export function ActivityPage({ account, tokens }: { account: AccountView; tokens
   const active = FILTERS.find((f) => f.id === filter)!;
 
   return (
-    <div className="max-w-3xl">
+    <div>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Activity</h1>
@@ -245,7 +251,7 @@ export function ActivityPage({ account, tokens }: { account: AccountView; tokens
           <ActivitySkeleton rows={6} />
         ) : items.length ? (
           <>
-            <ActivityList items={items} tokens={tokens.byId} limit={shown} />
+            <ActivityList items={items} tokens={tokens.byId} limit={shown} layout="table" />
             {items.length > shown && (
               <div className="border-t border-line/60 py-3 text-center">
                 <button
@@ -281,61 +287,140 @@ export function DevicePage({
   onDisconnect: () => void;
 }) {
   const [showDetails, setShowDetails] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const cap = capacity(status);
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await onRefresh();
+    } finally {
+      setTimeout(() => setRefreshing(false), 400);
+    }
+  };
+
   return (
-    <div className="max-w-3xl">
+    <div>
       <PageTitle title="Device" subtitle="The QDay connected to this browser." />
-      <section className="rounded-3xl bg-surface px-6 pt-5 pb-2 sm:px-8 sm:pt-6">
-        <div className="flex items-center gap-2.5 text-sm font-medium">
-          <StatusDot tone="ok" /> Connected and ready to sign
-        </div>
-        <dl className="mt-4 divide-y divide-line/60 border-t border-line/60">
-          {cap.left !== null && <Row label="Signatures left" value={groupThousands(cap.left)} />}
-          <Row label="Device ID" value={shortHex(status.root, 8, 6)} mono />
-        </dl>
-        {cap.low && (
-          <div className="mt-4 rounded-xl bg-warn/10 px-4 py-3 text-xs leading-relaxed text-warn">
-            {cap.empty
-              ? "This QDay has no signatures left on its current keys. Refresh its keys to keep signing."
-              : "This QDay is running low on signatures. Refresh its keys soon."}
+
+      <section className="flex flex-col gap-6 rounded-3xl bg-surface px-6 py-6 sm:flex-row sm:items-center sm:gap-8 sm:px-8 sm:py-7">
+        <DeviceArt size="large" light="ok" caption="Ready to sign" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2.5 text-sm font-medium text-ok">
+            <span className="size-2 animate-breathe rounded-full bg-ok" /> Connected and ready to sign
           </div>
-        )}
-        <div className="mt-5 flex items-center justify-between gap-3">
-          <Button variant="secondary" onClick={onRefresh}>
-            Refresh status
-          </Button>
-          <Button variant="ghost" className="-mr-3 px-3" onClick={onDisconnect}>
-            Disconnect
-          </Button>
-        </div>
-        <div className="mt-5 border-t border-line/60">
-          <button
-            onClick={() => setShowDetails((v) => !v)}
-            aria-expanded={showDetails}
-            className="flex w-full items-center justify-between py-3 text-sm text-muted transition-colors hover:text-alabaster"
-          >
-            Technical details
-            <svg viewBox="0 0 16 16" className={`size-4 transition-transform ${showDetails ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
-              <path d="m4 6 4 4 4-4" />
-            </svg>
-          </button>
-          {showDetails && (
-            <div className="mb-1 rounded-2xl bg-onyx px-5 py-2">
-              <dl className="divide-y divide-line/60">
-                <Row label="Key set" value={String(status.tree)} />
-                <Row label="Next signature" value={String(status.nextIndex)} />
-                <Row label="Public key" value={status.root} mono />
-                <Row label="Public seed" value={status.pubSeed} mono />
-              </dl>
-              <div className="mt-1 border-t border-line/60 pt-3 text-xs text-muted">Device log</div>
-              <pre className="mt-2 mb-3 max-h-48 overflow-auto font-mono text-xs leading-relaxed text-muted">
-                {log.length ? log.join("\n") : "Nothing logged yet."}
-              </pre>
-            </div>
-          )}
+          <h2 className="mt-2 text-2xl font-semibold tracking-tight">QDay</h2>
+          <div className="mt-1 flex items-center gap-2 text-sm text-muted">
+            Device ID <span className="font-mono text-xs text-alabaster/80">{shortHex(status.root, 8, 6)}</span>
+            <CopyIconButton text={status.root} label="Copy device ID" />
+          </div>
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <Button variant="secondary" onClick={() => void refresh()} disabled={refreshing}>
+              <Icon name="refresh" className={`size-4 ${refreshing ? "animate-spin" : ""}`} />
+              {refreshing ? "Refreshing…" : "Refresh status"}
+            </Button>
+            <Button variant="ghost" className="px-4" onClick={onDisconnect}>
+              <Icon name="disconnect" className="size-4" />
+              Disconnect
+            </Button>
+          </div>
         </div>
       </section>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-2 lg:items-start">
+        {cap.left !== null && cap.total !== null && (
+          <section className="rounded-3xl bg-surface px-6 py-5 sm:px-8 sm:py-6">
+            <h2 className="text-base font-semibold">Signatures</h2>
+            <div className="mt-4 flex items-baseline gap-2">
+              <span className={`text-4xl font-semibold tracking-tight tabular-nums ${cap.empty ? "text-bad" : cap.low ? "text-warn" : ""}`}>
+                {groupThousands(cap.left)}
+              </span>
+              <span className="text-sm text-muted">left of {groupThousands(cap.total)}</span>
+            </div>
+            <div
+              className="mt-4 h-2 overflow-hidden rounded-full bg-surface-2"
+              role="meter"
+              aria-label="Signatures left"
+              aria-valuemin={0}
+              aria-valuemax={cap.total}
+              aria-valuenow={cap.left}
+            >
+              <div
+                className={`h-full origin-left animate-grow rounded-full ${cap.empty ? "bg-bad" : cap.low ? "bg-warn" : "bg-alabaster"}`}
+                style={{ width: `${Math.max((cap.left / cap.total) * 100, cap.left > 0 ? 1.5 : 0)}%` }}
+              />
+            </div>
+            <p className="mt-4 text-xs leading-relaxed text-muted">
+              Each approval uses one signature. When they run low, refresh the keys on your QDay. Your address stays the
+              same.
+            </p>
+            {cap.low && (
+              <div className="mt-4 rounded-xl bg-warn/10 px-4 py-3 text-xs leading-relaxed text-warn">
+                {cap.empty
+                  ? "No signatures left on these keys. Refresh the keys on your QDay to keep signing."
+                  : "Running low. Refresh the keys on your QDay soon."}
+              </div>
+            )}
+          </section>
+        )}
+
+        <section className="rounded-3xl bg-surface px-6 pt-5 pb-2 sm:px-8 sm:pt-6">
+          <h2 className="text-base font-semibold">Details</h2>
+          <dl className="mt-2 divide-y divide-line/60">
+            <Row label="Connection" value="USB" />
+            <Row label="Key set" value={`#${status.tree + 1}`} />
+            <Row label="Next signature" value={`#${String(status.nextIndex).padStart(4, "0")}`} />
+          </dl>
+          <div className="border-t border-line/60">
+            <button
+              onClick={() => setShowDetails((v) => !v)}
+              aria-expanded={showDetails}
+              className="flex w-full items-center justify-between py-3 text-sm text-muted transition-colors hover:text-alabaster"
+            >
+              Technical details
+              <Icon name="chevron" className={`size-4 transition-transform duration-200 ${showDetails ? "rotate-180" : ""}`} />
+            </button>
+            {showDetails && (
+              <div className="mb-4 animate-enter rounded-2xl bg-onyx px-4 py-2">
+                <dl className="divide-y divide-line/60">
+                  <Row label="Public key" value={status.root} mono />
+                  <Row label="Public seed" value={status.pubSeed} mono />
+                </dl>
+                <div className="border-t border-line/60 pt-3 text-xs text-muted">Device log</div>
+                <pre className="mt-2 mb-3 max-h-48 overflow-auto font-mono text-xs leading-relaxed text-muted">
+                  {log.length ? log.join("\n") : "Nothing logged yet."}
+                </pre>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
     </div>
+  );
+}
+
+/** A small copy control with an icon that confirms the copy. */
+function CopyIconButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard blocked; the technical details show the full value.
+    }
+  };
+  return (
+    <button
+      onClick={() => void copy()}
+      aria-label={copied ? "Copied" : label}
+      title={copied ? "Copied" : label}
+      className={`grid size-7 place-items-center rounded-lg transition-[color,background-color,transform] hover:bg-surface-2 active:scale-90 ${
+        copied ? "text-ok" : "text-muted hover:text-alabaster"
+      }`}
+    >
+      <Icon name={copied ? "check" : "copy"} className="size-3.5" />
+    </button>
   );
 }
 
@@ -361,8 +446,11 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
 
 function EmptyState({ title, body }: { title: string; body: string }) {
   return (
-    <div className="py-10 text-center">
-      <div className="text-sm font-semibold">{title}</div>
+    <div className="flex flex-col items-center py-10 text-center">
+      <span className="grid size-11 place-items-center rounded-full bg-surface-2 text-muted">
+        <Icon name="activity" className="size-5" />
+      </span>
+      <div className="mt-4 text-sm font-semibold">{title}</div>
       <div className="mx-auto mt-1 max-w-xs text-sm text-muted">{body}</div>
     </div>
   );

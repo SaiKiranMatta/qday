@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Token } from "../lib/tokens";
+import { Icon } from "./icons";
 import { TokenLogo } from "./TokenLogo";
 
 /** The token chip in the amount field. Opens a list of the account's tokens with their balances. */
@@ -54,20 +55,18 @@ export function TokenPicker({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`Token: ${selected.symbol}. Change token`}
-        className="flex items-center gap-2 rounded-full bg-surface py-1 pr-2.5 pl-1 text-sm font-medium transition-colors hover:bg-onyx/60"
+        className="flex items-center gap-2 rounded-full bg-surface py-1 pr-2.5 pl-1 text-sm font-medium transition-[background-color,transform] duration-150 hover:bg-onyx/60 active:scale-[0.97]"
       >
         <TokenLogo token={selected} size={24} />
         {selected.symbol}
-        <svg viewBox="0 0 16 16" className={`size-3.5 text-muted transition-transform ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
-          <path d="m4 6 4 4 4-4" />
-        </svg>
+        <Icon name="chevron" className={`size-3.5 text-muted transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
       </button>
 
       {open && (
         <ul
           role="listbox"
           aria-label="Token to send"
-          className="absolute top-full right-0 z-20 mt-2 w-64 rounded-2xl bg-surface p-1.5 shadow-2xl shadow-onyx ring-1 ring-line"
+          className="absolute top-full right-0 z-20 mt-2 w-64 origin-top-right animate-drop rounded-2xl bg-surface p-1.5 shadow-2xl shadow-onyx ring-1 ring-line"
         >
           {tokens.map((token, i) => {
             const active = token.id === selected.id;

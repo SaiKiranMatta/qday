@@ -4,6 +4,7 @@ import { txUrl } from "../lib/explorer";
 import { addressLines, exactEth, exactUnits, parseAmount, shortHex } from "../lib/format";
 import { KNOWN_TOKENS, NATIVE_ID, type Token, isAddress } from "../lib/tokens";
 import { type Draft, type SendFees, type SendStep, feeFor } from "../lib/useSend";
+import { Icon } from "./icons";
 import { TokenLogo } from "./TokenLogo";
 import { TokenPicker } from "./TokenPicker";
 import { Button } from "./ui";
@@ -58,27 +59,30 @@ export function SendFlow({
   return (
     <div>
       <Progress step={step.kind} />
-      {step.kind === "edit" ? (
-        <DetailsForm
-          to={to}
-          amount={amount}
-          token={token}
-          tokens={tokens}
-          onTo={setTo}
-          onAmount={setAmount}
-          onToken={(t) => {
-            setTokenId(t.id);
-            setAmount("");
-          }}
-          balances={balances}
-          fees={fees}
-          ownAddress={ownAddress}
-          error={step.error}
-          onReview={onReview}
-        />
-      ) : (
-        <Summary step={step} onConfirm={onConfirm} onEdit={onEdit} onClose={onClose} />
-      )}
+      {/* Details, the summary (review to sending) and the receipt each enter once; the summary stays put while it sends. */}
+      <div key={step.kind === "edit" ? "edit" : step.kind === "done" ? "done" : "summary"} className="animate-enter">
+        {step.kind === "edit" ? (
+          <DetailsForm
+            to={to}
+            amount={amount}
+            token={token}
+            tokens={tokens}
+            onTo={setTo}
+            onAmount={setAmount}
+            onToken={(t) => {
+              setTokenId(t.id);
+              setAmount("");
+            }}
+            balances={balances}
+            fees={fees}
+            ownAddress={ownAddress}
+            error={step.error}
+            onReview={onReview}
+          />
+        ) : (
+          <Summary step={step} onConfirm={onConfirm} onEdit={onEdit} onClose={onClose} />
+        )}
+      </div>
     </div>
   );
 }
@@ -366,10 +370,8 @@ function Sent({ draft, block, hash, onClose }: { draft: Draft; block: number; ha
   return (
     <div role="status">
       <div className="flex flex-col items-center pt-2 text-center">
-        <span className="grid size-14 place-items-center rounded-full bg-ok/15 text-ok">
-          <svg viewBox="0 0 24 24" className="size-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="m5 12.5 4.5 4.5L19 7.5" />
-          </svg>
+        <span className="grid size-14 animate-pop place-items-center rounded-full bg-ok/15 text-ok">
+          <Icon name="check" className="size-7" />
         </span>
         <div className="mt-4 flex items-center gap-2 text-3xl font-semibold tracking-tight tabular-nums">
           <TokenLogo token={draft.token} size={28} />
@@ -441,10 +443,5 @@ function Notice({ tone, children }: { tone: "bad" | "warn"; children: ReactNode 
 }
 
 function DeviceIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" className={className} aria-hidden>
-      <rect x="2" y="3.5" width="12" height="9" rx="1.8" />
-      <path d="M5 10.5h6" />
-    </svg>
-  );
+  return <Icon name="device" className={className} />;
 }

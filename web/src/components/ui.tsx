@@ -24,7 +24,7 @@ export function Button({
 }: ComponentProps<"button"> & { variant?: ButtonVariant }) {
   return (
     <button
-      className={`inline-flex h-11 items-center justify-center rounded-full px-6 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${BUTTON[variant]} ${className}`}
+      className={`inline-flex h-11 items-center justify-center gap-2 rounded-full px-6 text-sm font-semibold transition-[color,background-color,opacity,transform] duration-150 enabled:active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 ${BUTTON[variant]} ${className}`}
       {...props}
     />
   );
