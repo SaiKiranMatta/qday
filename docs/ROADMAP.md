@@ -42,7 +42,8 @@ hold real funds. Everything under **Built** runs now; each line points at where 
 - **Finding and spending kept apart**: the view key finds payments in the browser and can't spend;
   the claim is signed on the device.
 - **In the web wallet**: share the private address, pay one from **Send**, see payments arrive, claim
-  them to any address.
+  them to any address. Paid and claimed from both an XMSS and an ML-DSA account, signed on the board,
+  on the hosted devnet ([devnet notes](devnet.md#hosted-signed-on-the-board)).
 
 ### The device
 

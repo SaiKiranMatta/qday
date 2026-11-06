@@ -201,9 +201,13 @@ On QDay's devnet, signed on the device and read back with the built-in explorer
 | Send 0.0125 ETH | ML-DSA-44 | 1,308,782 | about 1,248,000 |
 | Private payment of 0.05 ETH | XMSS | 360,325 | |
 | Claim it to a new address | One-time ML-DSA | 1,566,169 | |
+| Private payment of 0.1 ETH | ML-DSA-44 | 1,448,841 | 1,247,107 |
+| Claim it back to the account | One-time ML-DSA | 1,383,734 | |
 
-The ML-DSA and private-payment rows were signed on the board on the team's local devnet. The hosted devnet
-matched them with laptop keys: a repeat ML-DSA transfer at 1,309,213 gas, a claim at 1,565,900. Deploying an ML-DSA account
+Every row was signed on the board. The ML-DSA transfer and the first private payment and claim ran on
+the team's local devnet; the ML-DSA private payment and its claim ran on the hosted devnet through the
+live wallet ([devnet notes](docs/devnet.md#hosted-signed-on-the-board)). The hosted devnet also matched
+the local figures with laptop keys: a repeat ML-DSA transfer at 1,309,213 gas, a claim at 1,565,900. Deploying an ML-DSA account
 costs about 37M gas, almost all of it the 20,545-byte key, because code costs about 1,555 gas per
 byte on this chain.
 
