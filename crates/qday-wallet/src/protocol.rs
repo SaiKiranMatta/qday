@@ -469,6 +469,12 @@ mod tests {
     }
 
     #[test]
+    fn an_ml_key_with_extra_words_is_refused() {
+        let line = format!("QDAY1 MLPUBKEY {} extra", hex::encode(&vec![4; 1312]));
+        assert_eq!(parse_response(&line), None);
+    }
+
+    #[test]
     fn scheme_responses_match_the_protocol() {
         assert_eq!(
             response_line(&Response::Scheme(Scheme::Xmss)),

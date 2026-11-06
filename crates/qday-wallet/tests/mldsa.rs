@@ -14,7 +14,7 @@ use qday_wallet::mlkey::MlKeyStore;
 use qday_wallet::passcode::{Attempt, Code, Passcode, Proof};
 use qday_wallet::settings::{Scheme, Settings};
 use qday_wallet::wallet::{MAIN_ACCOUNT, MlReview, Pending, Wallet, WalletError};
-use qday_xmss::Hash;
+use qday_xmss::{Hash, keccak256};
 
 const CODE: Code = [1, 2, 3, 4, 5, 6];
 const WRONG: Code = [9, 9, 9, 9, 9, 9];
@@ -23,6 +23,8 @@ const TO: [u8; 20] = [0x22; 20];
 const LATER: u64 = 1 << 40;
 /// The counter and both key slots.
 const UNTOUCHED: usize = layout::MLDSA_PUBLIC as usize;
+/// The stored key's magic, account, key and checksum.
+const RECORD_BYTES: usize = 8 + 4 + 1312 + 32;
 
 type TestWallet = Wallet<SimFlash, FlashCounter<SimFlash>>;
 
@@ -215,6 +217,21 @@ fn another_account_has_no_stored_key() {
 }
 
 #[test]
+fn a_whole_record_with_the_wrong_magic_reads_as_missing() {
+    let flash = ml_flash();
+    let at = layout::MLDSA_PUBLIC as usize;
+    let mut record = flash.image()[at..at + RECORD_BYTES].to_vec();
+    record[0] ^= 1;
+    let check = keccak256(&[&record[..RECORD_BYTES - 32]]);
+    record[RECORD_BYTES - 32..].copy_from_slice(&check);
+    flash.poke(at, &record);
+    assert_eq!(
+        open(&flash).ml_public_key(MAIN_ACCOUNT),
+        Err(WalletError::NothingPending)
+    );
+}
+
+#[test]
 fn a_damaged_key_reads_as_missing() {
     let flash = ml_flash();
     flash.poke(layout::MLDSA_PUBLIC as usize + 100, &[0x55]);
@@ -373,6 +390,19 @@ fn a_missing_stored_key_is_rebuilt_when_signing() {
         .ml_public_key(MAIN_ACCOUNT)
         .expect("it's stored again");
     assert!(verify(&key, &review.message, &signature));
+}
+
+#[test]
+fn signing_for_another_account_keeps_the_main_key() {
+    let flash = ml_flash();
+    let mut wallet = open(&flash);
+    let main_key = wallet.ml_public_key(MAIN_ACCOUNT).expect("it's stored");
+    let review = ml_review(&mut wallet);
+    let proof = proof(&mut wallet);
+    wallet
+        .ml_sign(&review, 1, proof, &mut TestRng(3))
+        .expect("it signs");
+    assert_eq!(wallet.ml_public_key(MAIN_ACCOUNT), Ok(main_key));
 }
 
 #[test]
