@@ -16,6 +16,7 @@ esp-hal = { version = "~1.2.2", features = ["esp32s3", "unstable"] }
 esp-println = { version = "0.18.0", features = ["esp32s3"] }
 esp-storage = { version = "0.10.0", features = ["esp32s3"] }
 mipidsi = "0.10.0"
+nb = "1"
 qday-ui = { path = "../crates/qday-ui" }
 qday-wallet = { path = "../crates/qday-wallet" }
 qday-xmss = { path = "../crates/qday-xmss" }

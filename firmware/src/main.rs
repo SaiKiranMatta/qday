@@ -50,6 +50,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// external RAM depends on. `heap_peak` in `qday-ui`'s tests measures what this has to cover, and
 /// what isn't given to the heap is left for the stack.
 const HEAP_BYTES: usize = 256 * 1024;
+const RECLAIMED_HEAP_BYTES: usize = 73_744;
 /// Over breadboard wires the picture turns to noise at 80 MHz.
 const LCD_MHZ: u32 = 40;
 const TOUCH_MHZ: u32 = 1;
@@ -61,6 +62,8 @@ const POLL_MS: u32 = 5;
 fn main() -> ! {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
+    // The RAM the bootloader used is free now, and using it costs the stack nothing.
+    esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: RECLAIMED_HEAP_BYTES);
     esp_alloc::heap_allocator!(size: HEAP_BYTES);
     let mut delay = Delay::new();
 

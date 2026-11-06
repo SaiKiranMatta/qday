@@ -38,6 +38,9 @@ const T1_HIGH: u16 = 64;
 const T1_LOW: u16 = 36;
 const LIGHT_BITS: usize = 24;
 
+/// How long a USB write waits for the laptop before giving up.
+const USB_STALL_MS: u64 = 1000;
+
 /// How often to look for USB start-of-frame packets, which only arrive from a live host.
 const USB_CHECK_MS: u64 = 500;
 
@@ -222,9 +225,26 @@ where
         self.light.set(light);
     }
 
+    /// Writes one byte at a time, waiting whenever the 64-byte FIFO is full. The driver's own
+    /// `write` assumes the FIFO is empty, so it drops bytes when log output is still queued, and
+    /// it has no timeout, so an absent laptop would hang the device.
     fn send(&mut self, line: &str) {
-        let _ = self.usb.write(line.as_bytes());
-        let _ = self.usb.flush_tx();
+        for &byte in line.as_bytes() {
+            let started = now_ms();
+            loop {
+                match self.usb.write_byte_nb(byte) {
+                    Ok(()) => break,
+                    Err(nb::Error::WouldBlock) if now_ms() - started < USB_STALL_MS => {}
+                    Err(_) => return,
+                }
+            }
+        }
+        let started = now_ms();
+        while let Err(nb::Error::WouldBlock) = self.usb.flush_tx_nb() {
+            if now_ms() - started >= USB_STALL_MS {
+                return;
+            }
+        }
     }
 
     fn restart(&mut self) {

@@ -1249,6 +1249,7 @@ dependencies = [
  "esp-println",
  "esp-storage",
  "mipidsi",
+ "nb 1.1.0",
  "qday-ui",
  "qday-wallet",
  "qday-xmss",
