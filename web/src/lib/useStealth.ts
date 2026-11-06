@@ -55,7 +55,7 @@ export function useStealth(device: StealthDevice) {
   const enable = useCallback(async () => {
     setSetup({ kind: "sharing" });
     try {
-      if (!HAS_DEV_KEY) throw new Error("Private payments need a dev key to submit claims, which only the local devnet has.");
+      if (!HAS_DEV_KEY) throw new Error("Private payments need a dev key to submit claims, which only QDay's own devnets have.");
       if (!(await client.getCode({ address: POOL }))) {
         throw new Error("The stealth pool isn't on this network. Run tools/devnet/deploy-stealth.sh.");
       }

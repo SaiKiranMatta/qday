@@ -17,6 +17,8 @@ interface Network {
   faucet: { kind: "gateway" } | { kind: "key"; key: Hex };
   /** Seconds between blocks, for telling people when the next one is due. */
   blockSeconds: number;
+  /** Where ML-DSA accounts stake, when the network has a known registry. */
+  stakingRegistry?: Address;
 }
 
 const NETWORKS: Record<string, Network> = {
@@ -39,6 +41,8 @@ const NETWORKS: Record<string, Network> = {
     // The same throwaway premine key as the local devnet: deploy/coolify runs the same chain setup.
     faucet: { kind: "key", key: "0x06f911c1ecb2053bb443ba0a0e28d630c583c3c0c2f334a9ecdc8c7c6ad4ea15" },
     blockSeconds: 6,
+    // The sidecar's NaiveStakingRegistry, which deploy/coolify deploys through CREATE2.
+    stakingRegistry: "0xb9654f4208EE0809D212B66eD145A3CC07464857",
   },
   public: {
     name: "Public devnet",
@@ -63,8 +67,9 @@ export const FACTORY: Address = "0xbCebAd3eCE45625983409B429406a5Dc8d38f876";
 export const ML_FACTORY: Address = "0x6aD8F805f02509bdf646406b9108dd3070E4174d";
 export const ML_VERIFIER: Address = "0x20a8128F20FAF48A9A26Bb83c332582520100954";
 export const POOL: Address = "0x4eBfa044FA7a52CfDE7Fc1B6d8Fb3b4b0669f354";
-/** Where ML-DSA accounts stake. It differs per devnet, so it comes from VITE_QDAY_STAKING_REGISTRY. */
-export const STAKING_REGISTRY: Address | undefined = import.meta.env.VITE_QDAY_STAKING_REGISTRY;
+/** Where ML-DSA accounts stake. It differs per devnet: VITE_QDAY_STAKING_REGISTRY, else the network's own. */
+export const STAKING_REGISTRY: Address | undefined =
+  import.meta.env.VITE_QDAY_STAKING_REGISTRY ?? NETWORK.stakingRegistry;
 /** The price plain transactions use: the gateway can't estimate fees. */
 export const GAS_PRICE = 2_000_000_000n;
 
@@ -178,7 +183,7 @@ export const CAN_MINT_TEST_TOKENS = HAS_DEV_KEY;
 
 /** The funded dev key as a wallet. It pays for what a QDay account can't send itself. */
 export function devWallet() {
-  if (NETWORK.faucet.kind !== "key") throw new Error("This needs a dev key, which only the local devnet has.");
+  if (NETWORK.faucet.kind !== "key") throw new Error("This needs a dev key, which only QDay's own devnets have.");
   return createWalletClient({
     account: privateKeyToAccount(NETWORK.faucet.key),
     chain: devnet,
