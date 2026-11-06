@@ -1,9 +1,11 @@
 import { LineBuffer } from "./lines";
 import {
   type ErrorCode,
+  type Hex,
   type NextKey,
   type Request,
   type Response,
+  type StealthSpend,
   isProtocolLine,
   parseResponse,
   requestLine,
@@ -16,9 +18,8 @@ const STATUS_WAIT_MS = 1_000;
 /** Signing waits for a person, and tree building takes minutes. */
 export const LONG_WAIT_MS = 300_000;
 
-/** The device's keys, from a PUBKEY response. */
-export interface DeviceStatus {
-  /** Signature scheme the keys belong to. The current firmware only has one. */
+/** An XMSS device's keys, from a PUBKEY response. */
+export interface XmssStatus {
   scheme: "xmss-keccak";
   root: `0x${string}`;
   pubSeed: `0x${string}`;
@@ -26,6 +27,15 @@ export interface DeviceStatus {
   tree: number;
   next: NextKey | null;
 }
+
+/** An ML-DSA device's key, from an MLPUBKEY response. */
+export interface MlDsaStatus {
+  scheme: "ml-dsa-44";
+  publicKey: `0x${string}`;
+}
+
+/** The device's keys, for whichever scheme it is set to. */
+export type DeviceStatus = XmssStatus | MlDsaStatus;
 
 export class DeviceError extends Error {
   constructor(
@@ -102,28 +112,66 @@ export class QDayDevice {
     return () => this.closeListeners.delete(listener);
   }
 
-  /** Asks for the keys, retrying because opening the port can reset the board. */
+  /** Asks for the scheme and its keys, retrying because opening the port can reset the board. */
   async status(): Promise<DeviceStatus> {
     for (let attempt = 0; attempt < STATUS_TRIES; attempt += 1) {
-      const response = await this.exchange({ kind: "pubkey" }, STATUS_WAIT_MS);
-      if (response === null) continue;
-      if (response.kind === "err") throw new DeviceError(`The device said ${response.code}`, response.code);
-      if (response.kind !== "pubkey") throw new DeviceError("The device gave the wrong response");
-      return {
-        scheme: "xmss-keccak",
-        root: response.root,
-        pubSeed: response.pubSeed,
-        nextIndex: response.nextIndex,
-        tree: response.tree,
-        next: response.next,
-      };
+      const scheme = await this.exchange({ kind: "scheme" }, STATUS_WAIT_MS);
+      if (scheme === null) continue;
+      if (scheme.kind === "err") throw new DeviceError(`The device said ${scheme.code}`, scheme.code);
+      if (scheme.kind !== "scheme") throw new DeviceError("The device gave the wrong response");
+      const status = scheme.scheme === "ml-dsa-44" ? await this.mlStatus() : await this.xmssStatus();
+      if (status) return status;
     }
     throw new DeviceError(`The device didn't answer after ${STATUS_TRIES} tries`);
   }
 
+  private async xmssStatus(): Promise<XmssStatus | null> {
+    const response = await this.exchange({ kind: "pubkey" }, STATUS_WAIT_MS);
+    if (response === null) return null;
+    if (response.kind === "err") throw new DeviceError(`The device said ${response.code}`, response.code);
+    if (response.kind !== "pubkey") throw new DeviceError("The device gave the wrong response");
+    return {
+      scheme: "xmss-keccak",
+      root: response.root,
+      pubSeed: response.pubSeed,
+      nextIndex: response.nextIndex,
+      tree: response.tree,
+      next: response.next,
+    };
+  }
+
+  private async mlStatus(): Promise<MlDsaStatus | null> {
+    const response = await this.exchange({ kind: "mlPubkey" }, STATUS_WAIT_MS);
+    if (response === null) return null;
+    if (response.kind === "err") throw new DeviceError(`The device said ${response.code}`, response.code);
+    if (response.kind !== "mlPubkey") throw new DeviceError("The device gave the wrong response");
+    return { scheme: "ml-dsa-44", publicKey: response.publicKey };
+  }
+
+  /** Asks for the stealth address. The device asks its owner to agree first. */
+  async stealthAddress(): Promise<Hex> {
+    const response = await this.request({ kind: "stealthAddress" }, LONG_WAIT_MS);
+    if (response.kind !== "stealthAddress") throw new DeviceError("The device gave the wrong response");
+    return response.address;
+  }
+
+  /** Asks for the view seed, which finds payments but can't spend them. Needs the passcode on the device. */
+  async viewKey(): Promise<Hex> {
+    const response = await this.request({ kind: "viewKey" }, LONG_WAIT_MS);
+    if (response.kind !== "viewKey") throw new DeviceError("The device gave the wrong response");
+    return response.view;
+  }
+
+  /** Asks the device to review and sign a spend of a stealth note. */
+  async spendStealth(spend: StealthSpend): Promise<Hex> {
+    const response = await this.request({ kind: "spendStealth", ...spend }, LONG_WAIT_MS);
+    if (response.kind !== "sig") throw new DeviceError("The device gave the wrong response");
+    return response.signature;
+  }
+
   /**
    * Asks the device to review and sign an unsigned frame transaction. Waits for the person to approve,
-   * up to LONG_WAIT_MS. Returns the 2,500-byte signature as 0x hex.
+   * up to LONG_WAIT_MS. Returns the signature as 0x hex: 2,500 bytes for XMSS, 2,420 for ML-DSA.
    */
   async signFrame(raw: Uint8Array): Promise<`0x${string}`> {
     const response = await this.request({ kind: "signFrame", raw }, LONG_WAIT_MS);
