@@ -590,3 +590,39 @@ impl Shape {
         raw
     }
 }
+
+const FACTORY: [u8; 20] = [0x33; 20];
+
+fn create() -> FrameTx {
+    let (root, pub_seed) = next_key();
+    FrameTx::create(SENDER, 0, FACTORY, root, pub_seed)
+}
+
+#[test]
+fn a_create_round_trips_and_puts_the_deploy_frame_first() {
+    let tx = create();
+    let raw = tx.encode(&[]);
+    assert_eq!(FrameTx::decode_unsigned(&raw), Ok(tx.clone()));
+    let frames = tx.frame_views();
+    assert_eq!(frames.len(), 3, "deploy, verify, spend");
+    assert_eq!(frames[0].mode, 0, "deploy frame is DEFAULT");
+    assert_eq!(frames[0].target, Some(FACTORY));
+    assert_eq!(&frames[0].data[..4], &[0x18, 0x38, 0x15, 0xc8], "createAccount selector");
+    assert_eq!(frames[1].mode, 1, "then the account's VERIFY frame");
+    assert_eq!(frames[2].mode, 2, "then the spend frame");
+    assert_eq!(tx.signing_message(), tx.sig_hash());
+}
+
+#[test]
+fn a_create_keeps_the_deploy_frame_inside_the_state_gas_budget() {
+    let frames = create().frame_views();
+    assert!(frames[0].state + frames[1].state <= 500_000, "validation prefix state gas");
+}
+
+#[test]
+fn a_deploy_frame_calling_something_else_is_refused() {
+    let mut raw = create().encode(&[]);
+    let selector = raw.windows(4).position(|w| w == [0x18, 0x38, 0x15, 0xc8]).expect("selector present");
+    raw[selector] ^= 1;
+    assert_eq!(FrameTx::decode_unsigned(&raw), Err(DecodeError));
+}

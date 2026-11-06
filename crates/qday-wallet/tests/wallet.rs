@@ -734,3 +734,18 @@ fn a_review_type_is_not_enough_to_sign_without_proof() {
     fn takes_proof(_: fn(&mut TestWallet, &Review, Proof) -> Result<[u8; 2500], WalletError>) {}
     takes_proof(TestWallet::sign);
 }
+
+const FACTORY: [u8; 20] = [0x33; 20];
+
+#[test]
+fn the_device_creates_only_its_own_account() {
+    let mut wallet = open(&fresh());
+    let key = wallet.active().expect("the wallet has a key").key;
+    let own = FrameTx::create(SENDER, 0, FACTORY, key.root, key.pub_seed).encode(&[]);
+    let review = wallet.review(&own).expect("its own account");
+    assert!(matches!(review.tx.action, Action::Create { .. }));
+    assert_eq!(review.message, review.tx.sig_hash());
+
+    let other = FrameTx::create(SENDER, 0, FACTORY, [0xaa; 32], key.pub_seed).encode(&[]);
+    assert_eq!(wallet.review(&other), Err(WalletError::BadRequest));
+}

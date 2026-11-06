@@ -17,6 +17,8 @@ pub enum Summary {
     },
     /// A rotation.
     Rotation,
+    /// The account's creation.
+    Creation,
     /// Anything else.
     Other,
 }
@@ -31,6 +33,7 @@ impl Summary {
                 value: *value,
             },
             Action::Rotate { .. } => Self::Rotation,
+            Action::Create { .. } => Self::Creation,
             Action::Other { .. } => Self::Other,
         }
     }

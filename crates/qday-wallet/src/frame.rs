@@ -16,6 +16,7 @@ pub type Address = [u8; 20];
 
 /// The first byte of the wire encoding.
 const TX_TYPE: u8 = 0x06;
+const MODE_DEFAULT: u64 = 0;
 const MODE_VERIFY: u64 = 1;
 const MODE_SENDER: u64 = 2;
 const VERIFY_FLAGS: u64 = 3;
@@ -25,6 +26,9 @@ const NONCE_KEY: u64 = 0;
 const VALIDATE_SELECTOR: [u8; 4] = [0x69, 0x01, 0xf6, 0x68];
 const SPEND_SELECTOR: [u8; 4] = [0x92, 0xf5, 0x9d, 0x73];
 const ROTATE_SELECTOR: [u8; 4] = [0xed, 0x29, 0x6e, 0x9c];
+/// `createAccount(bytes32,bytes32)` on the account factory.
+const CREATE_SELECTOR: [u8; 4] = [0x18, 0x38, 0x15, 0xc8];
+const CREATE_DATA_BYTES: usize = 68;
 const SPEND_DATA_BYTES: usize = 36;
 const ROTATE_DATA_BYTES: usize = 68;
 
@@ -33,6 +37,9 @@ const VERIFY_LIMITS: (u64, u64) = (300_000, 0);
 const SPEND_LIMITS: (u64, u64) = (50_000, 100_000);
 const TRANSFER_LIMITS: (u64, u64) = (50_000, 200_000);
 const ROTATE_LIMITS: (u64, u64) = (80_000, 200_000);
+/// A deploy frame runs in the validation prefix, so it must stay under the alt mempool's
+/// 500,000 state-gas budget. Creating a proxy account uses about 390,000 gas in all.
+const DEPLOY_LIMITS: (u64, u64) = (300_000, 400_000);
 
 /// "QDAY-ROTATE-V1", right-padded with zeros.
 const ROTATE_TAG: Hash = *b"QDAY-ROTATE-V1\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
@@ -53,6 +60,16 @@ pub enum Action {
         next_root: Hash,
         /// The next tree's public seed.
         next_pub_seed: Hash,
+    },
+    /// Creates the account: a deploy frame through `factory` goes first and there is no third frame.
+    /// The account pays for its own deployment from funds sent to its address beforehand.
+    Create {
+        /// The account factory.
+        factory: Address,
+        /// The first tree's root.
+        root: Hash,
+        /// The first tree's public seed.
+        pub_seed: Hash,
     },
     /// Anything else. The device shows a warning before signing one of these.
     Other {
@@ -95,6 +112,21 @@ impl FrameTx {
     #[must_use]
     pub fn transfer(sender: Address, nonce: u64, index: u32, to: Address, value: u128) -> Self {
         Self::new(sender, nonce, index, Action::Transfer { to, value })
+    }
+
+    /// The account's first transaction, which deploys it, with the default fees.
+    #[must_use]
+    pub fn create(sender: Address, index: u32, factory: Address, root: Hash, pub_seed: Hash) -> Self {
+        Self::new(
+            sender,
+            0,
+            index,
+            Action::Create {
+                factory,
+                root,
+                pub_seed,
+            },
+        )
     }
 
     /// A rotation with the default fees.
@@ -183,7 +215,7 @@ impl FrameTx {
                 next_root,
                 next_pub_seed,
             } => rotation_message(&sig_hash, next_root, next_pub_seed),
-            Action::Transfer { .. } | Action::Other { .. } => sig_hash,
+            Action::Transfer { .. } | Action::Create { .. } | Action::Other { .. } => sig_hash,
         }
     }
 
@@ -194,7 +226,7 @@ impl FrameTx {
     ///
     /// # Errors
     ///
-    /// Fails unless the bytes are the canonical encoding of an unsigned three-frame transaction.
+    /// Fails unless the bytes are the canonical encoding of an unsigned `QDay` transaction.
     pub fn decode_unsigned(raw: &[u8]) -> Result<Self, DecodeError> {
         let tx = Self::parse(raw).ok_or(DecodeError)?;
         if tx.encode(&[]) == raw {
@@ -219,9 +251,21 @@ impl FrameTx {
         let sender = Address::try_from(payload.bytes().ok()?).ok()?;
 
         let mut frames = payload.list().ok()?;
-        ParsedFrame::read(&mut frames)?;
-        let index = spend_index(ParsedFrame::read(&mut frames)?.data)?;
-        let action = ParsedFrame::read(&mut frames)?.into_action();
+        let first = ParsedFrame::read(&mut frames)?;
+        let (index, action) = if first.mode == MODE_DEFAULT {
+            let (factory, root, pub_seed) = first.create_call()?;
+            ParsedFrame::read(&mut frames)?;
+            let index = spend_index(ParsedFrame::read(&mut frames)?.data)?;
+            let action = Action::Create {
+                factory,
+                root,
+                pub_seed,
+            };
+            (index, action)
+        } else {
+            let index = spend_index(ParsedFrame::read(&mut frames)?.data)?;
+            (index, ParsedFrame::read(&mut frames)?.into_action())
+        };
         frames.finish().ok()?;
 
         payload.list().ok()?;
@@ -239,7 +283,7 @@ impl FrameTx {
         })
     }
 
-    /// The total gas limit of all three frames.
+    /// The total gas limit of all frames.
     #[must_use]
     pub fn gas_limit(&self) -> u128 {
         self.frames()
@@ -254,9 +298,39 @@ impl FrameTx {
         self.max_fee.saturating_mul(self.gas_limit())
     }
 
-    fn frames(&self) -> [Frame; 3] {
-        let spend_data = spend_call(self.index);
+    fn frames(&self) -> Vec<Frame> {
+        let verify = Frame {
+            mode: MODE_VERIFY,
+            flags: VERIFY_FLAGS,
+            target: None,
+            limits: VERIFY_LIMITS,
+            value: 0,
+            data: VALIDATE_SELECTOR.to_vec(),
+        };
+        let spend = Frame {
+            mode: MODE_SENDER,
+            flags: 0,
+            target: None,
+            limits: SPEND_LIMITS,
+            value: 0,
+            data: spend_call(self.index),
+        };
         let third = match &self.action {
+            Action::Create {
+                factory,
+                root,
+                pub_seed,
+            } => {
+                let deploy = Frame {
+                    mode: MODE_DEFAULT,
+                    flags: 0,
+                    target: Some(*factory),
+                    limits: DEPLOY_LIMITS,
+                    value: 0,
+                    data: create_call(root, pub_seed),
+                };
+                return alloc::vec![deploy, verify, spend];
+            }
             Action::Transfer { to, value } => Frame {
                 mode: MODE_SENDER,
                 flags: 0,
@@ -291,31 +365,15 @@ impl FrameTx {
                 data: data.clone(),
             },
         };
-        [
-            Frame {
-                mode: MODE_VERIFY,
-                flags: VERIFY_FLAGS,
-                target: None,
-                limits: VERIFY_LIMITS,
-                value: 0,
-                data: VALIDATE_SELECTOR.to_vec(),
-            },
-            Frame {
-                mode: MODE_SENDER,
-                flags: 0,
-                target: None,
-                limits: SPEND_LIMITS,
-                value: 0,
-                data: spend_data,
-            },
-            third,
-        ]
+        alloc::vec![verify, spend, third]
     }
 
     /// The frames in the form the submission JSON needs.
     #[must_use]
-    pub fn frame_views(&self) -> [FrameView; 3] {
-        self.frames().map(|frame| FrameView {
+    pub fn frame_views(&self) -> Vec<FrameView> {
+        self.frames()
+            .into_iter()
+            .map(|frame| FrameView {
             mode: frame.mode,
             flags: frame.flags,
             target: frame.target,
@@ -323,7 +381,8 @@ impl FrameTx {
             state: frame.limits.1,
             value: frame.value,
             data: frame.data,
-        })
+            })
+            .collect()
     }
 }
 
@@ -377,6 +436,7 @@ impl Frame {
 
 /// A frame as read from the wire.
 struct ParsedFrame<'a> {
+    mode: u64,
     target: Option<Address>,
     limits: (u64, u64),
     value: u128,
@@ -386,7 +446,7 @@ struct ParsedFrame<'a> {
 impl<'a> ParsedFrame<'a> {
     fn read(frames: &mut Reader<'a>) -> Option<Self> {
         let mut frame = frames.list().ok()?;
-        frame.uint().ok()?;
+        let mode = u64::try_from(frame.uint().ok()?).ok()?;
         frame.uint().ok()?;
         let target = match frame.bytes().ok()? {
             [] => None,
@@ -400,6 +460,7 @@ impl<'a> ParsedFrame<'a> {
         let data = frame.bytes().ok()?;
         frame.finish().ok()?;
         Some(Self {
+            mode,
             target,
             limits: (execution, state),
             value,
@@ -429,6 +490,20 @@ impl<'a> ParsedFrame<'a> {
             execution: self.limits.0,
             state: self.limits.1,
         }
+    }
+
+    /// Reads a deploy frame's factory and first key. Limits and flags are checked by the re-encoding.
+    fn create_call(&self) -> Option<(Address, Hash, Hash)> {
+        let factory = self.target?;
+        if self.value != 0
+            || self.data.len() != CREATE_DATA_BYTES
+            || !self.data.starts_with(&CREATE_SELECTOR)
+        {
+            return None;
+        }
+        let root = Hash::try_from(&self.data[4..36]).ok()?;
+        let pub_seed = Hash::try_from(&self.data[36..]).ok()?;
+        Some((factory, root, pub_seed))
     }
 
     fn rotate_key(&self) -> Option<(Hash, Hash)> {
@@ -463,6 +538,14 @@ fn spend_call(index: u32) -> Vec<u8> {
     data.extend_from_slice(&SPEND_SELECTOR);
     data.extend_from_slice(&[0; 28]);
     data.extend_from_slice(&index.to_be_bytes());
+    data
+}
+
+fn create_call(root: &Hash, pub_seed: &Hash) -> Vec<u8> {
+    let mut data = Vec::with_capacity(CREATE_DATA_BYTES);
+    data.extend_from_slice(&CREATE_SELECTOR);
+    data.extend_from_slice(root);
+    data.extend_from_slice(pub_seed);
     data
 }
 
