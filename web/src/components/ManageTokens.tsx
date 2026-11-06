@@ -80,20 +80,20 @@ export function ManageTokens({ tokens, onClose }: { tokens: TokenList; onClose: 
             value={address}
             onChange={(e) => setAddress(e.target.value.trim())}
             placeholder="Contract address (0x…)"
-            className="mt-3 w-full rounded-xl bg-surface-2 px-3 py-2.5 font-mono text-xs outline-none placeholder:text-muted focus:ring-1 focus:ring-slate"
+            className="mt-3 w-full rounded-xl bg-surface-2 px-3 py-2.5 font-mono text-xs outline-none placeholder:text-muted focus:ring-1 focus:ring-alabaster/25"
           />
           <div className="mt-2 flex gap-2">
             <input
               value={symbol}
               onChange={(e) => setSymbol(e.target.value)}
               placeholder="Symbol"
-              className="min-w-0 flex-1 rounded-xl bg-surface-2 px-3 py-2.5 text-sm outline-none placeholder:text-muted focus:ring-1 focus:ring-slate"
+              className="min-w-0 flex-1 rounded-xl bg-surface-2 px-3 py-2.5 text-sm outline-none placeholder:text-muted focus:ring-1 focus:ring-alabaster/25"
             />
             <input
               value={decimals}
               onChange={(e) => setDecimals(e.target.value.trim())}
               placeholder="Decimals"
-              className="w-24 rounded-xl bg-surface-2 px-3 py-2.5 text-sm outline-none placeholder:text-muted focus:ring-1 focus:ring-slate"
+              className="w-24 rounded-xl bg-surface-2 px-3 py-2.5 text-sm outline-none placeholder:text-muted focus:ring-1 focus:ring-alabaster/25"
             />
           </div>
           {address && !isAddress(address) && <div className="mt-2 text-xs text-bad">That isn't a contract address.</div>}

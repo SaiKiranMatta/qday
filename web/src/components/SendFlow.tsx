@@ -145,7 +145,7 @@ function DetailsForm({
         <span>Amount</span>
         <span className="tabular-nums">Balance {exactEth(balanceWei)} ETH</span>
       </label>
-      <div className="mt-2 flex items-center gap-3 rounded-2xl bg-surface-2 px-4 py-3 focus-within:ring-1 focus-within:ring-slate">
+      <div className="mt-2 flex items-center gap-3 rounded-2xl bg-surface-2 px-4 py-3 focus-within:ring-1 focus-within:ring-alabaster/25">
         <input
           id="send-amount"
           ref={amountRef}
@@ -181,7 +181,7 @@ function DetailsForm({
       <label htmlFor="send-to" className="mt-6 block text-xs text-muted">
         To
       </label>
-      <div className="mt-2 flex items-center gap-2 rounded-2xl bg-surface-2 py-1.5 pr-1.5 pl-4 focus-within:ring-1 focus-within:ring-slate">
+      <div className="mt-2 flex items-center gap-2 rounded-2xl bg-surface-2 py-1.5 pr-1.5 pl-4 focus-within:ring-1 focus-within:ring-alabaster/25">
         <input
           id="send-to"
           value={to}
@@ -258,7 +258,7 @@ function Summary({
 
       <dl className="mt-6 divide-y divide-line/60 rounded-2xl bg-surface-2 px-4 text-sm">
         <div className="flex flex-col gap-1 py-3 sm:flex-row sm:gap-4">
-          <dt className="w-20 shrink-0 text-muted">To</dt>
+          <dt className="w-20 shrink-0 leading-6 text-muted">To</dt>
           {/* Two whole lines, never rewrapped: they have to match the device's lines group for group. */}
           <dd className="font-mono text-[13px] leading-6 whitespace-nowrap tabular-nums">
             {line1}
@@ -305,7 +305,7 @@ function Summary({
           </span>
           <div className="min-w-0">
             <div className="text-sm font-medium">
-              {step.kind === "approve" ? "Approve on your QDay" : "Sending to the network"}
+              {step.kind === "approve" ? "Approve on your QDay" : "Submitting transaction…"}
             </div>
             <div className="mt-0.5 text-xs text-muted">
               {step.kind === "approve"
@@ -363,10 +363,10 @@ function Sent({
         <Row label="Status">
           <span className="text-ok">Confirmed in block {block.toLocaleString("en-US")}</span>
         </Row>
-        <div className="flex items-center gap-4 py-3">
+        <div className="flex items-baseline gap-4 py-3">
           <dt className="w-20 shrink-0 text-muted">Transaction</dt>
-          <dd className="flex min-w-0 flex-1 items-center justify-end gap-3">
-            <span className="truncate font-mono text-xs" title={hash}>
+          <dd className="flex min-w-0 flex-1 items-baseline gap-3">
+            <span className="min-w-0 flex-1 truncate font-mono text-xs" title={hash}>
               {shortHex(hash, 10, 8)}
             </span>
             <button onClick={copy} className="shrink-0 text-xs font-medium text-alabaster/80 hover:text-alabaster">

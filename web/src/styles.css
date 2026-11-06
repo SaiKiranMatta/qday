@@ -74,9 +74,15 @@ body {
   background: rgb(83 104 120 / 0.55);
   color: var(--color-alabaster);
 }
-:focus-visible {
-  outline: 2px solid var(--color-slate);
-  outline-offset: 2px;
+@layer base {
+  /* Keyboard focus on controls. Text fields don't get this: their container shows one quiet ring. */
+  :where(button, a, [role="button"], summary, input[type="checkbox"]):focus-visible {
+    outline: 2px solid var(--color-alabaster);
+    outline-offset: 2px;
+  }
+  :where(input, textarea, select):focus {
+    outline: none;
+  }
 }
 input,
 textarea {
