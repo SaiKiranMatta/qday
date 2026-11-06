@@ -1,20 +1,38 @@
 # Devnet notes
 
-What the runs on 2026-11-06 ran against.
+QDay runs on its own EIP-8141 devnet. The same chain setup runs in two places:
+
+| | Hosted | Local |
+|---|---|---|
+| Node RPC | `https://rpc-qday.unitlabs.xyz` | `http://127.0.0.1:8545` |
+| Gateway (frame transactions) | `https://gateway-qday.unitlabs.xyz/rpc` | `http://127.0.0.1:14337/rpc` |
+| Wallet | [qday.unitlabs.xyz](https://qday.unitlabs.xyz) | `pnpm dev` |
+| Start it | Always on ([deploy/coolify](../deploy/coolify)) | `tools/devnet/local/up.sh` |
 
 | Field | Value |
 |-------|-------|
-| Chain id | 1337 |
-| RPC URL | `http://127.0.0.1:14337/rpc` (mempool gateway), `http://127.0.0.1:8545` (ethrex) |
-| Explorer | None |
-| Funded key | The genesis premine key, kept outside the repository |
-| `web3_clientVersion` | `ethrex/v23.0.0-eip8141-tracer-9aa3645d795945c64400f41a70aace0edfa7f383/x86_64-unknown-linux-gnu/rustc-v1.93.1` |
-| Mempool rules | ERC-8421 sidecar, minimum stake 0.01 ETH |
-| Frame transaction accepted | Yes, see below |
+| Chain id | 1337, 6-second slots |
+| Clients | ethrex (`eip8141-tracer`) and Lighthouse, with the ERC-8421 gateway |
+| Explorer | Built into the wallet: `/tx/<hash>` decodes frame transactions |
+| Funded key | The devnet's premine key, public by design (`tools/devnet/local/up.sh`). Nothing of value lives here |
+| Gateway verify budget | Raised to 10,000,000 gas (the public rule is 100,000, too little for an XMSS check) |
+| Contracts | Factory `0xbCebAd3eCE45625983409B429406a5Dc8d38f876`, verifier `0xe0Ab78755c24867147473b12ffA430D24C1ed127`, USDC `0xd1108cBf3C5E7b44D7A58d4b2cdA492a0DDF6a72`, WBTC `0xb212346871a9a08494e165F5AeFe655f06A5B75F` (the same on every reset, through CREATE2) |
+| Smoke test | `tools/devnet/smoke.sh`: ETH and token transfers, approve, transferFrom, overspend refused (14 checks, passing on both) |
+
+## Signed on the device
+
+Transactions the ESP32-S3 approved and signed from the web wallet, 2026-11-06, read back with the
+built-in explorer.
+
+| Transaction | Total gas | Note |
+|---|---|---|
+| Create the account | 464,530 | Deploys the account (an EIP-1167 clone) and pays for it from its own balance |
+| Send 0.0001 ETH | 197,171 | VERIFY frame 123,577 |
+| Send 29.5 USDC | 207,094 | VERIFY frame 111,607; ERC-20 `transfer` decoded and shown on the device |
 
 ## Measured results
 
-Laptop key, 2026-11-06. Frame transactions go through the gateway with `eth_sendFrameTransaction`, and
+First runs with a laptop key, 2026-11-06. Frame transactions go through the gateway with `eth_sendFrameTransaction`, and
 ethrex itself doesn't have that method. The gateway has no `eth_feeHistory`, so plain transactions use
 legacy gas pricing.
 
