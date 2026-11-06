@@ -4,6 +4,9 @@ import { Badge, Button, StatusDot, Wordmark } from "./components/ui";
 import type { DeviceStatus } from "@qday/device";
 import { useAccount } from "./lib/useAccount";
 import { useCreateAccount } from "./lib/useCreateAccount";
+import { useSend } from "./lib/useSend";
+import { ReceiveModal } from "./components/ReceiveModal";
+import { SendModal } from "./components/SendModal";
 import { useDevice } from "./lib/useDevice";
 import { useTokens } from "./lib/useTokens";
 import { MOCK, MOCK_ACCOUNT } from "./lib/wallet";
@@ -105,6 +108,12 @@ function ConnectedApp({
   const setup = useCreateAccount(status, live.onChain?.address ?? null, signFrame, () => void live.refresh());
   const account = MOCK ? MOCK_ACCOUNT : live.account;
   const needsSetup = !MOCK && !live.onChain?.deployed;
+  const [dialog, setDialog] = useState<"send" | "receive" | null>(null);
+  const send = useSend(status, live.onChain?.deployed ? live.onChain : null, signFrame, () => void live.refresh());
+  const closeDialog = () => {
+    setDialog(null);
+    send.reset();
+  };
 
   return (
     <Shell page={page} onNavigate={setPage} status={status} account={account} onDisconnect={onDisconnect}>
@@ -126,9 +135,22 @@ function ConnectedApp({
                 }
               : null
           }
+          onSend={!MOCK && live.onChain?.deployed ? () => setDialog("send") : null}
+          onReceive={account.address !== "0x" ? () => setDialog("receive") : null}
           onOpenActivity={() => setPage("activity")}
         />
       )}
+      {dialog === "send" && (
+        <SendModal
+          balance={account.balance}
+          step={send.step}
+          onReview={(to, amount) => void send.review(to, amount)}
+          onConfirm={() => void send.confirm()}
+          onBack={send.reset}
+          onClose={closeDialog}
+        />
+      )}
+      {dialog === "receive" && account.address !== "0x" && <ReceiveModal address={account.address} onClose={closeDialog} />}
       {page === "activity" && <ActivityPage account={account} tokens={tokens} />}
       {page === "device" && <DevicePage status={status} log={log} onRefresh={onRefresh} />}
     </Shell>

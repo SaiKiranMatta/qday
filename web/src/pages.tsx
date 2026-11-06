@@ -20,6 +20,8 @@ export function WalletPage({
   chain,
   error,
   setup,
+  onSend,
+  onReceive,
   onOpenActivity,
 }: {
   account: AccountView;
@@ -35,6 +37,9 @@ export function WalletPage({
     onFund: () => void;
     onCreate: () => void;
   } | null;
+  /** Null while sending isn't possible (no account yet, or no device in mock mode). */
+  onSend: (() => void) | null;
+  onReceive: (() => void) | null;
   onOpenActivity: () => void;
 }) {
   const [managing, setManaging] = useState(false);
@@ -55,10 +60,10 @@ export function WalletPage({
               </div>
             )}
             <div className={`flex gap-3 ${setup ? "hidden" : ""}`}>
-              <Button variant="onyx" disabled title="Coming next">
+              <Button variant="onyx" disabled={!onSend} onClick={() => onSend?.()}>
                 Send
               </Button>
-              <Button variant="onyx" disabled title="Coming next">
+              <Button variant="onyx" disabled={!onReceive} onClick={() => onReceive?.()}>
                 Receive
               </Button>
             </div>
