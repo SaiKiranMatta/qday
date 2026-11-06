@@ -1,8 +1,9 @@
 import type { DeviceStatus } from "@qday/device";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityScanner } from "./activity";
 import { type OnChainAccount, RPC_URL, accountAddress, readAccount } from "./chain";
 import { NATIVE_ID, type Token } from "./tokens";
-import { type AccountView, EMPTY_ACCOUNT } from "./wallet";
+import { type AccountView, type ActivityItem, EMPTY_ACCOUNT } from "./wallet";
 
 const POLL_MS = 6_000; // one devnet block
 
@@ -13,6 +14,8 @@ export function useAccount(status: DeviceStatus | null, tokens: Token[]) {
   const [onChain, setOnChain] = useState<OnChainAccount | null>(null);
   const [chain, setChain] = useState<ChainState>("loading");
   const [error, setError] = useState<string | null>(null);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const scanner = useRef<{ key: string; scan: ActivityScanner } | null>(null);
 
   const root = status?.root ?? null;
   const pubSeed = status?.pubSeed ?? null;
@@ -38,6 +41,13 @@ export function useAccount(status: DeviceStatus | null, tokens: Token[]) {
       setOnChain(next);
       setChain("live");
       setError(null);
+      const key = `${address}|${tokens.map((t) => t.id).join(",")}`;
+      if (scanner.current?.key !== key) scanner.current = { key, scan: new ActivityScanner(address, tokens) };
+      try {
+        setActivity(await scanner.current.scan.update());
+      } catch (e) {
+        console.warn("[qday] activity scan failed; will retry", e);
+      }
     } catch (e) {
       console.error("[qday] chain read failed", { rpc: RPC_URL, error: e });
       setError(e instanceof Error ? e.message : String(e));
@@ -64,7 +74,7 @@ export function useAccount(status: DeviceStatus | null, tokens: Token[]) {
         address: onChain.address,
         balance: onChain.balances[NATIVE_ID] ?? "0",
         balances: onChain.balances,
-        activity: [],
+        activity,
       }
     : EMPTY_ACCOUNT;
 

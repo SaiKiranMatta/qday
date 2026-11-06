@@ -7,7 +7,7 @@ export interface TokenAmount {
   value: string;
 }
 
-export type ActivityKind = "sent" | "received" | "refresh" | "refused";
+export type ActivityKind = "sent" | "received" | "created" | "refresh" | "refused";
 
 export interface ActivityItem {
   id: string;

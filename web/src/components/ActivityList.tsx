@@ -5,6 +5,7 @@ import { TokenLogo } from "./TokenLogo";
 const LABEL: Record<ActivityKind, string> = {
   sent: "Sent",
   received: "Received",
+  created: "Account created",
   refresh: "Keys refreshed",
   refused: "Rejected on device",
 };
@@ -54,7 +55,9 @@ export function ActivityList({
                   <div className="truncate text-xs text-muted">
                     {item.counterparty
                       ? `${item.kind === "received" ? "From" : "To"} ${item.counterparty}`
-                      : "New keys are active"}
+                      : item.kind === "created"
+                        ? "Your account is ready"
+                        : "New keys are active"}
                   </div>
                 </div>
                 <div className="text-right">
@@ -81,6 +84,7 @@ export function ActivityList({
 const PATH: Record<ActivityKind, string> = {
   sent: "M5 11 11 5M6 5h5v5",
   received: "M11 5 5 11M10 11H5V6",
+  created: "M8 3v10M3 8h10",
   refresh: "M3.5 8a4.5 4.5 0 0 1 8-2.8M12.5 8a4.5 4.5 0 0 1-8 2.8M11.5 2.5v3h-3M4.5 13.5v-3h3",
   refused: "m5 5 6 6M11 5l-6 6",
 };
