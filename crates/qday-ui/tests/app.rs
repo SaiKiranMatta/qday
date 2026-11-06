@@ -878,6 +878,24 @@ fn the_switch_survives_a_restart() {
 }
 
 #[test]
+fn switching_back_works_after_signing_with_ml_dsa() {
+    let mut rig = switched_rig();
+    rig.request(&Request::SignFrame(ml_raw(1000)));
+    rig.approve(CODE);
+    assert!(matches!(rig.last_response(), Response::Sig { .. }));
+    rig.wait(2600);
+    rig.request(&Request::Scheme);
+    assert_eq!(rig.last_response(), Response::Scheme(Scheme::MlDsa44));
+
+    start_switch(&mut rig);
+    rig.approve(CODE);
+    rig.wait(2600);
+    assert_eq!(saved_scheme(&rig), Scheme::Xmss);
+    rig.request(&Request::Scheme);
+    assert_eq!(rig.last_response(), Response::Scheme(Scheme::Xmss));
+}
+
+#[test]
 fn switching_back_returns_to_the_same_xmss_key() {
     let mut rig = rig();
     rig.press(3);
