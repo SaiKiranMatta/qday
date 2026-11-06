@@ -1,7 +1,9 @@
 // Signature schemes the app knows about. Screens read these descriptors instead of assuming XMSS,
 // so adding a scheme means adding an entry here (and its signer and verifier elsewhere).
 
-export type SchemeId = "xmss-keccak";
+import type { SchemeId } from "@qday/device";
+
+export type { SchemeId };
 
 export interface SchemeDescriptor {
   id: SchemeId;
@@ -27,5 +29,12 @@ export const SCHEMES: Record<SchemeId, SchemeDescriptor> = {
     keysPerTree: 1024,
     reservedPerTree: 16,
     signatureBytes: 2500,
+  },
+  "ml-dsa-44": {
+    id: "ml-dsa-44",
+    name: "ML-DSA-44",
+    family: "lattice",
+    stateful: false,
+    signatureBytes: 2420,
   },
 };

@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { formatAmount } from "../lib/chain";
 import { txUrl } from "../lib/explorer";
 import { addressLines, exactEth, exactUnits, parseAmount, shortHex } from "../lib/format";
+import { isStealthAddress } from "../lib/stealth";
 import { KNOWN_TOKENS, NATIVE_ID, type Token, isAddress } from "../lib/tokens";
 import { type Draft, type SendFees, type SendStep, feeFor } from "../lib/useSend";
 import { Icon } from "./icons";
@@ -140,19 +141,21 @@ function DetailsForm({
   const amountRef = useRef<HTMLInputElement>(null);
   useEffect(() => amountRef.current?.focus(), [token.id]);
 
-  const validTo = isAddress(to);
+  const stealth = isStealthAddress(to);
+  const validTo = isAddress(to) || stealth;
   const toSelf = validTo && to.toLowerCase() === ownAddress.toLowerCase();
   const native = token.address === null;
   const balance = balances[token.id] ?? 0n;
   const ethBalance = balances[NATIVE_ID] ?? 0n;
-  const fee = fees ? feeFor(fees, token) : null;
+  const fee = fees ? feeFor(fees, token, to) : null;
   const value = parseAmount(amount, token.decimals);
   // A well-formed number that has more decimal places than the token.
   const tooPrecise = value === null && /^\d*\.\d+$/.test(amount);
   const tooMuch = value !== null && (native ? fee !== null && value + fee > balance : value > balance);
   const noFee = !native && fee !== null && fee > ethBalance;
   const max = native ? (fee !== null && balance > fee ? balance - fee : 0n) : balance;
-  const ready = validTo && !toSelf && value !== null && value > 0n && !tooMuch && !noFee;
+  const stealthToken = stealth && !native;
+  const ready = validTo && !toSelf && !stealthToken && value !== null && value > 0n && !tooMuch && !noFee;
   const pickerBalances = Object.fromEntries(tokens.map((t) => [t.id, formatAmount(balances[t.id] ?? 0n, t.decimals)]));
 
   const note = tooPrecise
@@ -231,9 +234,13 @@ function DetailsForm({
         </button>
       </div>
       <div className="mt-2 min-h-5 font-mono text-xs" aria-live="polite">
-        {to && !validTo && <span className="font-sans text-bad">Enter a full 0x address, 42 characters.</span>}
+        {to && !validTo && (
+          <span className="font-sans text-bad">Enter a full 0x address of 42 characters, or a private address.</span>
+        )}
         {toSelf && <span className="font-sans text-warn">That's this account. Send to a different address.</span>}
-        {validTo && !toSelf && (
+        {stealthToken && <span className="font-sans text-bad">Private payments can only send ETH.</span>}
+        {stealth && !stealthToken && <span className="font-sans text-muted">Private address {shortHex(to, 6, 4)}</span>}
+        {validTo && !stealth && !toSelf && (
           <span className="text-muted">
             {addressLines(to)[0]} {addressLines(to)[1]}
           </span>
@@ -253,6 +260,7 @@ function DetailsForm({
 function sending(draft: Draft) {
   const { action } = draft.tx;
   if (action.kind === "transfer") return { value: BigInt(action.valueWei), to: action.to, contract: null, deviceKnows: true };
+  if (action.kind === "stealthPay") return { value: BigInt(action.valueWei), to: action.pool, contract: null, deviceKnows: true };
   if (action.kind === "token") {
     return { value: BigInt(action.amount), to: action.to, contract: action.token, deviceKnows: action.symbol !== null };
   }
@@ -297,7 +305,8 @@ function Summary({
 
       <dl className="mt-6 divide-y divide-line/60 rounded-2xl bg-surface-2 px-4 text-sm">
         {send.contract && !send.deviceKnows && <AddressRow label="Token" address={send.contract} />}
-        <AddressRow label="To" address={send.to} />
+        {step.draft.stealth && <Row label="To">A private address</Row>}
+        <AddressRow label={step.draft.stealth ? "Pool" : "To"} address={send.to} />
         <Row label="Network">{DEVICE_NETWORK}</Row>
         <Row label="Fee">Up to {exactEth(fee)} ETH</Row>
         {!send.contract && (
@@ -311,7 +320,9 @@ function Summary({
         <>
           <p className="mt-4 flex items-start gap-2.5 text-xs leading-relaxed text-muted">
             <DeviceIcon className="mt-0.5 size-4 shrink-0 text-alabaster/70" />
-            Your QDay shows the same amount and address. Approve on the device only if every group matches.
+            {step.draft.stealth
+              ? "Your QDay shows the amount and the pool, because nothing on chain says who this is for. Check the private address you pasted before you approve."
+              : "Your QDay shows the same amount and address. Approve on the device only if every group matches."}
           </p>
           {step.error && <Notice tone="bad">{step.error}</Notice>}
           <div className="mt-5 flex gap-3">
@@ -405,7 +416,11 @@ function Result({ step, onClose }: { step: Extract<SendStep, { kind: "submitting
 
         <div className="mt-5 text-2xl font-semibold tracking-tight tabular-nums">{done ? `${amount} sent` : `Sending ${amount}`}</div>
         <div className="mt-1 text-sm text-muted">
-          {done ? `to ${shortHex(send.to, 6, 4)}` : "Confirming on the devnet, usually a few seconds."}
+          {done
+            ? step.draft.stealth
+              ? "to a private address"
+              : `to ${shortHex(send.to, 6, 4)}`
+            : "Confirming on the devnet, usually a few seconds."}
         </div>
       </div>
 

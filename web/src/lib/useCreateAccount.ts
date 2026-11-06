@@ -3,6 +3,7 @@ import { loadFrame } from "@qday/frame";
 import { useCallback, useState } from "react";
 import { hexToBytes } from "viem";
 import { FACTORY, requestTestEth, submitFrameTx } from "./chain";
+import { deployMlAccount } from "./mlAccount";
 import type { Address } from "./tokens";
 
 export type SetupStep =
@@ -10,6 +11,8 @@ export type SetupStep =
   | { kind: "funding" }
   | { kind: "approve" }
   | { kind: "submitting" }
+  /** An ML-DSA account only: the dev key is deploying it, which takes two large transactions. */
+  | { kind: "deploying" }
   | { kind: "done"; block: number }
   | { kind: "error"; message: string };
 
@@ -24,7 +27,8 @@ function message(error: unknown): string {
 /**
  * Funding and creating the account. Creation is the account's own first transaction: the browser
  * builds it with the device's frame code, the device signs it, and the account pays for its own
- * deployment from the funds already at its address.
+ * deployment from the funds already at its address. An ML-DSA account is too big for that: its key
+ * alone is a 20 KB contract, so the devnet's dev key deploys it and the device isn't involved.
  */
 export function useCreateAccount(
   status: DeviceStatus,
@@ -49,6 +53,13 @@ export function useCreateAccount(
   const create = useCallback(async () => {
     if (!address) return;
     try {
+      if (status.scheme === "ml-dsa-44") {
+        setStep({ kind: "deploying" });
+        const block = await deployMlAccount(status.publicKey);
+        setStep({ kind: "done", block });
+        onChanged();
+        return;
+      }
       const frame = await loadFrame();
       const raw = frame.createTx(address, status.nextIndex, FACTORY, status.root, status.pubSeed);
       console.info("[qday] create account", frame.describe(raw), "signs", frame.signingMessage(raw));
