@@ -32,6 +32,8 @@
   --animate-tick: tick 420ms var(--ease-out) backwards;
   --animate-breathe: breathe 2.8s ease-in-out infinite;
   --animate-grow: grow 900ms var(--ease-out) 120ms backwards;
+  /* The send ring closing into a full circle; 233 is its circumference (r = 37). */
+  --animate-draw: draw 700ms var(--ease-out) both;
 
   @keyframes enter {
     from {
@@ -73,6 +75,11 @@
       transform: translateY(5px);
     }
   }
+  @keyframes draw {
+    from {
+      stroke-dashoffset: 233;
+    }
+  }
   @keyframes grow {
     from {
       transform: scaleX(0);
@@ -102,6 +109,7 @@
     --animate-tick: fade 200ms ease-out backwards;
     --animate-breathe: none;
     --animate-grow: fade 200ms ease-out backwards;
+    --animate-draw: fade 200ms ease-out both;
   }
 }
 
