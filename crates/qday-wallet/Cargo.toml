@@ -11,5 +11,8 @@ qday-mldsa = { path = "../qday-mldsa" }
 qday-xmss = { path = "../qday-xmss" }
 zeroize = { version = "1.8", default-features = false }
 
+[dev-dependencies]
+serde_json = "1"
+
 [lints]
 workspace = true

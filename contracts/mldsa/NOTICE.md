@@ -12,6 +12,10 @@ This folder is a vendored copy of `evm-ml-dsa-verifier`, commit `cca262b`, under
 2. **`test/QDayMempoolScan.t.sol`:** new. It scans the deployed bytecode and fails on any GAS not
    directly before a CALL-family opcode, or on any other opcode the mempool bans.
 
+3. **`src/MLDSA44InlineVerifier.sol`:** new, a copy of `src/MLDSA44Verifier.sol` that takes `tr` and
+   `t1hat` from calldata and `Ahat` from a shared 16,385-byte data contract. Keys can then share one
+   matrix and need no blob of their own. The checks themselves are unchanged.
+
 `helpers/f1600_170.hex` is unchanged, because its code hash is pinned.
 
 ## What the patch breaks

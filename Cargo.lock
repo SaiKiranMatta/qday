@@ -538,6 +538,7 @@ dependencies = [
  "bip39",
  "qday-mldsa",
  "qday-xmss",
+ "serde_json",
  "zeroize",
 ]
 
