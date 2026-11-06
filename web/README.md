@@ -1,7 +1,7 @@
 # QDay web wallet
 
-The browser side of QDay: connect the device over USB, create the account, send ETH and tokens, and
-read what happened. Live at **[qday.unitlabs.xyz](https://qday.unitlabs.xyz)** on QDay's hosted
+The browser side of QDay: connect the device over USB, create the account (XMSS or ML-DSA-44), send
+ETH and tokens, pay and claim private payments, and read what happened. Live at **[qday.unitlabs.xyz](https://qday.unitlabs.xyz)** on QDay's hosted
 devnet.
 
 ![The wallet](../docs/images/web-wallet.png)
@@ -26,16 +26,32 @@ including a button that plays the whole flow.
 | `hosted` | `rpc-qday.unitlabs.xyz` | `gateway-qday.unitlabs.xyz/rpc` | Built-in faucet and test tokens |
 | `public` | the shared alt-mempool devnet | its gateway | Its faucet |
 
+ML-DSA accounts and private payments need a network with a funded dev key, because that key deploys
+ML-DSA accounts and submits claims: `local` and `hosted`, not `public`.
+
+| Variable | What it does |
+|---|---|
+| `VITE_QDAY_NETWORK` | `local`, `hosted` or `public` |
+| `VITE_QDAY_DEV_KEY` | The funded key on a local devnet not started by `tools/devnet/local/up.sh` |
+| `VITE_QDAY_STAKING_REGISTRY` | Where ML-DSA accounts stake. `hosted` has its own; set it for a local devnet |
+| `VITE_QDAY_EXPLORER` | Point transaction links at another explorer instead of the built-in one |
+
 ## What it does
 
 - **Connect.** Over Web Serial, with the device's own text protocol (`packages/device`). Disconnect
   makes the browser forget the port, so a reload stays disconnected.
 - **Create the account.** The address comes from the device's key through the factory before anything
   is deployed. Get test ETH, then approve **Create account** on the device; the account pays for its
-  own deployment.
+  own deployment. With the device switched to ML-DSA-44, the wallet shows that scheme's account
+  instead, and the dev key deploys it (the key is too large for the account to deploy itself).
 - **Send ETH or a token.** Pick the token, the amount and the recipient, compare the review with the
   device's screen, approve on the device, and watch it go: signed, submitted with its hash, confirmed
   in block N.
+- **Private payments.** **Receive**, then **Private**, asks the device for the private address and
+  the view key. Pasting a private address into **Send** pays it through the lattice pool. The wallet
+  scans the pool every block with the view key, lists what it finds under **Private payments**, and
+  **Claim** sends a whole note to any address: the device signs, the dev key submits and is repaid
+  from the note. ETH only.
 - **See activity.** Read from the chain, with no indexer: own transactions, incoming ETH and ERC-20
   transfers.
 - **Explore any transaction.** `/tx/<hash>` decodes a frame transaction frame by frame (verify, spend a
@@ -66,6 +82,8 @@ including a button that plays the whole flow.
 | `src/lib/useSend.ts`, `src/lib/useCreateAccount.ts` | The send and account-creation flows |
 | `src/lib/useDevice.ts` | The device connection |
 | `src/lib/schemes.ts` | Signature schemes as data, so screens don't assume XMSS |
+| `src/lib/mlAccount.ts` | Where an ML-DSA account will be, and deploying it with the dev key |
+| `src/lib/useStealth.ts`, `src/lib/stealth.ts`, `src/components/ClaimModal.tsx` | Private payments: setup, scanning and claiming |
 
 ## Checks
 

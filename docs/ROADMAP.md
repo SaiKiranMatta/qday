@@ -20,6 +20,30 @@ hold real funds. Everything under **Built** runs now; each line points at where 
   (`contracts/src/QDayAccountFactory.sol`, EIP-1167 clones).
 - **Rotation at the same address**: keys 1008 to 1023 can only switch the account to a new tree.
 
+### A second scheme: ML-DSA-44
+
+- **ML-DSA-44 signing on the device** (NIST FIPS 204, through the `fips204` crate), from the same seed
+  as XMSS, with the public key kept in flash so showing it needs no passcode (`crates/qday-mldsa`,
+  `crates/qday-wallet/src/mlkey.rs`).
+- **Switching schemes on the device**, after approval: switching back finds the XMSS key and counter
+  unchanged, checked on the board.
+- **On-chain verification at about 1.23M gas**, with Fireblocks' verifier, patched so the mempool
+  accepts it during validation (`contracts/mldsa`, [NOTICE](../contracts/mldsa/NOTICE.md)).
+- **An ML-DSA account and factory** that bind the verifier and the key contract by code hash and
+  stake in the mempool's registry (`contracts/src/QDayMlDsaAccount.sol`, `QDayMlDsaFactory.sol`).
+- **In the web wallet**: create the ML-DSA account and send ETH from it.
+
+### Private payments
+
+- **A post-quantum stealth address**: X-Wing (ML-KEM-768 with X25519) gives payer and owner a shared
+  secret that turns the owner's published ML-DSA key into a one-time key (`crates/qday-wallet/src/stealth.rs`).
+- **A shared pool** that holds each payment under its key's hash and pays it out once, for a signature
+  from the one-time key; nothing is deployed per payment (`contracts/src/QDayLatticePool.sol`).
+- **Finding and spending kept apart**: the view key finds payments in the browser and can't spend;
+  the claim is signed on the device.
+- **In the web wallet**: share the private address, pay one from **Send**, see payments arrive, claim
+  them to any address.
+
 ### The device
 
 - **ESP32-S3 firmware** that decodes every transaction itself and shows what it will sign: ETH
@@ -48,7 +72,8 @@ hold real funds. Everything under **Built** runs now; each line points at where 
 ### The network
 
 - **A hosted EIP-8141 devnet** that stays up: ethrex and Lighthouse on chain 1337, the ERC-8421
-  gateway, and QDay's contracts at fixed addresses (`deploy/coolify`).
+  gateway, and all of QDay's contracts at fixed addresses, the ML-DSA and pool contracts included
+  (`deploy/coolify`).
 - **A local devnet** in one command for development (`tools/devnet/local/up.sh`).
 
 ## Next
@@ -66,8 +91,15 @@ In rough order of value for the people who would use it.
    on the device.
 5. **Hardware rollback protection.** A flash counter can be dumped and restored; an eFuse high-water
    mark or a secure element closes that ([R8](risks-and-blockers.md)).
-6. **More signature schemes.** The wallet already describes schemes as data
-   (`web/src/lib/schemes.ts`), so a lattice or stateless hash-based scheme can sit beside XMSS.
+6. **Tokens for ML-DSA accounts and private payments.** Both carry ETH only today.
+7. **No dev key in the loop.** On the devnet a funded dev key deploys ML-DSA accounts and submits
+   private-payment claims. Anyone may already submit a claim and is repaid from the note, so a public
+   relayer can take that over; deploying accounts needs a paymaster or a cheaper account (below).
+8. **Show who a private payment is for.** The device shows the amount and the pool; it should show a
+   fingerprint of the private address too, so a page can't swap it unseen.
+9. **A cheaper ML-DSA account.** About 37M gas to deploy, almost all of it the key, because code costs
+   about 1,555 gas per byte on the devnet; a shared key contract per device, or a precompile, would cut
+   it.
 
 ## Before real funds
 
@@ -75,7 +107,9 @@ These are outside the code, and none is done:
 
 - **EIP-8141 on mainnet.** It is a draft, considered for the Hegotá upgrade; until then QDay runs on
   devnets only ([fact-check](fact-check.md), item 6).
-- **An independent audit** of the signature scheme, the verifier and the account.
+- **An independent audit** of the signature scheme, both verifiers, the accounts and the pool.
+- **A review of the one-time ML-DSA signer** used for private payments, which is QDay's own unreviewed
+  variant, and of the privacy assumption that ML-KEM ciphertexts don't reveal their recipient.
 - **A certified secure element** to meet NIST SP 800-208's requirement for stateful hash-based
   signatures ([fact-check](fact-check.md), item 15).
 - **A standard key derivation**: QDay derives tree secrets from BIP39 entropy with its own keccak256
