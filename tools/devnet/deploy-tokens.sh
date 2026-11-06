@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Deploys the test USDC and WBTC tokens through the CREATE2 factory, so they land at the same
 # addresses after every devnet reset. Safe to rerun: tokens already deployed are skipped.
-# Needs: solc 0.8.28+, cast, and ../../.env (ask Sainath for the team key).
+# Needs: solc 0.8.28+, cast, and ../../.env (ask Sainath for the team key), or QDAY_RPC_URL and
+# QDAY_DEPLOY_KEY, e.g. for the local devnet: QDAY_RPC_URL=http://127.0.0.1:8545 QDAY_DEPLOY_KEY=<premine key>.
 set -euo pipefail
 cd "$(dirname "$0")"
-set -a; source ../../.env; set +a
+if [ -z "${QDAY_RPC_URL:-}" ] || [ -z "${QDAY_DEPLOY_KEY:-}" ]; then set -a; source ../../.env; set +a; fi
+DEVNET_RPC_URL=${QDAY_RPC_URL:-$DEVNET_RPC_URL}
+TEAM_PRIVATE_KEY=${QDAY_DEPLOY_KEY:-$TEAM_PRIVATE_KEY}
+export ETH_RPC_TIMEOUT=30   # seconds per RPC call
 
 FACTORY=0x4e59b44847b379578588920cA78FbF26c0B4956C
 SALT=$(cast keccak "qday-devnet-tokens-v1")
