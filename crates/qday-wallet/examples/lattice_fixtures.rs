@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use qday_mldsa::Signer;
 use qday_mldsa::blob::{key_part, prepare};
 use qday_mldsa::stealth::Master;
-use qday_wallet::invoice::spend_hash;
+use qday_wallet::stealth::spend_hash;
 use qday_xmss::{Hash, keccak256};
 
 const VERIFIER: &str = "contracts/mldsa/out/MLDSA44InlineVerifier.sol/MLDSA44InlineVerifier.json";

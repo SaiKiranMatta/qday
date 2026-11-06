@@ -9,7 +9,6 @@ use qday_mldsa::{KeySeed, PublicKey, Signer, StandardSigner, verify};
 use qday_wallet::counter::{FlashCounter, OneWayCounter};
 use qday_wallet::flash::layout;
 use qday_wallet::frame::{FrameTx, MlFrameTx};
-use qday_wallet::invoice::SpendLog;
 use qday_wallet::keystore::{KeyStore, StoreError};
 use qday_wallet::mlkey::MlKeyStore;
 use qday_wallet::passcode::{Attempt, Code, Passcode, Proof};
@@ -36,7 +35,6 @@ fn open(flash: &SimFlash) -> TestWallet {
         FlashCounter::new(flash.clone(), layout::COUNTER),
         Settings::new(flash.clone()),
         MlKeyStore::new(flash.clone()),
-        SpendLog::new(flash.clone()),
         0,
     )
     .expect("the flash is healthy")

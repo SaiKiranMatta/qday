@@ -13,12 +13,6 @@ const R_AT: usize = 4;
 const CHAINS_AT: usize = R_AT + 32;
 const AUTH_AT: usize = CHAINS_AT + CHAINS * 32;
 
-/// Length of an encoded one-time signature: `r`, then the chain values.
-pub const ONE_TIME_SIG_BYTES: usize = 32 + CHAINS * 32;
-
-/// A one-time key on its own is the first key of its set.
-const ONE_TIME_LEAF: u32 = 0;
-
 /// A tree's public key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PublicKey {
@@ -68,50 +62,6 @@ impl KeySet {
         out[AUTH_AT..].copy_from_slice(auth.as_flattened());
         Ok(out)
     }
-}
-
-impl KeySet {
-    /// Signs `message` with this set's first one-time key, on its own with no tree. The result is
-    /// deterministic, and signing two different messages with one key breaks the scheme, so the
-    /// caller must make sure only one message ever reaches this.
-    #[must_use]
-    pub fn sign_one_time(&self, message: &Hash) -> [u8; ONE_TIME_SIG_BYTES] {
-        let wide_index = u256(ONE_TIME_LEAF);
-        let r = keccak256(&[&self.prf_key, &wide_index]);
-        let digest = message_digest(&r, &self.leaf(ONE_TIME_LEAF), &wide_index, message);
-
-        let mut out = [0; ONE_TIME_SIG_BYTES];
-        out[..32].copy_from_slice(&r);
-        let slots = out[32..].chunks_exact_mut(32);
-        for ((chain, slot), digit) in (0..).zip(slots).zip(digits(&digest)) {
-            let start = self.chain_start(ONE_TIME_LEAF, chain);
-            let value = advance(self.pub_seed(), ONE_TIME_LEAF, chain, 0, digit, &start);
-            slot.copy_from_slice(&value);
-        }
-        out
-    }
-}
-
-/// Checks a one-time signature against a key's leaf. Anything malformed is simply not valid.
-#[must_use]
-pub fn verify_one_time(leaf: &Hash, pub_seed: &Hash, message: &Hash, signature: &[u8]) -> bool {
-    let Ok(signature) = <&[u8; ONE_TIME_SIG_BYTES]>::try_from(signature) else {
-        return false;
-    };
-    let digest = message_digest(&hash_at(signature, 0), leaf, &u256(ONE_TIME_LEAF), message);
-    let mut ends = [[0; 32]; CHAINS];
-    for (chain, (end, digit)) in (0..).zip(ends.iter_mut().zip(digits(&digest))) {
-        let value = hash_at(signature, 32 + chain as usize * 32);
-        *end = advance(
-            pub_seed,
-            ONE_TIME_LEAF,
-            chain,
-            digit,
-            MAX_DIGIT - digit,
-            &value,
-        );
-    }
-    leaf_hash(pub_seed, ONE_TIME_LEAF, &ends) == *leaf
 }
 
 /// Checks a signature. Anything malformed is simply not valid.
@@ -166,7 +116,7 @@ fn u256(index: u32) -> Hash {
 }
 
 /// Copies the 32 bytes at `offset`.
-fn hash_at(signature: &[u8], offset: usize) -> Hash {
+fn hash_at(signature: &[u8; SIG_BYTES], offset: usize) -> Hash {
     let mut out = [0; 32];
     out.copy_from_slice(&signature[offset..offset + 32]);
     out

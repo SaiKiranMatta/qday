@@ -8,13 +8,11 @@ use anyhow::{Context, Result, anyhow, bail};
 use qday_mldsa::SIGNATURE_BYTES;
 use qday_wallet::frame::{Address, FrameTx, MlFrameTx};
 use qday_wallet::hex;
-use qday_wallet::invoice::{Invoice, Spend};
 use qday_wallet::protocol::{
     NextKey, PREFIX, Request, Response, error_code, parse_response, request_line, scheme_name,
 };
 use qday_wallet::settings::Scheme;
 use qday_wallet::stealth::StealthSpend;
-use qday_xmss::ONE_TIME_SIG_BYTES;
 use serde_json::Value;
 
 use crate::json;
@@ -173,26 +171,6 @@ impl<P: Read + Write> Device<P> {
         }
     }
 
-    /// Asks the device for an invoice's key, which the person has to agree to.
-    pub fn invoice(&mut self, number: u32) -> Result<Invoice> {
-        self.scheme()?;
-        match self.request(&Request::Invoice(number))? {
-            Response::Invoice(invoice) if invoice.number == number => Ok(invoice),
-            _ => bail!("the device gave the wrong response"),
-        }
-    }
-
-    /// Signs a spend of an invoice's note on the device.
-    pub fn spend_invoice(&mut self, spend: Spend) -> Result<Vec<u8>> {
-        self.scheme()?;
-        match self.request(&Request::SpendInvoice(spend))? {
-            Response::Sig { signature, .. } if signature.len() == ONE_TIME_SIG_BYTES => {
-                Ok(signature)
-            }
-            _ => bail!("the device gave the wrong response"),
-        }
-    }
-
     /// Asks the device for its stealth address, which the person has to agree to.
     pub fn stealth_address(&mut self) -> Result<Vec<u8>> {
         self.scheme()?;
@@ -322,7 +300,6 @@ mod tests {
     use std::io::{Error, ErrorKind, Read, Result, Write};
 
     use qday_wallet::frame::{Action, FrameTx, MlFrameTx};
-    use qday_wallet::invoice::{Invoice, Spend};
     use qday_wallet::protocol::{Request, Response, parse_request, response_line};
     use qday_wallet::settings::Scheme;
     use qday_wallet::stealth::StealthSpend;
@@ -534,85 +511,6 @@ mod tests {
             .restore([5; 32], 0, 0)
             .expect("the device restores");
         assert_eq!(fake.requests[0], Request::Scheme);
-    }
-
-    fn spend() -> Spend {
-        Spend {
-            number: 4,
-            pool: SENDER,
-            to: TO,
-            fee: 1000,
-        }
-    }
-
-    #[test]
-    fn invoice_says_hello_with_scheme_then_asks() {
-        let invoice = Invoice {
-            number: 4,
-            leaf: [1; 32],
-            pub_seed: [2; 32],
-        };
-        let mut fake = FakeDevice::new(vec![
-            Some(Response::Scheme(Scheme::Xmss)),
-            Some(Response::Invoice(invoice)),
-        ]);
-        let got = Device::new(&mut fake).invoice(4).expect("it answers");
-        assert_eq!(got, invoice);
-        assert_eq!(fake.requests, [Request::Scheme, Request::Invoice(4)]);
-    }
-
-    #[test]
-    fn invoice_refuses_the_wrong_number() {
-        let invoice = Invoice {
-            number: 5,
-            leaf: [1; 32],
-            pub_seed: [2; 32],
-        };
-        let mut fake = FakeDevice::new(vec![
-            Some(Response::Scheme(Scheme::Xmss)),
-            Some(Response::Invoice(invoice)),
-        ]);
-        assert!(Device::new(&mut fake).invoice(4).is_err());
-    }
-
-    #[test]
-    fn spend_invoice_returns_the_one_time_signature() {
-        let mut fake = FakeDevice::new(vec![
-            Some(Response::Scheme(Scheme::MlDsa44)),
-            Some(Response::Sig {
-                signature: vec![9; 2176],
-                next: None,
-            }),
-        ]);
-        let signature = Device::new(&mut fake)
-            .spend_invoice(spend())
-            .expect("the device signs");
-        assert_eq!(signature, vec![9; 2176]);
-        assert_eq!(fake.requests[1], Request::SpendInvoice(spend()));
-    }
-
-    #[test]
-    fn spend_invoice_refuses_another_signature_length() {
-        let mut fake = FakeDevice::new(vec![
-            Some(Response::Scheme(Scheme::Xmss)),
-            Some(Response::Sig {
-                signature: vec![9; 2420],
-                next: None,
-            }),
-        ]);
-        assert!(Device::new(&mut fake).spend_invoice(spend()).is_err());
-    }
-
-    #[test]
-    fn a_used_invoice_is_an_error_with_its_code() {
-        let mut fake = FakeDevice::new(vec![
-            Some(Response::Scheme(Scheme::Xmss)),
-            Some(Response::Err(WalletError::InvoiceUsed)),
-        ]);
-        let error = Device::new(&mut fake)
-            .spend_invoice(spend())
-            .expect_err("nothing is signed");
-        assert!(error.to_string().contains("invoice-used"), "{error}");
     }
 
     fn stealth_spend() -> StealthSpend {

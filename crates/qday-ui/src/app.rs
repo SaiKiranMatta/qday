@@ -9,7 +9,6 @@ use qday_wallet::counter::OneWayCounter;
 use qday_wallet::flash::Flash;
 use qday_wallet::frame::{Action as TxAction, Address, CHAIN_ID, FrameTx, MlFrameTx};
 use qday_wallet::input::{APPROVAL_TIMEOUT_MS, Approval, Debouncer, Decision, KeyState, Role};
-use qday_wallet::invoice::Spend;
 use qday_wallet::passcode::{Attempt, CODE_DIGITS, Code, MAX_FAILURES, Proof, shuffled_digits};
 use qday_wallet::protocol::{Line, NextKey, Request, Response, parse_request, response_line};
 use qday_wallet::rng::Rng;
@@ -187,26 +186,6 @@ impl Shown {
         })
     }
 
-    /// Describes a spend of an invoice's note. `None` if it can't be shown whole.
-    #[must_use]
-    pub fn from_spend(spend: &Spend) -> Option<Self> {
-        let fee = eth(spend.fee);
-        if fee.len() > LONGEST_FEE {
-            return None;
-        }
-        Some(Self {
-            kind: ShownKind::Send,
-            summary: format!("Spent invoice #{}", spend.number),
-            detail: format!("to {}", short_address(&spend.to)),
-            a: format!("All of #{:04}", spend.number),
-            b: checksum_address(&spend.to),
-            c: String::new(),
-            fee,
-            rotation: false,
-            unit: "",
-        })
-    }
-
     /// Describes a transaction. `None` if it can't be shown whole, so it mustn't be signed.
     #[must_use]
     pub fn from_tx(tx: &FrameTx) -> Option<Self> {
@@ -341,7 +320,6 @@ impl Purpose {
 /// What's about to be handed to the laptop.
 #[derive(Clone, Copy)]
 enum Sharing {
-    Invoice(u32),
     Address,
     ViewKey,
 }
@@ -508,7 +486,7 @@ fn draw(
             let (scheme, index) = match review {
                 Pending::Xmss(review) => (Scheme::Xmss, review.tx.index),
                 Pending::MlDsa(_) => (Scheme::MlDsa44, 0),
-                Pending::Invoice(_) | Pending::Stealth(_) => (Scheme::Xmss, 0),
+                Pending::Stealth(_) => (Scheme::Xmss, 0),
             };
             let info = ReviewInfo {
                 review: shown.review(),
@@ -516,7 +494,6 @@ fn draw(
                 chain_id: CHAIN_ID,
                 scheme,
                 signature: match review {
-                    Pending::Invoice(_) => Some("One-time hash"),
                     Pending::Stealth(_) => Some("One-time ML-DSA"),
                     Pending::Xmss(_) | Pending::MlDsa(_) => None,
                 },
@@ -532,17 +509,7 @@ fn draw(
             screens::scheme_confirm(c, *target, seconds, TIMEOUT_SECONDS, flash);
         }
         Mode::ShareConfirm { what, approval } => {
-            let invoice;
             let (title, detail, gives, passcode) = match what {
-                Sharing::Invoice(number) => {
-                    invoice = format!("Invoice #{number:04}");
-                    (
-                        invoice.as_str(),
-                        "A fresh key to be paid on",
-                        "one public key",
-                        false,
-                    )
-                }
                 Sharing::Address => (
                     "Stealth address",
                     "Lets anyone pay you privately",
@@ -837,9 +804,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             Pending::Xmss(review) => {
                 format!("No signature. Key #{:04} is still unused.", review.tx.index)
             }
-            Pending::MlDsa(_) | Pending::Invoice(_) | Pending::Stealth(_) => {
-                "No signature was made.".to_string()
-            }
+            Pending::MlDsa(_) | Pending::Stealth(_) => "No signature was made.".to_string(),
         };
         self.show_result(host, false, title, detail);
         self.remember(false, title.to_string(), why.to_string(), None);
@@ -957,9 +922,6 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             Purpose::Sign(Pending::MlDsa(review), shown) => {
                 self.ml_sign(host, &review, &shown, proof);
             }
-            Purpose::Sign(Pending::Invoice(spend), shown) => {
-                self.spend_invoice(host, &spend, &shown, proof);
-            }
             Purpose::Sign(Pending::Stealth(spend), shown) => {
                 self.spend_stealth(host, &spend, &shown, proof);
             }
@@ -1042,32 +1004,6 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         }
     }
 
-    fn spend_invoice(&mut self, host: &mut impl Host, spend: &Spend, shown: &Shown, proof: Proof) {
-        self.show_notice("Signing...", "One-time hash");
-        self.redraw(host);
-        match self.wallet.sign_invoice(spend, MAIN_ACCOUNT, proof) {
-            Ok(signature) => {
-                let response = Response::Sig {
-                    signature: signature.to_vec(),
-                    next: None,
-                };
-                Self::respond(host, &response);
-                self.remember(true, shown.summary.clone(), shown.detail.clone(), None);
-                let detail = format!("Invoice #{} spent", spend.number);
-                self.show_result(host, true, "Signed", detail);
-            }
-            Err(error) => {
-                Self::respond(host, &Response::Err(error));
-                let detail = if error == WalletError::InvoiceUsed {
-                    "That key already signed something else."
-                } else {
-                    "No signature was made."
-                };
-                self.show_result(host, false, "Not signed", detail.to_string());
-            }
-        }
-    }
-
     fn spend_stealth(
         &mut self,
         host: &mut impl Host,
@@ -1116,10 +1052,6 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
     /// Hands over what doesn't need a passcode.
     fn hand_over(&mut self, host: &mut impl Host, what: Sharing, now_ms: u64) {
         let response = match what {
-            Sharing::Invoice(number) => self
-                .wallet
-                .invoice(MAIN_ACCOUNT, number)
-                .map_or_else(Response::Err, Response::Invoice),
             Sharing::Address => self
                 .wallet
                 .meta_address(MAIN_ACCOUNT)
@@ -1622,7 +1554,6 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         let now_ms = host.now_ms();
         match request {
             Request::PubKey | Request::Scheme | Request::MlPubKey => {}
-            Request::Invoice(number) => self.ask_to_share(host, Sharing::Invoice(number), now_ms),
             Request::StealthAddress => self.ask_to_share(host, Sharing::Address, now_ms),
             Request::ViewKey => self.ask_to_share(host, Sharing::ViewKey, now_ms),
             Request::SpendStealth(spend) => {
@@ -1630,13 +1561,6 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
                     Self::respond(host, &Response::Err(WalletError::BadRequest));
                 } else {
                     self.show_review(host, Pending::Stealth(spend), now_ms);
-                }
-            }
-            Request::SpendInvoice(spend) => {
-                if spend.to == [0; 20] || spend.pool == [0; 20] {
-                    Self::respond(host, &Response::Err(WalletError::BadRequest));
-                } else {
-                    self.show_review(host, Pending::Invoice(spend), now_ms);
                 }
             }
             Request::SignFrame(raw) => self.start_review(host, &raw, now_ms),
@@ -1698,7 +1622,6 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         let shown = match &review {
             Pending::Xmss(review) => Shown::from_tx(&review.tx),
             Pending::MlDsa(review) => Shown::from_ml_tx(&review.tx),
-            Pending::Invoice(spend) => Shown::from_spend(spend),
             Pending::Stealth(spend) => Shown::from_stealth(spend),
         };
         let Some(shown) = shown else {
@@ -1799,7 +1722,6 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             Mode::Review { .. } => "review",
             Mode::SchemeConfirm { .. } => "scheme",
             Mode::ShareConfirm { what, .. } => match what {
-                Sharing::Invoice(_) => "invoice",
                 Sharing::Address => "address",
                 Sharing::ViewKey => "viewkey",
             },

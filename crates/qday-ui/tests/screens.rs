@@ -354,23 +354,6 @@ fn every_screen() -> Vec<(&'static str, Draw)> {
             Box::new(|c: &mut Canvas| scheme_confirm(c, Scheme::Xmss, 20, 30, None)),
         ),
         (
-            "share an invoice",
-            Box::new(|c: &mut Canvas| {
-                share_confirm(
-                    c,
-                    &ShareInfo {
-                        title: "Invoice #1000000",
-                        detail: "A fresh key to be paid on",
-                        gives: "one public key",
-                        passcode: false,
-                        seconds_left: 20,
-                        timeout: 30,
-                    },
-                    Some(3),
-                )
-            }),
-        ),
-        (
             "share the view key",
             Box::new(|c: &mut Canvas| {
                 share_confirm(
@@ -400,25 +383,6 @@ fn every_screen() -> Vec<(&'static str, Draw)> {
                         },
                         fee: "0.0003 ETH",
                         signature: Some("One-time ML-DSA"),
-                        ..send()
-                    },
-                    None,
-                )
-            }),
-        ),
-        (
-            "review invoice",
-            Box::new(move |c: &mut Canvas| {
-                review(
-                    c,
-                    &ReviewInfo {
-                        review: Review::Send {
-                            amount: "All of #1000000",
-                            unit: "",
-                            to: TO,
-                        },
-                        fee: "0.0003 ETH",
-                        signature: Some("One-time hash"),
                         ..send()
                     },
                     None,

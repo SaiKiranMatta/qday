@@ -17,7 +17,6 @@ use qday_ui::fb::{Framebuffer, PIXELS};
 use qday_wallet::counter::FlashCounter;
 use qday_wallet::flash::layout;
 use qday_wallet::frame::{FrameTx, MlFrameTx};
-use qday_wallet::invoice::SpendLog;
 use qday_wallet::keystore::KeyStore;
 use qday_wallet::mlkey::MlKeyStore;
 use qday_wallet::passcode::{Attempt, Passcode};
@@ -88,7 +87,6 @@ fn start(
         FlashCounter::new(flash.clone(), layout::COUNTER),
         Settings::new(flash.clone()),
         MlKeyStore::new(flash.clone()),
-        SpendLog::new(flash.clone()),
         0,
     )
     .expect("the flash is healthy");

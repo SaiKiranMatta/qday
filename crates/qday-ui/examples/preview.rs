@@ -455,43 +455,7 @@ fn screens() -> Vec<(&'static str, Draw)> {
             }),
         ),
         (
-            "32-share-invoice",
-            Box::new(|c: &mut Canvas| {
-                share_confirm(
-                    c,
-                    &ShareInfo {
-                        title: "Invoice #0012",
-                        detail: "A fresh key to be paid on",
-                        gives: "one public key",
-                        passcode: false,
-                        seconds_left: 24,
-                        timeout: 30,
-                    },
-                    None,
-                )
-            }),
-        ),
-        (
-            "33-review-invoice",
-            Box::new(move |c: &mut Canvas| {
-                review(
-                    c,
-                    &ReviewInfo {
-                        review: Review::Send {
-                            amount: "All of #0012",
-                            unit: "",
-                            to: TO,
-                        },
-                        fee: "0.0003 ETH",
-                        signature: Some("One-time hash"),
-                        ..send()
-                    },
-                    None,
-                )
-            }),
-        ),
-        (
-            "34-share-address",
+            "32-share-address",
             Box::new(|c: &mut Canvas| {
                 share_confirm(
                     c,
@@ -508,7 +472,7 @@ fn screens() -> Vec<(&'static str, Draw)> {
             }),
         ),
         (
-            "35-share-view-key",
+            "33-share-view-key",
             Box::new(|c: &mut Canvas| {
                 share_confirm(
                     c,
@@ -525,7 +489,7 @@ fn screens() -> Vec<(&'static str, Draw)> {
             }),
         ),
         (
-            "36-review-stealth",
+            "34-review-stealth",
             Box::new(move |c: &mut Canvas| {
                 review(
                     c,

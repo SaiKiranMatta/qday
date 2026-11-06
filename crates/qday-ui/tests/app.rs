@@ -17,7 +17,6 @@ use qday_wallet::counter::{FlashCounter, OneWayCounter};
 use qday_wallet::flash::layout;
 use qday_wallet::frame::{Action, CHAIN_ID, FrameTx, MlFrameTx};
 use qday_wallet::hex;
-use qday_wallet::invoice::{Spend, SpendLog, spend_hash};
 use qday_wallet::keystore::KeyStore;
 use qday_wallet::mlkey::MlKeyStore;
 use qday_wallet::passcode::{Attempt, Code, Passcode};
@@ -25,7 +24,7 @@ use qday_wallet::protocol::{Line, Request, Response, parse_response, request_lin
 use qday_wallet::settings::{CROSSES, Calibration, Scheme, Settings};
 use qday_wallet::stealth::{StealthSpend, pay_to, view_seed_for};
 use qday_wallet::wallet::{MAIN_ACCOUNT, Wallet, WalletError};
-use qday_xmss::{PublicKey, keccak256, verify, verify_one_time};
+use qday_xmss::{PublicKey, keccak256, verify};
 
 const CODE: Code = [1, 2, 3, 4, 5, 6];
 const OTHER: Code = [6, 5, 4, 3, 2, 1];
@@ -111,7 +110,6 @@ fn boot(flash: &SimFlash, seed: u64, hold_k1: bool) -> (FakeHost, TestApp) {
         FlashCounter::new(flash.clone(), layout::COUNTER),
         Settings::new(flash.clone()),
         MlKeyStore::new(flash.clone()),
-        SpendLog::new(flash.clone()),
         0,
     )
     .expect("the flash is healthy");
@@ -132,7 +130,6 @@ fn image() -> &'static Vec<u8> {
             FlashCounter::new(flash.clone(), layout::COUNTER),
             Settings::new(flash.clone()),
             MlKeyStore::new(flash.clone()),
-            SpendLog::new(flash.clone()),
             0,
         )
         .expect("the flash is healthy");
@@ -1074,232 +1071,8 @@ fn signing_while_locked_refuses_an_ml_dsa_transfer() {
     assert_eq!(rig.last_response(), Response::Err(WalletError::Rejected));
 }
 
-// Invoices
-
 const POOL: [u8; 20] = [0x90; 20];
 const FEE: u128 = 1_000_000_000_000_000;
-
-fn invoice_spend(number: u32) -> Spend {
-    Spend {
-        number,
-        pool: POOL,
-        to: TO,
-        fee: FEE,
-    }
-}
-
-#[test]
-fn an_invoice_needs_a_press_but_no_passcode() {
-    let mut rig = rig();
-    rig.request(&Request::Invoice(7));
-    assert_eq!(rig.screen(), "invoice");
-    assert!(rig.host.sent.is_empty());
-    rig.wait(520);
-    rig.press(3);
-    let want = rig
-        .app
-        .wallet()
-        .invoice(MAIN_ACCOUNT, 7)
-        .expect("it derives");
-    assert_eq!(rig.last_response(), Response::Invoice(want));
-    assert_eq!(rig.screen(), "wallet");
-}
-
-#[test]
-fn k1_refuses_to_hand_over_an_invoice() {
-    let mut rig = rig();
-    rig.request(&Request::Invoice(7));
-    rig.wait(520);
-    rig.press(0);
-    assert_eq!(rig.last_response(), Response::Err(WalletError::Rejected));
-    assert_eq!(rig.screen(), "wallet");
-}
-
-#[test]
-fn an_invoice_with_no_decision_times_out() {
-    let mut rig = rig();
-    rig.request(&Request::Invoice(7));
-    rig.wait(30_100);
-    assert_eq!(rig.last_response(), Response::Err(WalletError::Rejected));
-}
-
-#[test]
-fn a_request_during_an_invoice_is_refused() {
-    let mut rig = rig();
-    rig.request(&Request::Invoice(7));
-    rig.sign_request(0);
-    assert_eq!(rig.last_response(), Response::Err(WalletError::BadRequest));
-    assert_eq!(rig.screen(), "invoice");
-}
-
-#[test]
-fn an_approved_spend_gives_a_valid_signature() {
-    let mut rig = rig();
-    let invoice = rig
-        .app
-        .wallet()
-        .invoice(MAIN_ACCOUNT, 7)
-        .expect("it derives");
-    rig.request(&Request::SpendInvoice(invoice_spend(7)));
-    assert_eq!(rig.screen(), "review");
-    rig.approve(CODE);
-    assert_eq!(rig.screen(), "result");
-    let Response::Sig { signature, next } = rig.last_response() else {
-        panic!("it must sign");
-    };
-    assert_eq!(next, None);
-    let message = spend_hash(&POOL, &invoice.leaf, &TO, FEE);
-    assert!(verify_one_time(
-        &invoice.leaf,
-        &invoice.pub_seed,
-        &message,
-        &signature
-    ));
-}
-
-#[test]
-fn spending_an_invoice_leaves_the_counter_alone() {
-    let mut rig = rig();
-    rig.request(&Request::SpendInvoice(invoice_spend(7)));
-    rig.approve(CODE);
-    assert_eq!(rig.counter(), 0);
-}
-
-#[test]
-fn a_rejected_spend_leaves_the_key_unused() {
-    let mut rig = rig();
-    rig.request(&Request::SpendInvoice(invoice_spend(7)));
-    rig.wait(520);
-    rig.press(0);
-    assert_eq!(rig.last_response(), Response::Err(WalletError::Rejected));
-    rig.wait(2600);
-    let other = Spend {
-        fee: 2 * FEE,
-        ..invoice_spend(7)
-    };
-    rig.request(&Request::SpendInvoice(other));
-    rig.approve(CODE);
-    assert!(matches!(rig.last_response(), Response::Sig { .. }));
-}
-
-#[test]
-fn a_second_different_spend_of_an_invoice_is_refused() {
-    let mut rig = rig();
-    rig.request(&Request::SpendInvoice(invoice_spend(7)));
-    rig.approve(CODE);
-    rig.wait(2600);
-    let other = Spend {
-        fee: 2 * FEE,
-        ..invoice_spend(7)
-    };
-    rig.request(&Request::SpendInvoice(other));
-    rig.approve(CODE);
-    assert_eq!(rig.last_response(), Response::Err(WalletError::InvoiceUsed));
-    assert_eq!(rig.screen(), "result");
-}
-
-#[test]
-fn the_same_spend_can_be_repeated() {
-    let mut rig = rig();
-    rig.request(&Request::SpendInvoice(invoice_spend(7)));
-    rig.approve(CODE);
-    let first = rig.last_response();
-    rig.wait(2600);
-    rig.request(&Request::SpendInvoice(invoice_spend(7)));
-    rig.approve(CODE);
-    assert_eq!(rig.last_response(), first);
-}
-
-#[test]
-fn a_zero_recipient_is_refused_with_no_screen() {
-    let mut rig = rig();
-    let zero = Spend {
-        to: [0; 20],
-        ..invoice_spend(7)
-    };
-    rig.request(&Request::SpendInvoice(zero));
-    assert_eq!(rig.last_response(), Response::Err(WalletError::BadRequest));
-    assert_eq!(rig.screen(), "wallet");
-}
-
-#[test]
-fn an_invoice_fee_too_long_to_show_is_refused() {
-    let mut rig = rig();
-    let long = Spend {
-        fee: 1_234_567_890_123,
-        ..invoice_spend(7)
-    };
-    rig.request(&Request::SpendInvoice(long));
-    assert_eq!(rig.last_response(), Response::Err(WalletError::BadRequest));
-    assert_eq!(rig.screen(), "notice");
-}
-
-#[test]
-fn the_review_shows_the_invoice_and_the_true_recipient() {
-    let shown = Shown::from_spend(&invoice_spend(7)).expect("this fits");
-    let Review::Send { amount, unit, to } = shown.review() else {
-        panic!("a spend is a send");
-    };
-    assert_eq!((amount, unit), ("All of #0007", ""));
-    assert_eq!(to, checksum_address(&TO));
-}
-
-#[test]
-fn the_review_says_a_one_time_key_signs() {
-    let _theme = theme_lock();
-    let mut rig = rig();
-    rig.request(&Request::SpendInvoice(invoice_spend(7)));
-    let shown = Shown::from_spend(&invoice_spend(7)).expect("this fits");
-    let mut want = Framebuffer::new();
-    let info = screens::ReviewInfo {
-        review: shown.review(),
-        fee: "0.001 ETH",
-        chain_id: CHAIN_ID,
-        scheme: Scheme::Xmss,
-        signature: Some("One-time hash"),
-        index: 0,
-        rotation: false,
-        seconds_left: 30,
-        timeout: 30,
-    };
-    screens::review(&mut want.canvas(), &info, None);
-    assert!(pixels(rig.app.frame()) == pixels(&want));
-}
-
-#[test]
-fn a_spent_invoice_is_in_the_activity_log() {
-    let mut rig = rig();
-    rig.request(&Request::SpendInvoice(invoice_spend(7)));
-    rig.approve(CODE);
-    let activity = rig.app.activity();
-    let latest = activity.first().expect("it was recorded");
-    assert!(latest.approved);
-    assert_eq!(latest.title, "Spent invoice #7");
-    assert_eq!(latest.index, None);
-}
-
-#[test]
-fn invoices_work_in_ml_dsa_mode() {
-    let mut rig = switched_rig();
-    rig.request(&Request::SpendInvoice(invoice_spend(7)));
-    rig.approve(CODE);
-    assert!(matches!(rig.last_response(), Response::Sig { .. }));
-}
-
-#[test]
-fn a_locked_device_refuses_a_spend() {
-    let mut rig = rig();
-    rig.request(&Request::SpendInvoice(invoice_spend(7)));
-    rig.approve(WRONG);
-    rig.enter(WRONG);
-    rig.enter(WRONG);
-    rig.press(0);
-    rig.request(&Request::SpendInvoice(invoice_spend(7)));
-    rig.wait(520);
-    rig.press(3);
-    assert_eq!(rig.screen(), "locked");
-    assert_eq!(rig.last_response(), Response::Err(WalletError::Rejected));
-}
 
 // Stealth payments
 
@@ -1490,20 +1263,6 @@ fn signing_a_stealth_spend_is_on_screen_before_the_signature_goes_out() {
     rig.enter(CODE);
     let mut want = Framebuffer::new();
     screens::notice(&mut want.canvas(), "Signing...", "One-time ML-DSA");
-    assert!(rig.host.at_last_send.as_ref() == Some(&pixels(&want)));
-}
-
-#[test]
-fn signing_an_invoice_is_on_screen_before_the_signature_goes_out() {
-    let _theme = theme_lock();
-    let mut rig = rig();
-    rig.request(&Request::SpendInvoice(invoice_spend(7)));
-    rig.wait(520);
-    rig.press(3);
-    rig.host.capture = true;
-    rig.enter(CODE);
-    let mut want = Framebuffer::new();
-    screens::notice(&mut want.canvas(), "Signing...", "One-time hash");
     assert!(rig.host.at_last_send.as_ref() == Some(&pixels(&want)));
 }
 

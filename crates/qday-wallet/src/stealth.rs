@@ -19,7 +19,7 @@ use x_wing::{
     KeyExport,
 };
 
-use crate::frame::Address;
+use crate::frame::{Address, CHAIN_ID};
 
 /// Length of a published address: the X-Wing key, then the published `t`.
 pub const META_ADDRESS_BYTES: usize = ENCAPSULATION_KEY_SIZE + PUBLIC_T_BYTES;
@@ -70,6 +70,30 @@ pub struct StealthSpend {
     pub to: Address,
     /// What whoever submits the spend gets out of the note, in wei.
     pub fee: u128,
+}
+
+fn word_of_address(address: &Address) -> Hash {
+    let mut word = [0; 32];
+    word[32 - address.len()..].copy_from_slice(address);
+    word
+}
+
+fn word_of_number(value: u128) -> Hash {
+    let mut word = [0; 32];
+    word[32 - 16..].copy_from_slice(&value.to_be_bytes());
+    word
+}
+
+/// What a spend signs, as the pool's `spendHash` computes it.
+#[must_use]
+pub fn spend_hash(pool: &Address, key_hash: &Hash, to: &Address, fee: u128) -> Hash {
+    keccak256(&[
+        &word_of_number(u128::from(CHAIN_ID)),
+        &word_of_address(pool),
+        key_hash,
+        &word_of_address(to),
+        &word_of_number(fee),
+    ])
 }
 
 /// The seed that finds payments and can't spend them.
@@ -175,4 +199,22 @@ pub fn signer_for(
     let secret = secret_for(&view_seed_for(seed, account), ciphertext)?;
     let signer = master_for(seed, account).one_time(&secret);
     (keccak256(&[&key_part(&signer.public_key())]) == *key_hash).then_some(signer)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::spend_hash;
+    use crate::hex;
+
+    #[test]
+    fn the_spend_hash_matches_the_contract_encoding() {
+        let mut pool = [0; 20];
+        pool[19] = 0xAA;
+        let mut to = [0; 20];
+        to[19] = 0xBB;
+        assert_eq!(
+            hex::encode(&spend_hash(&pool, &[0x11; 32], &to, 1000)),
+            "0x9a5987d1c61e040b708221e73aadc74ec92e26227e911a8e11aca4d1fa9a0432"
+        );
+    }
 }

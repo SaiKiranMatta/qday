@@ -10,7 +10,6 @@ pub mod flash;
 pub mod frame;
 pub mod hex;
 pub mod input;
-pub mod invoice;
 pub mod keystore;
 pub mod mlkey;
 pub mod passcode;

@@ -6,10 +6,9 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use qday_mldsa::{PUBLIC_KEY_BYTES, SIGNATURE_BYTES};
-use qday_xmss::{Hash, ONE_TIME_SIG_BYTES, SIG_BYTES};
+use qday_xmss::{Hash, SIG_BYTES};
 
 use crate::hex;
-use crate::invoice::{Invoice, Spend};
 use crate::settings::Scheme;
 use crate::stealth::{META_ADDRESS_BYTES, StealthSpend};
 use crate::wallet::WalletError;
@@ -28,10 +27,6 @@ pub enum Request {
     Scheme,
     /// Report the stored ML-DSA public key.
     MlPubKey,
-    /// Hand over an invoice's key, once the person agrees.
-    Invoice(u32),
-    /// Review and sign a spend of an invoice's note.
-    SpendInvoice(Spend),
     /// Hand over the stealth address, once the person agrees.
     StealthAddress,
     /// Hand over the view seed, once the person agrees and enters the passcode.
@@ -78,15 +73,13 @@ pub enum Response {
     Scheme(Scheme),
     /// The 1,312-byte ML-DSA public key.
     MlPubKey(Vec<u8>),
-    /// An invoice's key.
-    Invoice(Invoice),
     /// The 4,160-byte stealth address.
     StealthAddress(Vec<u8>),
     /// The view seed.
     ViewKey(Hash),
     /// A signature.
     Sig {
-        /// The signature: 2,500 bytes for XMSS, 2,420 for ML-DSA, 2,176 for an invoice.
+        /// The signature: 2,500 bytes for XMSS, 2,420 for ML-DSA.
         signature: Vec<u8>,
         /// The prepared key, if there is one.
         next: Option<NextKey>,
@@ -97,7 +90,7 @@ pub enum Response {
     Err(WalletError),
 }
 
-const ERROR_CODES: [(WalletError, &str); 11] = [
+const ERROR_CODES: [(WalletError, &str); 9] = [
     (WalletError::BadRequest, "bad-request"),
     (WalletError::Rejected, "rejected"),
     (WalletError::KeysExhausted, "keys-exhausted"),
@@ -107,8 +100,6 @@ const ERROR_CODES: [(WalletError, &str); 11] = [
     (WalletError::StorageFailure, "storage-failure"),
     (WalletError::WrongScheme, "wrong-scheme"),
     (WalletError::SigningFailed, "signing-failed"),
-    (WalletError::InvoiceUsed, "invoice-used"),
-    (WalletError::SpendLogFull, "spend-log-full"),
 ];
 
 /// The word for an error on the USB line.
@@ -142,7 +133,6 @@ fn parse_body(body: &str) -> Option<Request> {
         "PUBKEY" => Request::PubKey,
         "SCHEME" => Request::Scheme,
         "MLPUBKEY" => Request::MlPubKey,
-        "INVOICE" => Request::Invoice(number(words.next()?)?),
         "STEALTHADDRESS" => Request::StealthAddress,
         "VIEWKEY" => Request::ViewKey,
         "SPENDSTEALTH" => Request::SpendStealth(Box::new(StealthSpend {
@@ -152,12 +142,6 @@ fn parse_body(body: &str) -> Option<Request> {
             to: hex::decode_array(words.next()?)?,
             fee: wide_number(words.next()?)?,
         })),
-        "SPENDINVOICE" => Request::SpendInvoice(Spend {
-            number: number(words.next()?)?,
-            pool: hex::decode_array(words.next()?)?,
-            to: hex::decode_array(words.next()?)?,
-            fee: wide_number(words.next()?)?,
-        }),
         "PREPARE" => Request::Prepare,
         "SIGNFRAME" => Request::SignFrame(hex::decode(words.next()?)?),
         "ACTIVATE" => Request::Activate(number(words.next()?)?),
@@ -190,20 +174,12 @@ pub fn request_line(request: &Request) -> String {
         Request::PubKey => format!("{PREFIX}PUBKEY\n"),
         Request::Scheme => format!("{PREFIX}SCHEME\n"),
         Request::MlPubKey => format!("{PREFIX}MLPUBKEY\n"),
-        Request::Invoice(number) => format!("{PREFIX}INVOICE {number}\n"),
         Request::StealthAddress => format!("{PREFIX}STEALTHADDRESS\n"),
         Request::ViewKey => format!("{PREFIX}VIEWKEY\n"),
         Request::SpendStealth(spend) => format!(
             "{PREFIX}SPENDSTEALTH {} {} {} {} {}\n",
             hex::encode(&spend.ciphertext),
             hex::encode(&spend.key_hash),
-            hex::encode(&spend.pool),
-            hex::encode(&spend.to),
-            spend.fee
-        ),
-        Request::SpendInvoice(spend) => format!(
-            "{PREFIX}SPENDINVOICE {} {} {} {}\n",
-            spend.number,
             hex::encode(&spend.pool),
             hex::encode(&spend.to),
             spend.fee
@@ -257,12 +233,6 @@ pub fn response_line(response: &Response) -> String {
             format!("{PREFIX}STEALTHADDRESS {}\n", hex::encode(address))
         }
         Response::ViewKey(seed) => format!("{PREFIX}VIEWKEY {}\n", hex::encode(seed)),
-        Response::Invoice(invoice) => format!(
-            "{PREFIX}INVOICE {} {} {}\n",
-            invoice.number,
-            hex::encode(&invoice.leaf),
-            hex::encode(&invoice.pub_seed)
-        ),
         Response::Ok => format!("{PREFIX}OK\n"),
         Response::Err(error) => format!("{PREFIX}ERR {}\n", error_code(*error)),
     }
@@ -316,21 +286,12 @@ pub fn parse_response(line: &str) -> Option<Response> {
             let seed = hex::decode_array(words.next()?)?;
             words.next().is_none().then_some(Response::ViewKey(seed))
         }
-        "INVOICE" => {
-            let invoice = Invoice {
-                number: number(words.next()?)?,
-                leaf: hex::decode_array(words.next()?)?,
-                pub_seed: hex::decode_array(words.next()?)?,
-            };
-            words.next().is_none().then_some(Response::Invoice(invoice))
-        }
         "SIG" => {
             let signature = hex::decode(words.next()?)?;
             let next = parse_next(words).ok()?;
             // Only XMSS has a next key to report.
             let fits = signature.len() == SIG_BYTES
-                || ([SIGNATURE_BYTES, ONE_TIME_SIG_BYTES].contains(&signature.len())
-                    && next.is_none());
+                || (signature.len() == SIGNATURE_BYTES && next.is_none());
             fits.then_some(Response::Sig { signature, next })
         }
         "OK" => words.next().is_none().then_some(Response::Ok),
@@ -388,7 +349,6 @@ impl LineBuffer {
 mod tests {
     use alloc::boxed::Box;
 
-    use crate::invoice::{Invoice, Spend};
     use crate::settings::Scheme;
     use crate::stealth::StealthSpend;
     use qday_mldsa::PUBLIC_KEY_BYTES;
@@ -564,15 +524,6 @@ mod tests {
     const POOL: [u8; 20] = [0x90; 20];
     const TO: [u8; 20] = [0xBE; 20];
 
-    fn spend() -> Spend {
-        Spend {
-            number: 12,
-            pool: POOL,
-            to: TO,
-            fee: 340_282_366_920_938_463_463_374_607_431_768_211_455,
-        }
-    }
-
     fn stealth_spend() -> StealthSpend {
         StealthSpend {
             ciphertext: [0x33; 1120],
@@ -664,108 +615,6 @@ mod tests {
     fn a_stealth_address_fits_in_a_line() {
         let response = Response::StealthAddress(vec![0; 4160]);
         assert!(response_line(&response).len() <= MAX_LINE);
-    }
-
-    #[test]
-    fn invoice_requests_match_the_protocol() {
-        assert_eq!(request_line(&Request::Invoice(12)), "QDAY1 INVOICE 12\n");
-        assert_eq!(
-            parse_request("QDAY1 INVOICE 12"),
-            Some(Ok(Request::Invoice(12)))
-        );
-    }
-
-    #[test]
-    fn spend_requests_match_the_protocol() {
-        let want = format!(
-            "QDAY1 SPENDINVOICE 12 {} {} 340282366920938463463374607431768211455\n",
-            hex::encode(&POOL),
-            hex::encode(&TO)
-        );
-        let request = Request::SpendInvoice(spend());
-        assert_eq!(request_line(&request), want);
-        assert_eq!(parse_request(want.trim_end()), Some(Ok(request)));
-    }
-
-    #[test]
-    fn bad_invoice_requests_are_refused() {
-        let (pool, to) = (hex::encode(&POOL), hex::encode(&TO));
-        for line in [
-            "QDAY1 INVOICE".to_string(),
-            "QDAY1 INVOICE x".to_string(),
-            "QDAY1 INVOICE -1".to_string(),
-            "QDAY1 INVOICE 1 2".to_string(),
-            "QDAY1 INVOICE 4294967296".to_string(),
-            format!("QDAY1 SPENDINVOICE 1 {pool} {to}"),
-            format!("QDAY1 SPENDINVOICE 1 {pool} {to} x"),
-            format!("QDAY1 SPENDINVOICE 1 {pool} {to} 1 2"),
-            format!("QDAY1 SPENDINVOICE 1 {pool} 0x00 1"),
-            format!("QDAY1 SPENDINVOICE 1 0x00 {to} 1"),
-            format!("QDAY1 SPENDINVOICE 1 {pool} {to} 340282366920938463463374607431768211456"),
-        ] {
-            assert_eq!(
-                parse_request(&line),
-                Some(Err(WalletError::BadRequest)),
-                "{line}"
-            );
-        }
-    }
-
-    #[test]
-    fn invoice_responses_match_the_protocol() {
-        let response = Response::Invoice(Invoice {
-            number: 12,
-            leaf: A,
-            pub_seed: B,
-        });
-        let want = format!("QDAY1 INVOICE 12 {} {}\n", a(), b());
-        assert_eq!(response_line(&response), want);
-        assert_eq!(parse_response(want.trim_end()), Some(response));
-    }
-
-    #[test]
-    fn bad_invoice_responses_are_refused() {
-        for line in [
-            "QDAY1 INVOICE".to_string(),
-            format!("QDAY1 INVOICE x {} {}", a(), b()),
-            format!("QDAY1 INVOICE 1 {}", a()),
-            format!("QDAY1 INVOICE 1 {} {} extra", a(), b()),
-        ] {
-            assert_eq!(parse_response(&line), None, "{line}");
-        }
-    }
-
-    #[test]
-    fn a_one_time_signature_is_accepted_at_its_own_length() {
-        let response = Response::Sig {
-            signature: vec![5; 2176],
-            next: None,
-        };
-        let line = response_line(&response);
-        assert_eq!(parse_response(line.trim_end()), Some(response));
-    }
-
-    #[test]
-    fn a_one_time_signature_carries_no_next_key() {
-        let line = format!("QDAY1 SIG {} {} {}", hex::encode(&vec![5; 2176]), a(), b());
-        assert_eq!(parse_response(&line), None);
-    }
-
-    #[test]
-    fn the_invoice_errors_have_their_codes() {
-        assert_eq!(
-            response_line(&Response::Err(WalletError::InvoiceUsed)),
-            "QDAY1 ERR invoice-used\n"
-        );
-        assert_eq!(
-            response_line(&Response::Err(WalletError::SpendLogFull)),
-            "QDAY1 ERR spend-log-full\n"
-        );
-    }
-
-    #[test]
-    fn a_spend_request_fits_in_a_line() {
-        assert!(request_line(&Request::SpendInvoice(spend())).len() <= MAX_LINE);
     }
 
     #[test]

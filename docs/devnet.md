@@ -72,27 +72,6 @@ mempool note ahead of the real error.
 ethrex hegota-testnet: chain id 8141, RPC `https://rpc1.privacy.ethrex.xyz`, explorer
 `https://dora.privacy.ethrex.xyz`. Enforces the public `MAX_VERIFY_GAS = 100,000`.
 
-## Hash pool
-
-`scripts/hashpool-demo.sh`, 2026-11-06, on the same chain, as plain transactions with the funding key
-as the relayer. Both the laptop key and the device code were tested, the device code on simulated
-flash. No real board was involved.
-
-| Transaction | Total gas |
-|---|---|
-| Pay a new note | 133,589-133,601 |
-| Top up a note | 35,681 |
-| Spend a note | 166,808-173,111 |
-
-A one-time key signs only once. The device records what each key signed before signing, and the pool
-always finishes once a valid signature arrives, so a key never needs a second signature. The device
-refused a second, different spend with `invoice-used`, and the pool refused a replay and a payment to a
-spent key. An invoice works in both signing modes and leaves the one-way counter alone.
-
-Limits: the spend log holds 480 spends. The device shows the recipient and fee, but not the pool
-address or the note's balance, which it can't check. A wrong pool can't take funds, but it would use up
-the invoice's one signature.
-
 ## Lattice pool
 
 `scripts/stealth-demo.sh`, 2026-11-06, on the same chain, as plain transactions with the funding key

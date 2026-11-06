@@ -10,14 +10,13 @@ use qday_mldsa::stealth::derive_public;
 use qday_mldsa::verify;
 use qday_wallet::counter::FlashCounter;
 use qday_wallet::flash::layout;
-use qday_wallet::invoice::{SpendLog, spend_hash};
 use qday_wallet::keystore::KeyStore;
 use qday_wallet::mlkey::MlKeyStore;
 use qday_wallet::passcode::{Attempt, Code, Passcode, Proof};
 use qday_wallet::settings::{Scheme, Settings};
 use qday_wallet::stealth::{
     Announcement, CIPHERTEXT_BYTES, META_ADDRESS_BYTES, MetaAddress, StealthSpend, key_for,
-    meta_address_for, open as open_payment, pay_to, view_seed_for,
+    meta_address_for, open as open_payment, pay_to, spend_hash, view_seed_for,
 };
 use qday_wallet::wallet::{MAIN_ACCOUNT, Wallet, WalletError};
 use qday_xmss::{Hash, keccak256};
@@ -37,7 +36,6 @@ fn open(flash: &SimFlash) -> TestWallet {
         FlashCounter::new(flash.clone(), layout::COUNTER),
         Settings::new(flash.clone()),
         MlKeyStore::new(flash.clone()),
-        SpendLog::new(flash.clone()),
         0,
     )
     .expect("the flash is healthy")
