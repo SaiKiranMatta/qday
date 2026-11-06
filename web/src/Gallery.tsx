@@ -1,6 +1,8 @@
 import { loadFrame } from "@qday/frame";
 import { useEffect, useState } from "react";
 import { SEND_TITLES, SendFlow } from "./components/SendFlow";
+import { SendModal } from "./components/SendModal";
+import { Button } from "./components/ui";
 import { KNOWN_TOKENS, NATIVE_ID } from "./lib/tokens";
 import type { Draft, SendFees, SendStep } from "./lib/useSend";
 
@@ -19,6 +21,7 @@ export function Gallery() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [tokenDraft, setTokenDraft] = useState<Draft | null>(null);
   const [fees, setFees] = useState<SendFees | null>(null);
+  const [playing, setPlaying] = useState<SendStep | null>(null);
 
   useEffect(() => {
     void loadFrame().then((frame) => {
@@ -59,6 +62,32 @@ export function Gallery() {
   ];
 
   return (
+    <div>
+      <div className="flex items-center gap-4 px-8 pt-8">
+        <Button onClick={() => setPlaying({ kind: "review", draft: tokenDraft })}>Play the send flow</Button>
+        <span className="text-sm text-muted">Review, approve, sending and sent in the real dialog, on timers.</span>
+      </div>
+      {playing && (
+        <SendModal
+          step={playing}
+          tokens={KNOWN_TOKENS}
+          balances={BALANCES}
+          fees={fees}
+          ownAddress={ACCOUNT}
+          onReview={() => {}}
+          onConfirm={() => {
+            const draft = tokenDraft;
+            setPlaying({ kind: "approve", draft });
+            setTimeout(() => setPlaying({ kind: "submitting", draft }), 2500);
+            setTimeout(
+              () => setPlaying({ kind: "done", draft, block: 1612, hash: "0x51ac2e0a7c1f6d3b9e8a4f2c7d0b5e3a9c6f1d8e4b7a2c5f0e9d3b6a8c1f4e7d" }),
+              5500,
+            );
+          }}
+          onEdit={() => setPlaying({ kind: "edit" })}
+          onClose={() => setPlaying(null)}
+        />
+      )}
     <div className="grid gap-6 p-8 [grid-template-columns:repeat(auto-fill,minmax(min(400px,100%),1fr))]">
       {states.map(({ label, step, to, amount, token }) => (
         <section key={label}>
@@ -82,6 +111,7 @@ export function Gallery() {
           </div>
         </section>
       ))}
+    </div>
     </div>
   );
 }

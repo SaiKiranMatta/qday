@@ -59,8 +59,12 @@ export function SendFlow({
   return (
     <div>
       <Progress step={step.kind} />
-      {/* Details, the summary (review to sending) and the receipt each enter once; the summary stays put while it sends. */}
-      <div key={step.kind === "edit" ? "edit" : step.kind === "done" ? "done" : "summary"} className="animate-enter">
+      {/* Three phases enter once each: details, the summary (review and approve), and the result,
+          which stays mounted from sending to sent so its loader can close into the success mark. */}
+      <div
+        key={step.kind === "edit" ? "edit" : step.kind === "submitting" || step.kind === "done" ? "result" : "summary"}
+        className="animate-enter"
+      >
         {step.kind === "edit" ? (
           <DetailsForm
             to={to}
@@ -79,8 +83,10 @@ export function SendFlow({
             error={step.error}
             onReview={onReview}
           />
+        ) : step.kind === "submitting" || step.kind === "done" ? (
+          <Result step={step} onClose={onClose} />
         ) : (
-          <Summary step={step} onConfirm={onConfirm} onEdit={onEdit} onClose={onClose} />
+          <Summary step={step} onConfirm={onConfirm} onEdit={onEdit} />
         )}
       </div>
     </div>
@@ -253,17 +259,15 @@ function sending(draft: Draft) {
   return null;
 }
 
-/** The transfer as the device will show it. Stays on screen while you approve and while it sends. */
+/** The transfer as the device will show it. Stays on screen while you approve, so the two can be compared. */
 function Summary({
   step,
   onConfirm,
   onEdit,
-  onClose,
 }: {
-  step: Exclude<SendStep, { kind: "edit" }>;
+  step: Extract<SendStep, { kind: "review" | "approve" }>;
   onConfirm: () => void;
   onEdit: () => void;
-  onClose: () => void;
 }) {
   const confirmRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -274,10 +278,6 @@ function Summary({
   const send = sending(step.draft);
   if (!send) return null;
   const fee = BigInt(tx.maxFeeWei);
-
-  if (step.kind === "done") {
-    return <Sent draft={step.draft} block={step.block} hash={step.hash} onClose={onClose} />;
-  }
 
   return (
     <div>
@@ -325,41 +325,39 @@ function Summary({
         </>
       )}
 
-      {(step.kind === "approve" || step.kind === "submitting") && (
-        <div className="mt-5 flex items-center gap-4 rounded-2xl bg-surface-2 p-4" role="status" aria-live="polite">
-          <span className="relative grid size-11 shrink-0 place-items-center rounded-full bg-onyx">
-            {step.kind === "approve" ? (
-              <>
-                <span className="absolute inset-0 animate-ping rounded-full bg-slate/40 [animation-duration:1.8s]" />
-                <DeviceIcon className="relative size-5 text-alabaster" />
-              </>
-            ) : (
-              <span className="size-5 animate-spin rounded-full border-2 border-line border-t-alabaster" />
-            )}
+      {step.kind === "approve" && (
+        <div className="mt-5 flex items-center gap-3 rounded-2xl bg-surface-2 px-4 py-3.5" role="status" aria-live="polite">
+          <span className="relative flex size-2.5 shrink-0">
+            <span className="absolute inset-0 animate-ping rounded-full bg-warn/60 [animation-duration:1.6s]" />
+            <span className="relative size-2.5 rounded-full bg-warn" />
           </span>
-          <div className="min-w-0">
-            <div className="text-sm font-medium">
-              {step.kind === "approve" ? "Approve on your QDay" : "Submitting transaction…"}
-            </div>
-            <div className="mt-0.5 text-xs text-muted">
-              {step.kind === "approve"
-                ? "Compare the amount and each group of the address, then press Approve. The device waits up to 5 minutes."
-                : "Signed on your QDay. This usually takes one block, about 6 seconds."}
-            </div>
-          </div>
+          <span className="text-sm font-medium">Waiting for approval on your QDay</span>
         </div>
       )}
     </div>
   );
 }
 
-function Sent({ draft, block, hash, onClose }: { draft: Draft; block: number; hash: string; onClose: () => void }) {
+/** Ring radius, and its circumference (also in the draw keyframes). */
+const RING_R = 37;
+const RING_LENGTH = 233;
+
+/**
+ * Sending, then sent, in one place: the token in a ring that spins while the network confirms and
+ * closes into a full circle with a check once it has.
+ */
+function Result({ step, onClose }: { step: Extract<SendStep, { kind: "submitting" | "done" }>; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
-  const send = sending(draft);
+  const { token } = step.draft;
+  const send = sending(step.draft);
   if (!send) return null;
+  const done = step.kind === "done";
+  const amount = `${exactUnits(send.value, token.decimals)} ${token.symbol}`;
+
   const copy = async () => {
+    if (!done) return;
     try {
-      await navigator.clipboard.writeText(hash);
+      await navigator.clipboard.writeText(step.hash);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -368,44 +366,83 @@ function Sent({ draft, block, hash, onClose }: { draft: Draft; block: number; ha
   };
 
   return (
-    <div role="status">
-      <div className="flex flex-col items-center pt-2 text-center">
-        <span className="grid size-14 animate-pop place-items-center rounded-full bg-ok/15 text-ok">
-          <Icon name="check" className="size-7" />
-        </span>
-        <div className="mt-4 flex items-center gap-2 text-3xl font-semibold tracking-tight tabular-nums">
-          <TokenLogo token={draft.token} size={28} />
-          {exactUnits(send.value, draft.token.decimals)} <span className="text-muted">{draft.token.symbol}</span>
-        </div>
-        <div className="mt-1 text-sm text-muted">sent to {shortHex(send.to, 6, 4)}</div>
-      </div>
-      <dl className="mt-6 divide-y divide-line/60 rounded-2xl bg-surface-2 px-4 text-sm">
-        <Row label="Status">
-          <span className="text-ok">Confirmed in block {block.toLocaleString("en-US")}</span>
-        </Row>
-        <div className="flex items-baseline gap-4 py-3">
-          <dt className="w-20 shrink-0 text-muted">Transaction</dt>
-          <dd className="flex min-w-0 flex-1 items-baseline gap-3">
-            <span className="min-w-0 flex-1 truncate font-mono text-xs" title={hash}>
-              {shortHex(hash, 10, 8)}
+    <div>
+      <div className="flex flex-col items-center pt-3 text-center" role="status" aria-live="polite">
+        <span className="relative grid size-24 place-items-center">
+          <svg viewBox="0 0 80 80" className="absolute inset-0 size-full -rotate-90" aria-hidden>
+            <circle cx="40" cy="40" r={RING_R} fill="none" strokeWidth="3" className="stroke-line" />
+            {done ? (
+              <circle
+                cx="40"
+                cy="40"
+                r={RING_R}
+                fill="none"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeDasharray={RING_LENGTH}
+                className="animate-draw stroke-ok"
+              />
+            ) : (
+              <circle
+                cx="40"
+                cy="40"
+                r={RING_R}
+                fill="none"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeDasharray={`${RING_LENGTH * 0.28} ${RING_LENGTH}`}
+                className="origin-center animate-spin stroke-alabaster [transform-box:fill-box] [animation-duration:1.1s] motion-reduce:animate-none"
+              />
+            )}
+          </svg>
+          <TokenLogo token={token} size={56} />
+          {done && (
+            <span className="absolute right-0.5 bottom-0.5 grid size-7 animate-pop place-items-center rounded-full bg-ok text-onyx ring-4 ring-surface [animation-delay:350ms]">
+              <Icon name="check" className="size-4" />
             </span>
-            <button onClick={copy} className="shrink-0 text-xs font-medium text-alabaster/80 hover:text-alabaster">
-              {copied ? "Copied" : "Copy"}
-            </button>
+          )}
+        </span>
+
+        <div className="mt-5 text-2xl font-semibold tracking-tight tabular-nums">{done ? `${amount} sent` : `Sending ${amount}`}</div>
+        <div className="mt-1 text-sm text-muted">
+          {done ? `to ${shortHex(send.to, 6, 4)}` : "Confirming on the devnet, usually a few seconds."}
+        </div>
+      </div>
+
+      {done && (
+        <div className="animate-enter [animation-delay:200ms]">
+          <dl className="mt-6 divide-y divide-line/60 rounded-2xl bg-surface-2 px-4 text-sm">
+            <Row label="Status">
+              <span className="text-ok">Confirmed in block {step.block.toLocaleString("en-US")}</span>
+            </Row>
+            <div className="flex items-baseline gap-4 py-3">
+              <dt className="w-20 shrink-0 text-muted">Transaction</dt>
+              <dd className="flex min-w-0 flex-1 items-baseline gap-3">
+                <span className="min-w-0 flex-1 truncate font-mono text-xs" title={step.hash}>
+                  {shortHex(step.hash, 10, 8)}
+                </span>
+                <button onClick={() => void copy()} className="shrink-0 text-xs font-medium text-alabaster/80 hover:text-alabaster">
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </dd>
+            </div>
+          </dl>
+          <div className="mt-5 flex gap-3">
             <a
-              href={txUrl(hash)}
+              href={txUrl(step.hash)}
               target="_blank"
               rel="noreferrer"
-              className="shrink-0 text-xs font-medium text-alabaster/80 hover:text-alabaster"
+              className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-full bg-surface-2 px-5 text-sm font-semibold transition-[background-color,transform] duration-150 hover:bg-line active:scale-[0.97]"
             >
-              View
+              View transaction
+              <Icon name="external" className="size-4" />
             </a>
-          </dd>
+            <Button className="flex-1" onClick={onClose}>
+              Done
+            </Button>
+          </div>
         </div>
-      </dl>
-      <Button className="mt-5 w-full" variant="secondary" onClick={onClose}>
-        Done
-      </Button>
+      )}
     </div>
   );
 }
