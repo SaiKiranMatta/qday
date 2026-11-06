@@ -41,13 +41,26 @@ impl From<StoreError> for WalletError {
     }
 }
 
-/// What a transaction really does, as decoded by the device itself.
+/// What a transaction really does, as decoded by the device itself. Only `Wallet::review` makes
+/// one, so `sign` can't be handed a transaction that skipped its rules.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Review {
+    tx: FrameTx,
+    message: Hash,
+}
+
+impl Review {
     /// The decoded transaction.
-    pub tx: FrameTx,
+    #[must_use]
+    pub fn tx(&self) -> &FrameTx {
+        &self.tx
+    }
+
     /// The hash the signature will cover.
-    pub message: Hash,
+    #[must_use]
+    pub fn message(&self) -> &Hash {
+        &self.message
+    }
 }
 
 /// The wallet.

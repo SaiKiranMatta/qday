@@ -306,7 +306,7 @@ impl Purpose {
         match self {
             Self::Create | Self::ChangeNew(_) => "6 digits".to_string(),
             Self::CreateConfirm(_) | Self::ChangeConfirm(..) => "to confirm".to_string(),
-            Self::Sign(review, _) => format!("for key #{:04}", review.tx.index),
+            Self::Sign(review, _) => format!("for key #{:04}", review.tx().index),
             Self::ChangeOld => "to change it".to_string(),
             Self::Backup => "to show the words".to_string(),
             Self::Restore(_) => "to restore".to_string(),
@@ -463,7 +463,7 @@ fn draw(
                 review: shown.review(),
                 fee: &shown.fee,
                 chain_id: CHAIN_ID,
-                index: review.tx.index,
+                index: review.tx().index,
                 rotation: shown.rotation,
                 seconds_left: seconds_left(approval, now_ms),
                 timeout: TIMEOUT_SECONDS,
@@ -727,7 +727,10 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             ("Rejected", "You rejected it")
         };
         Self::respond(host, &Response::Err(WalletError::Rejected));
-        let detail = format!("No signature. Key #{:04} is still unused.", review.tx.index);
+        let detail = format!(
+            "No signature. Key #{:04} is still unused.",
+            review.tx().index
+        );
         self.show_result(host, false, title, detail);
         self.remember(false, title.to_string(), why.to_string(), None);
     }
@@ -860,7 +863,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
     }
 
     fn sign(&mut self, host: &mut impl Host, review: &Review, shown: &Shown, proof: Proof) {
-        let index = review.tx.index;
+        let index = review.tx().index;
         match self.wallet.sign(review, proof) {
             Ok(signature) => {
                 let response = Response::Sig {
@@ -1357,7 +1360,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
     fn start_review(&mut self, host: &mut impl Host, raw: &[u8], now_ms: u64) {
         match self.wallet.review(raw) {
             Ok(review) => {
-                let Some(shown) = Shown::from_tx(&review.tx) else {
+                let Some(shown) = Shown::from_tx(review.tx()) else {
                     Self::respond(host, &Response::Err(WalletError::BadRequest));
                     self.show_notice("Not shown", "That amount is too long to show whole.");
                     return;
