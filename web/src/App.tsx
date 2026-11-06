@@ -1,35 +1,20 @@
 import { useState } from "react";
 import { type Page, Shell } from "./components/Shell";
 import { Badge, Button, StatusDot, Wordmark } from "./components/ui";
+import type { DeviceStatus } from "@qday/device";
 import { useAccount } from "./lib/useAccount";
+import { useCreateAccount } from "./lib/useCreateAccount";
 import { useDevice } from "./lib/useDevice";
 import { useTokens } from "./lib/useTokens";
 import { MOCK, MOCK_ACCOUNT } from "./lib/wallet";
 import { ActivityPage, DevicePage, WalletPage } from "./pages";
 
 export function App() {
-  const { state, log, connect, refresh, disconnect } = useDevice();
-  const [page, setPage] = useState<Page>("wallet");
-  const tokens = useTokens();
-  const live = useAccount(!MOCK && state.kind === "connected" ? state.status : null, tokens.selected);
-  const account = MOCK ? MOCK_ACCOUNT : live.account;
-  const chain = MOCK ? "live" : live.chain;
+  const { state, log, connect, refresh, disconnect, signFrame } = useDevice();
 
   if (state.kind === "connected") {
-    const { status } = state;
     return (
-      <Shell page={page} onNavigate={setPage} status={status} account={account} onDisconnect={disconnect}>
-        {page === "wallet" && <WalletPage
-            account={account}
-            status={status}
-            tokens={tokens}
-            chain={chain}
-            warning={MOCK ? null : live.warning}
-            onLink={(address) => live.linkAddress(address)}
-            onOpenActivity={() => setPage("activity")} />}
-        {page === "activity" && <ActivityPage account={account} tokens={tokens} />}
-        {page === "device" && <DevicePage status={status} log={log} onRefresh={refresh} />}
-      </Shell>
+      <ConnectedApp status={state.status} log={log} onRefresh={refresh} onDisconnect={disconnect} signFrame={signFrame} />
     );
   }
 
@@ -97,5 +82,55 @@ function ConnectCard({
         </div>
       )}
     </div>
+  );
+}
+
+/** Everything after the device is connected: its account on the chain, setup, and the wallet screens. */
+function ConnectedApp({
+  status,
+  log,
+  onRefresh,
+  onDisconnect,
+  signFrame,
+}: {
+  status: DeviceStatus;
+  log: string[];
+  onRefresh: () => void;
+  onDisconnect: () => void;
+  signFrame: (raw: Uint8Array) => Promise<`0x${string}`>;
+}) {
+  const [page, setPage] = useState<Page>("wallet");
+  const tokens = useTokens();
+  const live = useAccount(MOCK ? null : status, tokens.selected);
+  const setup = useCreateAccount(status, live.onChain?.address ?? null, signFrame, () => void live.refresh());
+  const account = MOCK ? MOCK_ACCOUNT : live.account;
+  const needsSetup = !MOCK && !live.onChain?.deployed;
+
+  return (
+    <Shell page={page} onNavigate={setPage} status={status} account={account} onDisconnect={onDisconnect}>
+      {page === "wallet" && (
+        <WalletPage
+          account={account}
+          status={status}
+          tokens={tokens}
+          chain={MOCK ? "live" : live.chain}
+          error={MOCK ? null : live.error}
+          setup={
+            needsSetup
+              ? {
+                  address: live.onChain?.address ?? null,
+                  balanceWei: live.onChain?.balanceWei ?? 0n,
+                  step: setup.step,
+                  onFund: () => void setup.fund(),
+                  onCreate: () => void setup.create(),
+                }
+              : null
+          }
+          onOpenActivity={() => setPage("activity")}
+        />
+      )}
+      {page === "activity" && <ActivityPage account={account} tokens={tokens} />}
+      {page === "device" && <DevicePage status={status} log={log} onRefresh={onRefresh} />}
+    </Shell>
   );
 }

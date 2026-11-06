@@ -103,5 +103,14 @@ export function useDevice() {
     };
   }, [attach, fail]);
 
-  return { state, log, connect, refresh, disconnect };
+  /** Has the device review and sign an unsigned transaction, then re-reads its key state. */
+  const signFrame = useCallback(async (raw: Uint8Array) => {
+    const current = device.current;
+    if (!current) throw new DeviceError("Connect your QDay first");
+    const signature = await current.signFrame(raw);
+    setState({ kind: "connected", status: await current.status() });
+    return signature;
+  }, []);
+
+  return { state, log, connect, refresh, disconnect, signFrame };
 }

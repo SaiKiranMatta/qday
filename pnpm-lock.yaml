@@ -37,6 +37,9 @@ importers:
       '@qday/device':
         specifier: workspace:*
         version: link:../packages/device
+      '@qday/frame':
+        specifier: workspace:*
+        version: link:../packages/frame
       cryptocurrency-icons:
         specifier: ^0.18.1
         version: 0.18.1

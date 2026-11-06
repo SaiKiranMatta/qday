@@ -6,8 +6,9 @@ import { TokenLogo } from "./components/TokenLogo";
 import { Button, StatusDot } from "./components/ui";
 import { capacity } from "./lib/capacity";
 import { groupThousands, shortHex } from "./lib/format";
-import { isAddress } from "./lib/tokens";
+import { SetupCard } from "./components/SetupCard";
 import type { ChainState } from "./lib/useAccount";
+import type { SetupStep } from "./lib/useCreateAccount";
 import type { TokenList } from "./lib/useTokens";
 import type { AccountView } from "./lib/wallet";
 
@@ -17,16 +18,23 @@ export function WalletPage({
   status,
   tokens,
   chain,
-  warning,
-  onLink,
+  error,
+  setup,
   onOpenActivity,
 }: {
   account: AccountView;
   status: DeviceStatus;
   tokens: TokenList;
   chain: ChainState;
-  warning: string | null;
-  onLink: (address: `0x${string}`) => void;
+  error: string | null;
+  /** Present until the account exists. */
+  setup: {
+    address: `0x${string}` | null;
+    balanceWei: bigint;
+    step: SetupStep;
+    onFund: () => void;
+    onCreate: () => void;
+  } | null;
   onOpenActivity: () => void;
 }) {
   const [managing, setManaging] = useState(false);
@@ -35,8 +43,8 @@ export function WalletPage({
       <div className="space-y-6">
         <section className="chrome-wide grain overflow-hidden rounded-3xl p-8">
           <div className="relative z-10 flex flex-wrap items-end justify-between gap-6">
-            {chain === "unlinked" ? (
-              <LinkAccount onLink={onLink} />
+            {setup ? (
+              <SetupCard {...setup} />
             ) : (
               <div>
                 <div className="text-sm text-alabaster/80">Total balance</div>
@@ -46,7 +54,7 @@ export function WalletPage({
                 {chain === "error" && <div className="mt-2 text-xs text-bad">Couldn't reach the devnet. Retrying.</div>}
               </div>
             )}
-            <div className="flex gap-3">
+            <div className={`flex gap-3 ${setup ? "hidden" : ""}`}>
               <Button variant="onyx" disabled title="Coming next">
                 Send
               </Button>
@@ -57,7 +65,9 @@ export function WalletPage({
           </div>
         </section>
 
-        {warning && <div className="rounded-2xl bg-warn/10 p-4 text-sm text-warn">{warning}</div>}
+        {error && chain === "error" && (
+          <div className="rounded-2xl bg-bad/10 p-4 text-sm text-bad">Couldn't read the devnet: {error}</div>
+        )}
 
         <section className="rounded-3xl bg-surface p-6">
           <div className="flex items-center justify-between">
@@ -107,33 +117,10 @@ export function WalletPage({
         <section className="rounded-3xl bg-surface p-6">
           <h2 className="text-base font-semibold">Receive address</h2>
           <p className="mt-3 break-all font-mono text-xs leading-relaxed text-alabaster/80">
-            {account.address === "0x" ? "Link your account to see its address" : account.address}
+            {account.address === "0x" ? "Finding your address…" : account.address}
           </p>
         </section>
       </aside>
-    </div>
-  );
-}
-
-/** Links the device to its account contract on the devnet. */
-function LinkAccount({ onLink }: { onLink: (address: `0x${string}`) => void }) {
-  const [value, setValue] = useState("");
-  const ok = isAddress(value);
-  return (
-    <div className="w-full max-w-lg">
-      <div className="text-sm text-alabaster/80">Link your account</div>
-      <p className="mt-1 text-xs text-alabaster/60">Paste the address of the account this device controls.</p>
-      <div className="mt-3 flex gap-2">
-        <input
-          value={value}
-          onChange={(e) => setValue(e.target.value.trim())}
-          placeholder="0x…"
-          className="min-w-0 flex-1 rounded-full bg-onyx/70 px-4 py-2.5 font-mono text-xs outline-none placeholder:text-muted focus:ring-1 focus:ring-slate"
-        />
-        <Button variant="onyx" disabled={!ok} onClick={() => ok && onLink(value)}>
-          Link
-        </Button>
-      </div>
     </div>
   );
 }
