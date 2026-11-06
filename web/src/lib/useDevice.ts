@@ -34,6 +34,10 @@ export function useDevice() {
   const device = useRef<QDayDevice | null>(null);
 
   const attach = useCallback(async (next: QDayDevice) => {
+    if (device.current === next) {
+      setState({ kind: "connected", status: await next.status() });
+      return;
+    }
     device.current = next;
     next.onLog((line) => setLog((lines) => [...lines.slice(-(LOG_LIMIT - 1)), line]));
     next.onClose(() => {
@@ -86,12 +90,14 @@ export function useDevice() {
     let cancelled = false;
     void QDayDevice.reconnect()
       .then(async (found) => {
-        if (!found) return;
-        if (cancelled) return void found.close();
+        // A cancelled run leaves the shared connection open for the run that replaced it.
+        if (!found || cancelled) return;
         setState({ kind: "connecting" });
         await attach(found);
       })
-      .catch(fail);
+      .catch((error: unknown) => {
+        if (!cancelled) fail(error);
+      });
     return () => {
       cancelled = true;
     };

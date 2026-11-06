@@ -39,6 +39,9 @@ export class DeviceError extends Error {
 
 type Pending = { resolve: (response: Response | null) => void; timer: ReturnType<typeof setTimeout> };
 
+/** One connection per port: concurrent opens (a click during a reconnect, React running effects twice) share it. */
+const connections = new Map<SerialPort, Promise<QDayDevice>>();
+
 /** A QDay device on a Web Serial port. One request at a time, like the protocol. */
 export class QDayDevice {
   private readonly lines = new LineBuffer();
@@ -71,11 +74,18 @@ export class QDayDevice {
     return ports.length === 1 && ports[0] ? QDayDevice.open(ports[0]) : null;
   }
 
-  static async open(port: SerialPort): Promise<QDayDevice> {
-    await port.open({ baudRate: BAUD });
-    const device = new QDayDevice(port);
-    void device.readLoop();
-    return device;
+  static open(port: SerialPort): Promise<QDayDevice> {
+    const existing = connections.get(port);
+    if (existing) return existing;
+    const opening = (async () => {
+      await port.open({ baudRate: BAUD });
+      const device = new QDayDevice(port);
+      void device.readLoop();
+      return device;
+    })();
+    connections.set(port, opening);
+    opening.catch(() => connections.delete(port));
+    return opening;
   }
 
   /** Lines the device prints that aren't protocol responses. */
@@ -120,6 +130,7 @@ export class QDayDevice {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    connections.delete(this.port);
     this.settle(null);
     try {
       await this.reader?.cancel();
