@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use qday_wallet::activity::{Activity, Entry, Summary};
 use qday_wallet::frame::{Action, FrameTx};
 use qday_wallet::settings::ThemeChoice;
+use qday_wallet::tokens;
 
 use crate::keys::Tab;
 use crate::screens::{Home, Screen};
@@ -29,6 +30,10 @@ pub struct Samples {
     pub rotation: FrameTx,
     /// A call the device doesn't recognise.
     pub unknown: FrameTx,
+    /// A transfer of a token the device knows.
+    pub token: FrameTx,
+    /// A transfer of a token the device doesn't know.
+    pub unknown_token: FrameTx,
     /// A shuffled keypad.
     pub digits: [u8; 10],
     /// Backup words.
@@ -68,6 +73,11 @@ impl Samples {
         for index in 47..67 {
             let summary = match index % 5 {
                 0 => Summary::Other,
+                2 => Summary::TokenTransfer {
+                    token: tokens::KNOWN[0].address,
+                    to,
+                    amount: u128::from(index) * 1_000_000,
+                },
                 1 => Summary::Rotation,
                 _ => Summary::Transfer {
                     to,
@@ -105,6 +115,15 @@ impl Samples {
             huge: FrameTx::transfer(sender, 7, 67, to, u128::MAX),
             rotation: FrameTx::rotation(sender, 7, 1008, [0x18; 32], [0x8c; 32]),
             unknown,
+            token: FrameTx::token_transfer(
+                sender,
+                7,
+                67,
+                tokens::KNOWN[0].address,
+                to,
+                125_500_000,
+            ),
+            unknown_token: FrameTx::token_transfer(sender, 7, 67, [0x5c; 20], to, 125_500_000),
             digits: [7, 2, 9, 0, 5, 1, 8, 3, 6, 4],
             words: [
                 "abandon", "language", "wonder", "orbit", "feature", "clever", "mountain",
@@ -149,6 +168,11 @@ impl Samples {
             ("review-huge", Screen::Review(&self.huge, 9)),
             ("review-rotation", Screen::Review(&self.rotation, 30)),
             ("review-warning", Screen::Review(&self.unknown, 12)),
+            ("review-token", Screen::Review(&self.token, 25)),
+            (
+                "review-token-unknown",
+                Screen::Review(&self.unknown_token, 12)
+            ),
             (
                 "restore-confirm",
                 Screen::RestoreConfirm {

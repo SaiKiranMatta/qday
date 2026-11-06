@@ -7,12 +7,15 @@ use qday_wallet::activity::{Activity, Entry, Summary};
 use qday_wallet::frame::{Action as TxAction, Address, CHAIN_ID, FrameTx};
 use qday_wallet::hex;
 use qday_wallet::settings::{CROSSES, ThemeChoice};
+use qday_wallet::tokens;
 use qday_wallet::wallet::{PREPARE_FROM, RESERVED_FROM};
 use qday_xmss::{Hash, LEAVES};
 
 use crate::fb::{Framebuffer, WIDTH};
 use crate::fonts::{BODY, Font, HERO, LABEL, NUMBER, SMALL, TITLE};
-use crate::format::{address_lines, duration, eth, grouped, key_number, key_parts};
+use crate::format::{
+    address_lines, base_units, duration, eth, grouped, key_number, key_parts, token,
+};
 use crate::keys::{self, Action, KeyBar, Label, SoftKey, Style, Tab};
 use crate::theme::{Color, Theme};
 
@@ -249,6 +252,14 @@ fn draw_account_key(fb: &mut Framebuffer, theme: &Theme, x: i32, y: i32, key: &H
 fn summary_text(summary: &Summary) -> String {
     match summary {
         Summary::Transfer { value, .. } => eth(*value),
+        Summary::TokenTransfer {
+            token: contract,
+            amount,
+            ..
+        } => tokens::known(contract).map_or_else(
+            || "Token transfer".to_string(),
+            |known| token(*amount, known.decimals, known.symbol),
+        ),
         Summary::Rotation => "Rotation".to_string(),
         Summary::Creation => "Account created".to_string(),
         Summary::Other => "Unknown call".to_string(),
@@ -442,6 +453,34 @@ fn draw_address(fb: &mut Framebuffer, theme: &Theme, y: i32, label: &str, addres
     fb.text(&SMALL, VALUE_X, y + 15, &second, theme.text);
 }
 
+/// The top of a token transfer's review. Returns where the next row goes.
+fn draw_token_transfer(
+    fb: &mut Framebuffer,
+    theme: &Theme,
+    mut y: i32,
+    contract: &Address,
+    to: &Address,
+    amount: u128,
+) -> i32 {
+    if let Some(known) = tokens::known(contract) {
+        fb.text(&SMALL, MARGIN, 24, "Send", theme.muted);
+        draw_amount(fb, theme, &token(amount, known.decimals, known.symbol));
+    } else {
+        fb.text(
+            &LABEL,
+            MARGIN,
+            24,
+            "Unknown token: check carefully",
+            theme.warning,
+        );
+        draw_amount(fb, theme, &base_units(amount));
+        draw_address(fb, theme, y, "Token", contract);
+        y += 15 + ROW_STEP;
+    }
+    draw_address(fb, theme, y, "To", to);
+    y + 15 + ROW_STEP
+}
+
 fn draw_review(fb: &mut Framebuffer, theme: &Theme, tx: &FrameTx) {
     let mut y = 82;
     match &tx.action {
@@ -450,6 +489,9 @@ fn draw_review(fb: &mut Framebuffer, theme: &Theme, tx: &FrameTx) {
             draw_amount(fb, theme, &eth(*value));
             draw_address(fb, theme, y, "To", to);
             y += 15 + ROW_STEP;
+        }
+        TxAction::TokenTransfer { token, to, amount } => {
+            y = draw_token_transfer(fb, theme, y, token, to, *amount);
         }
         TxAction::Rotate { next_root, .. } => {
             fb.text(&SMALL, MARGIN, 24, "Rotate to a new tree", theme.muted);
@@ -508,7 +550,13 @@ fn draw_review(fb: &mut Framebuffer, theme: &Theme, tx: &FrameTx) {
         &format!("Up to {}", eth(tx.max_fee_wei())),
     );
     y += ROW_STEP;
-    if !matches!(tx.action, TxAction::Other { .. }) {
+    // Warning screens need the room, so they leave out the network.
+    let warns = match &tx.action {
+        TxAction::Other { .. } => true,
+        TxAction::TokenTransfer { token, .. } => tokens::known(token).is_none(),
+        _ => false,
+    };
+    if !warns {
         labelled(
             fb,
             theme,

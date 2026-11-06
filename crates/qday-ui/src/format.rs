@@ -35,6 +35,26 @@ pub fn eth(wei: u128) -> String {
     format!("{whole}.{} ETH", digits.trim_end_matches('0'))
 }
 
+/// An amount of a token with `decimals` places, with every significant digit: "125.5 USDC".
+#[must_use]
+pub fn token(amount: u128, decimals: u8, symbol: &str) -> String {
+    let places = usize::from(decimals);
+    let unit = 10_u128.checked_pow(u32::from(decimals));
+    let (whole, fraction) = unit.map_or((0, amount), |unit| (amount / unit, amount % unit));
+    let whole = with_separators(&whole.to_string());
+    if fraction == 0 {
+        return format!("{whole} {symbol}");
+    }
+    let digits = format!("{fraction:0places$}");
+    format!("{whole}.{} {symbol}", digits.trim_end_matches('0'))
+}
+
+/// An amount in a token's smallest unit, for tokens the device doesn't know: "125,500,000 units".
+#[must_use]
+pub fn base_units(amount: u128) -> String {
+    format!("{} units", with_separators(&amount.to_string()))
+}
+
 /// A count with thousands separators.
 #[must_use]
 pub fn grouped(value: u32) -> String {
@@ -96,7 +116,7 @@ pub fn duration(ms: u64) -> String {
 mod tests {
     use alloc::string::ToString;
 
-    use super::{address_lines, duration, eth, grouped, key_number, key_parts};
+    use super::{address_lines, base_units, duration, eth, grouped, key_number, key_parts, token};
 
     #[test]
     fn whole_and_fractional_ether_are_exact() {
@@ -115,6 +135,14 @@ mod tests {
             eth(u128::MAX),
             "340,282,366,920,938,463,463.374607431768211455 ETH"
         );
+    }
+
+    #[test]
+    fn token_amounts_use_the_tokens_decimals() {
+        assert_eq!(token(125_500_000, 6, "USDC"), "125.5 USDC");
+        assert_eq!(token(2_500_000_000, 6, "USDC"), "2,500 USDC");
+        assert_eq!(token(1, 8, "WBTC"), "0.00000001 WBTC");
+        assert_eq!(base_units(125_500_000), "125,500,000 units");
     }
 
     #[test]
