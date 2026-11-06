@@ -61,7 +61,7 @@ fn main() -> ! {
     let mut display = Builder::new(ILI9341Rgb565, interface)
         .reset_pin(reset)
         .color_order(ColorOrder::Bgr)
-        .orientation(Orientation::new().rotate(Rotation::Deg270))
+        .orientation(Orientation::new().rotate(Rotation::Deg90).flip_horizontal())
         .init(&mut delay)
         .expect("the display starts");
 

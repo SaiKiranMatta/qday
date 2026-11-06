@@ -59,5 +59,5 @@ and the serial monitor prints a `screen test:` line for each page.
 | Dark screen | VCC, GND or LED wiring, or no firmware running |
 | Flashing cannot connect | GPIO46 is a boot pin: unplug the e9 to f9 jumper, flash, then replace it |
 | Red and blue swapped | Change `ColorOrder::Bgr` to `ColorOrder::Rgb` in `src/main.rs` |
-| Text mirrored | Add `.flip_horizontal()` after `.rotate(Rotation::Deg270)` in `src/main.rs` |
-| Text upside down | Change `Rotation::Deg270` to `Rotation::Deg90` in `src/main.rs` |
+| Text mirrored | Remove `.flip_horizontal()` in `src/main.rs` |
+| Text upside down | Change `.flip_horizontal()` to `.flip_vertical()` in `src/main.rs` |
