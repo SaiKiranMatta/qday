@@ -6,6 +6,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+bip39 = { version = "2.2", default-features = false }
 qday-xmss = { path = "../qday-xmss" }
 
 [lints]

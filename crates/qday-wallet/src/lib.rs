@@ -4,5 +4,7 @@
 
 extern crate alloc;
 
+pub mod backup;
 pub mod frame;
+pub mod hex;
 pub mod rlp;

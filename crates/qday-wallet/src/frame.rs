@@ -220,7 +220,7 @@ impl FrameTx {
 
         let mut frames = payload.list().ok()?;
         ParsedFrame::read(&mut frames)?;
-        let index = spend_index(&ParsedFrame::read(&mut frames)?.data)?;
+        let index = spend_index(ParsedFrame::read(&mut frames)?.data)?;
         let action = ParsedFrame::read(&mut frames)?.into_action();
         frames.finish().ok()?;
 
