@@ -123,8 +123,9 @@ fn the_maximal_key_is_degenerate() {
 
 #[test]
 fn near_zero_keys_are_degenerate() {
+    let values = [0, 1, 2];
     assert!(is_degenerate(&key_with_coefficients(
-        |index| (index % 3) as u16
+        |index| values[index % 3]
     )));
 }
 
