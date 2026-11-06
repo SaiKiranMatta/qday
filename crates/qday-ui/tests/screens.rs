@@ -56,6 +56,7 @@ fn every_screen() -> Vec<(&'static str, Draw)> {
         index: 67,
         rotation: false,
         seconds_left: 24,
+        fraction_left: 0.8,
         timeout: 30,
     };
     let items = [

@@ -128,6 +128,8 @@ pub struct ReviewInfo<'a> {
     pub rotation: bool,
     /// Seconds left to decide, and the full timeout.
     pub seconds_left: u32,
+    /// The exact share of the time left, 0 to 1, for a countdown that sweeps instead of ticking.
+    pub fraction_left: f32,
     pub timeout: u32,
 }
 

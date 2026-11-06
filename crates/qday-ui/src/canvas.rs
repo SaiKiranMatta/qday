@@ -419,6 +419,93 @@ impl<'a> Canvas<'a> {
         });
     }
 
+    /// Eases the rows that changed with a new screen into place. `rows` marks them; `t` runs from 0
+    /// (just arrived) to 1 (settled). They start a few pixels low and blended into the background,
+    /// and land as `t` reaches 1, while unchanged rows (a shared header, the tab bar) stay put.
+    /// Works in place on the one frame, so it needs no second buffer.
+    pub fn settle_rows(&mut self, rows: &[bool], t: f32) {
+        let rest = 1.0 - t.clamp(0.0, 1.0);
+        let rest = rest * rest * rest; // ease out: quick at first, gentle as it lands
+        let background = self.px[0];
+        let row_len = WIDTH as usize;
+        let drop = (rest * 10.0) as usize;
+        if drop > 0 {
+            for y in (0..HEIGHT as usize).rev() {
+                if !rows.get(y).copied().unwrap_or(false) {
+                    continue;
+                }
+                let start = y * row_len;
+                if y >= drop && rows.get(y - drop).copied().unwrap_or(false) {
+                    self.px
+                        .copy_within((y - drop) * row_len..(y - drop + 1) * row_len, start);
+                } else {
+                    self.px[start..start + row_len].fill(background);
+                }
+            }
+        }
+        let alpha = (rest * 255.0) as u8;
+        if alpha == 0 {
+            return;
+        }
+        let under = load(background);
+        for (y, _) in rows.iter().enumerate().filter(|(_, changed)| **changed) {
+            for px in &mut self.px[y * row_len..(y + 1) * row_len] {
+                *px = store(under.over(load(*px), alpha));
+            }
+        }
+    }
+
+    /// The brand's chrome surface, as the web wallet draws its balance card: Onyx on the left
+    /// shading to Blue Slate through the middle, Alabaster catching the bottom-right corner, and a
+    /// fine grain over it. Each pixel is worked out in 8-bit colour and dithered into RGB565, so
+    /// the gradient doesn't band; the rounded edge is anti-aliased against what's underneath.
+    pub fn chrome(&mut self, rect: Rect, radius: f32) {
+        const ONYX: Color = Color::hex(0x0A0A0A);
+        const SHADE: Color = Color::hex(0x161B20);
+        const EDGE: Color = Color::hex(0x2F3B45);
+        const SLATE: Color = Color::hex(0x536878);
+        const ALABASTER: Color = Color::hex(0xE5E4E2);
+        // An elliptical glow as CSS draws `radial-gradient(rx ry at cx cy, colour 0%, transparent stop)`.
+        let lobe = |u: f32, v: f32, (cx, cy, rx, ry, stop): (f32, f32, f32, f32, f32)| {
+            let d = hypot((u - cx) / rx, (v - cy) / ry);
+            (1.0 - d / stop).clamp(0.0, 1.0)
+        };
+        let (x0, x1, y0, y1) = clip(rect, 0.0);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                let coverage = (0.5 - sd_round_rect(px, py, rect, radius)).clamp(0.0, 1.0);
+                if coverage <= 0.0 {
+                    continue;
+                }
+                let u = (px - rect.x) / rect.w;
+                let v = (py - rect.y) / rect.h;
+                let base = if u < 0.38 {
+                    ONYX.lerp(SHADE, u / 0.38)
+                } else {
+                    SHADE.lerp(EDGE, (u - 0.38) / 0.62)
+                };
+                let slate = lobe(u, v, (0.62, 0.70, 0.60, 1.60, 0.72));
+                let light = lobe(u, v, (1.00, 1.10, 0.45, 1.40, 0.62));
+                let mut color = base.lerp(SLATE, slate).lerp(ALABASTER, light);
+                // Grain: a small, fixed per-pixel nudge of brightness, like the brand's film grain.
+                let n = (x.wrapping_mul(73_856_093) ^ y.wrapping_mul(19_349_663)) as u32;
+                let grain = ((n >> 7) % 9) as i16 - 4;
+                let nudge = |c: u8| (i16::from(c) + grain).clamp(0, 255) as u8;
+                color = Color {
+                    r: nudge(color.r),
+                    g: nudge(color.g),
+                    b: nudge(color.b),
+                };
+                let i = (y * WIDTH + x) as usize;
+                if coverage < 1.0 {
+                    color = color.over(load(self.px[i]), (coverage * 255.0) as u8);
+                }
+                self.px[i] = color.to_565_dithered(x, y).swap_bytes();
+            }
+        }
+    }
+
     /// A faint light catching the top edge of a rounded card.
     pub fn gradient_clip_top_highlight(&mut self, r: Rect, radius: f32) {
         let top = Rect::new(r.x + 1.0, r.y + 1.0, r.w - 2.0, (r.h / 2.0).min(22.0));

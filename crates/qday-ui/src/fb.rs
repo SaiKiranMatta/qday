@@ -48,6 +48,16 @@ impl Framebuffer {
         self.pixels[y * ROW_PIXELS + x]
     }
 
+    /// Rows that differ from what was last sent to the screen, before they are sent.
+    #[must_use]
+    pub fn unsent_rows(&self) -> Vec<bool> {
+        (0..ROWS)
+            .map(|row| {
+                self.sent[row] != Some(row_hash(&self.pixels[row * ROW_PIXELS..][..ROW_PIXELS]))
+            })
+            .collect()
+    }
+
     /// Calls `send` for each run of changed rows, as (first row, rows, stored pixels), then marks
     /// them as sent.
     pub fn send_changes(&mut self, mut send: impl FnMut(i32, i32, &[u16])) {

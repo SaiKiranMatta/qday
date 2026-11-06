@@ -415,6 +415,16 @@ fn keys_for(mode: &Mode) -> Keys {
     }
 }
 
+/// How long a new screen takes to settle in.
+const ENTER_MS: u64 = 220;
+/// How often a running countdown moves.
+const SWEEP_MS: u64 = 50;
+
+/// Screens that settle in when they arrive. Calibration and passcode entry change in place.
+fn settles(screen: &str) -> bool {
+    !matches!(screen, "calibrate")
+}
+
 /// Draws a mode. A free function, so drawing can borrow the framebuffer alongside it.
 fn draw(
     c: &mut Canvas,
@@ -466,6 +476,8 @@ fn draw(
                 index: review.tx().index,
                 rotation: shown.rotation,
                 seconds_left: seconds_left(approval, now_ms),
+                fraction_left: approval.remaining_ms(now_ms) as f32
+                    / (TIMEOUT_SECONDS as f32 * 1000.0),
                 timeout: TIMEOUT_SECONDS,
             };
             screens::review(c, &info, flash);
@@ -546,6 +558,14 @@ pub struct App<F, C, R> {
     touched_slot: Option<usize>,
     dirty: bool,
     drawn_tick: u64,
+    /// The screen last drawn, to notice when it changes.
+    shown: Option<&'static str>,
+    /// A new screen settling in: when it arrived and which rows changed with it.
+    entering: Option<(u64, Vec<bool>)>,
+    /// The last frame was mid-motion, so one settled frame is still owed.
+    drawn_moving: bool,
+    /// The countdown's last drawn step, while one sweeps.
+    drawn_sweep: u64,
 }
 
 impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
@@ -558,7 +578,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         host: &mut impl Host,
     ) -> Self {
         let saved = settings.theme().ok().and_then(Theme::from_u8);
-        theme::set(saved.unwrap_or(Theme::StandardLight));
+        theme::set(saved.unwrap_or(Theme::DEFAULT));
         let calibration = settings.calibration().ok().flatten();
         let mut app = Self {
             wallet,
@@ -584,6 +604,10 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             touched_slot: None,
             dirty: true,
             drawn_tick: 0,
+            shown: None,
+            entering: None,
+            drawn_moving: false,
+            drawn_sweep: 0,
         };
         if calibrate || calibration.is_none() {
             app.mode = Mode::Calibrate {
@@ -1407,17 +1431,35 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
 
     fn redraw(&mut self, host: &mut impl Host) {
         let now_ms = host.now_ms();
+        let screen = self.screen_name();
+        let new_screen = self.shown != Some(screen);
+        let moving = self
+            .entering
+            .as_ref()
+            .is_some_and(|(since, _)| now_ms.saturating_sub(*since) < ENTER_MS);
+        // A running countdown redraws a few times a second so its ring sweeps.
+        let sweep = if matches!(self.mode, Mode::Review { .. }) {
+            now_ms / SWEEP_MS
+        } else {
+            0
+        };
         let tick = self.tick(now_ms);
-        if !self.dirty && tick == self.drawn_tick {
+        if !self.dirty
+            && !new_screen
+            && !moving
+            && !self.drawn_moving
+            && tick == self.drawn_tick
+            && sweep == self.drawn_sweep
+        {
             return;
         }
         self.dirty = false;
         self.drawn_tick = tick;
+        self.drawn_sweep = sweep;
         let lock_ms = self.wallet.locked_for(now_ms);
         let flash = (0..4).find(|&key| self.keys[key]);
-        let mut canvas = self.fb.canvas();
         draw(
-            &mut canvas,
+            &mut self.fb.canvas(),
             &self.mode,
             &self.view,
             lock_ms,
@@ -1425,6 +1467,23 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             flash,
             self.touched_slot,
         );
+        if new_screen {
+            // The first screen after starting appears at once; later ones settle in, but only the
+            // rows they actually change.
+            self.entering =
+                (self.shown.is_some() && settles(screen)).then(|| (now_ms, self.fb.unsent_rows()));
+            self.shown = Some(screen);
+        }
+        self.drawn_moving = false;
+        if let Some((since, rows)) = &self.entering {
+            let t = now_ms.saturating_sub(*since) as f32 / ENTER_MS as f32;
+            if t < 1.0 {
+                self.fb.canvas().settle_rows(rows, t);
+                self.drawn_moving = true;
+            } else {
+                self.entering = None;
+            }
+        }
         host.present(&mut self.fb);
     }
 

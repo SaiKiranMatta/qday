@@ -173,10 +173,10 @@ fn adjacent_keys_with_the_same_action_draw_as_one_control() {
 }
 
 #[test]
-fn themes_cycle_through_all_five_and_survive_a_byte() {
+fn themes_cycle_through_all_six_and_survive_a_byte() {
     let mut t = Theme::StandardLight;
     let mut seen = Vec::new();
-    for _ in 0..5 {
+    for _ in 0..Theme::ALL.len() {
         seen.push(t);
         t = t.next();
     }
@@ -190,6 +190,17 @@ fn themes_cycle_through_all_five_and_survive_a_byte() {
     assert_eq!(Theme::Brutal.family(), Family::Brutal);
     assert_eq!(Theme::RetroAmber.family(), Family::Terminal);
     assert_eq!(Theme::RetroGreen.name(), "Retro Green");
+    assert_eq!(Theme::Obsidian.family(), Family::Standard);
+    assert_eq!(
+        Theme::DEFAULT,
+        Theme::Obsidian,
+        "a fresh device shows the brand's theme"
+    );
+    assert_eq!(
+        Theme::from_u8(5),
+        Some(Theme::Obsidian),
+        "earlier themes keep their saved numbers"
+    );
 }
 
 #[test]

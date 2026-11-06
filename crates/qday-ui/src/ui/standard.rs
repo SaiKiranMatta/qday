@@ -1,6 +1,9 @@
 //! Standard Light / Dark: monochrome,
 //! light grey with cards a step darker, black pills, green only for success,
 //! greyed secondary digits, text tabs and a dot-matrix key map.
+//!
+//! Obsidian shares these layouts in the web wallet's colours (Onyx, its surfaces, Alabaster), with
+//! the brand's chrome gradient behind the account key and the amount under review.
 
 use crate::canvas::{Canvas, Color, Rect, TextStyle};
 use crate::fonts::{BODY, BODY_STRONG, CAPTION, DISPLAY, Font, HEADLINE, TITLE};
@@ -53,11 +56,41 @@ const DARK: P = P {
     ..LIGHT
 };
 
+/// The web wallet's palette: its surfaces, text and status colours.
+const OBSIDIAN: P = P {
+    bg: Color::hex(0x0A0A0A),
+    card: Color::hex(0x141517),
+    fill: Color::hex(0x1C1E21),
+    text: Color::hex(0xE5E4E2),
+    muted: Color::hex(0x8B9198),
+    dot: Color::hex(0x2A2D31),
+    primary: Color::hex(0xE5E4E2),
+    on_primary: Color::hex(0x0A0A0A),
+    success: Color::hex(0x4CC38A),
+    warning: Color::hex(0xD9A23B),
+    danger: Color::hex(0xE5534B),
+    eth: Color::hex(0x627EEA),
+};
+
+/// Secondary text on the chrome: Alabaster at three quarters, as the web card uses it.
+const ON_CHROME_MUTED: Color = Color::hex(0xB3B4B4);
+
 fn p() -> &'static P {
-    if theme::current() == Theme::StandardDark {
-        &DARK
+    match theme::current() {
+        Theme::StandardDark => &DARK,
+        Theme::Obsidian => &OBSIDIAN,
+        _ => &LIGHT,
+    }
+}
+
+/// The lead card of a screen in Obsidian: the chrome gradient. Other themes keep their plain
+/// background. Returns the colour for secondary text drawn over it.
+fn lead_card(c: &mut Canvas, rect: Rect) -> Color {
+    if theme::current() == Theme::Obsidian {
+        c.chrome(rect, 16.0);
+        ON_CHROME_MUTED
     } else {
-        &LIGHT
+        p().muted
     }
 }
 
@@ -147,11 +180,12 @@ fn controls(c: &mut Canvas, keys: &Keys, pressed: Option<usize>) {
 }
 
 /// Time left to decide, in K3's column (which does nothing).
-fn countdown(c: &mut Canvas, seconds_left: u32, timeout: u32) {
+fn countdown(c: &mut Canvas, seconds_left: u32, timeout: u32, fraction_left: Option<f32>) {
     let p = p();
     let (cx, cy) = (200.0, 211.0);
     c.ring(cx, cy, 13.0, 2.5, p.dot, 255);
-    let left = seconds_left as f32 / timeout.max(1) as f32;
+    // The arc sweeps with the exact time when it's known, and steps by seconds otherwise.
+    let left = fraction_left.unwrap_or(seconds_left as f32 / timeout.max(1) as f32);
     c.arc(cx, cy, 13.0, 2.5, 0.0, left, p.text, 255);
     c.text_centered(
         cx as i32,
@@ -270,7 +304,8 @@ pub fn home(
     let p = p();
     c.clear(p.bg);
     header(c, s);
-    c.text(16, 48, "Account key", &ts(&CAPTION, p.muted));
+    let muted = lead_card(c, Rect::new(8.0, 31.0, 304.0, 81.0));
+    c.text(16, 48, "Account key", &ts(&CAPTION, muted));
     let (head, tail) = hex_parts(root);
     runs(
         c,
@@ -278,7 +313,7 @@ pub fn home(
         84,
         &[
             (head.as_str(), ts(&DISPLAY, p.text)),
-            ("...", ts(&DISPLAY, p.muted)),
+            ("...", ts(&DISPLAY, muted)),
             (tail.as_str(), ts(&DISPLAY, p.text)),
         ],
     );
@@ -527,6 +562,7 @@ pub fn device(
 pub fn review(c: &mut Canvas, info: &ReviewInfo, pressed: Option<usize>) {
     let p = p();
     c.clear(p.bg);
+    let muted = lead_card(c, Rect::new(8.0, 4.0, 304.0, 81.0));
     let risky = info.review.is_risky();
     let (heading, col) = if risky {
         ("Check carefully", p.warning)
@@ -539,7 +575,7 @@ pub fn review(c: &mut Canvas, info: &ReviewInfo, pressed: Option<usize>) {
             306,
             22,
             text!(20, "Chain {}", info.chain_id).as_str(),
-            &ts(&BODY, p.muted),
+            &ts(&BODY, muted),
         );
     }
 
@@ -563,13 +599,13 @@ pub fn review(c: &mut Canvas, info: &ReviewInfo, pressed: Option<usize>) {
             if eth {
                 eth_coin(c, 286.0, 46.0, 16.0, p.eth);
             }
-            c.text(16, 77, "Send", &ts(&BODY, p.muted));
+            c.text(16, 77, "Send", &ts(&BODY, muted));
             card_rows(c, 88.0, &[Row::Address("To", to), fee, key_row]);
         }
         Review::Token { amount, to, token } => {
             hero(c, amount, p.text, 290);
             let sub = text!(48, "Token {}... (raw units)", &token[..token.len().min(6)]);
-            c.text(16, 77, sub.as_str(), &ts(&BODY, p.muted));
+            c.text(16, 77, sub.as_str(), &ts(&BODY, muted));
             card_rows(c, 88.0, &[Row::Address("To", to), fee, key_row]);
         }
         Review::Call {
@@ -587,7 +623,7 @@ pub fn review(c: &mut Canvas, info: &ReviewInfo, pressed: Option<usize>) {
                 16,
                 77,
                 text!(40, "Contract call, sends {value}").as_str(),
-                &ts(&BODY, p.muted),
+                &ts(&BODY, muted),
             );
             card_rows(c, 88.0, &[Row::Address("Contract", contract), fee, key_row]);
         }
@@ -607,18 +643,13 @@ pub fn review(c: &mut Canvas, info: &ReviewInfo, pressed: Option<usize>) {
                 16,
                 77,
                 text!(32, "Function {selector}").as_str(),
-                &ts(&BODY, p.muted),
+                &ts(&BODY, muted),
             );
             card_rows(c, 88.0, &[fee, key_row]);
         }
         Review::Blind { description, hash } => {
             hero(c, "Blind signature", p.warning, 290);
-            c.text(
-                16,
-                77,
-                "The laptop says (not checked):",
-                &ts(&BODY, p.muted),
-            );
+            c.text(16, 77, "The laptop says (not checked):", &ts(&BODY, muted));
             card_rows(
                 c,
                 88.0,
@@ -631,7 +662,7 @@ pub fn review(c: &mut Canvas, info: &ReviewInfo, pressed: Option<usize>) {
         }
     }
     controls(c, &nav::review_keys(), pressed);
-    countdown(c, info.seconds_left, info.timeout);
+    countdown(c, info.seconds_left, info.timeout, Some(info.fraction_left));
 }
 
 pub fn passcode(c: &mut Canvas, pc: &Passcode, pressed: Option<usize>) {
@@ -856,7 +887,7 @@ pub fn restore_confirm(
         ],
     );
     controls(c, &nav::review_keys(), pressed);
-    countdown(c, seconds_left, timeout);
+    countdown(c, seconds_left, timeout, None);
 }
 
 pub fn notice(c: &mut Canvas, title: &str, detail: &str) {
