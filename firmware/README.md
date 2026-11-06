@@ -5,7 +5,9 @@ the screen in landscape and cycles red, green, blue and a text page.
 
 ## Wiring
 
-Use the labels printed on the board.
+Use the labels printed on the board. The diagram lists the pins in wire order, not board order.
+
+![Wiring from the screen to the ESP32-S3](wiring.svg)
 
 | Screen pin | Connect to |
 |---|---|

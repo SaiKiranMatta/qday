@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="450" viewBox="0 0 680 450" role="img" font-family="Helvetica, Arial, sans-serif" font-size="14" fill="#2C2C2A">
+  <title>Wiring from the MSP2807 screen to the YD-ESP32-S3</title>
+  <desc>Eight wires connect the screen to the board: VCC and LED to 3V3, GND to GND, CS to GPIO10, RESET to GPIO14, DC to GPIO9, MOSI to GPIO11 and SCK to GPIO12. MISO and the touch pins are not connected.</desc>
+  <rect width="680" height="450" fill="#FFFFFF"/>
+
+  <rect x="60" y="50" width="200" height="345" rx="8" fill="#F1EFE8" stroke="#888780"/>
+  <rect x="420" y="50" width="200" height="285" rx="8" fill="#F1EFE8" stroke="#888780"/>
+  <text x="160" y="77" text-anchor="middle" font-weight="bold">MSP2807 screen</text>
+  <text x="520" y="77" text-anchor="middle" font-weight="bold">YD-ESP32-S3</text>
+
+  <g stroke-width="2.5" stroke-linecap="round">
+    <line x1="260" y1="100" x2="420" y2="100" stroke="#E24B4A"/>
+    <line x1="260" y1="130" x2="420" y2="130" stroke="#888780" stroke-dasharray="8 5"/>
+    <line x1="260" y1="160" x2="420" y2="160" stroke="#1D9E75"/>
+    <line x1="260" y1="190" x2="420" y2="190" stroke="#1D9E75"/>
+    <line x1="260" y1="220" x2="420" y2="220" stroke="#1D9E75"/>
+    <line x1="260" y1="250" x2="420" y2="250" stroke="#1D9E75"/>
+    <line x1="260" y1="280" x2="420" y2="280" stroke="#1D9E75"/>
+    <line x1="260" y1="310" x2="420" y2="310" stroke="#E24B4A"/>
+  </g>
+
+  <g>
+    <text x="80" y="105">1  VCC</text>
+    <text x="80" y="135">2  GND</text>
+    <text x="80" y="165">3  CS</text>
+    <text x="80" y="195">4  RESET</text>
+    <text x="80" y="225">5  DC/RS</text>
+    <text x="80" y="255">6  SDI (MOSI)</text>
+    <text x="80" y="285">7  SCK</text>
+    <text x="80" y="315">8  LED</text>
+  </g>
+  <g font-size="12" fill="#5F5E5A">
+    <text x="80" y="344">9  SDO (MISO)</text>
+    <text x="80" y="374">10-14  Touch pins</text>
+    <text x="276" y="344">Not connected</text>
+    <text x="276" y="374">Not connected</text>
+  </g>
+
+  <g text-anchor="end">
+    <text x="600" y="105">3V3</text>
+    <text x="600" y="135">GND</text>
+    <text x="600" y="165">GPIO10</text>
+    <text x="600" y="195">GPIO14</text>
+    <text x="600" y="225">GPIO9</text>
+    <text x="600" y="255">GPIO11</text>
+    <text x="600" y="285">GPIO12</text>
+    <text x="600" y="315">3V3</text>
+  </g>
+
+  <g stroke-width="2.5" stroke-linecap="round">
+    <line x1="150" y1="425" x2="180" y2="425" stroke="#E24B4A"/>
+    <line x1="270" y1="425" x2="300" y2="425" stroke="#888780" stroke-dasharray="8 5"/>
+    <line x1="390" y1="425" x2="420" y2="425" stroke="#1D9E75"/>
+  </g>
+  <g font-size="12" fill="#5F5E5A">
+    <text x="188" y="429">3.3 V power</text>
+    <text x="308" y="429">Ground</text>
+    <text x="428" y="429">Signal</text>
+  </g>
+</svg>
