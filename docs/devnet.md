@@ -72,10 +72,11 @@ mempool note ahead of the real error.
 Tested on 2026-11-07 in a browser, on the same chain. The page was the real web app. A test-only Web
 Serial port connected it to the real app and wallet code on simulated flash. No board was involved.
 
-The chain's own gateway refuses an XMSS account made by the factory: its budget for an unstaked sender is
-100,000 gas, and `tools/devnet/local/up.sh` is what raises it. The XMSS rows below went through a throwaway
-second gateway, patched as `up.sh` patches it. The ML-DSA account is staked, so it needs no patch, and
-`scripts/mldsa-demo.sh` sent through the chain's own gateway the same day.
+An XMSS account made by the factory is unstaked, and the sidecar's budget for an unstaked sender is 100,000
+gas. `tools/devnet/local/up.sh` raises that. The XMSS rows below went through a throwaway second gateway with
+that raise. The chain's own gateway and miner were then raised to 10,000,000 too. Through them, a new XMSS
+account deployed itself at 467,878 gas and an existing one sent at 191,957 gas. The change is a file copied into those two containers, so recreating
+them loses it. The ML-DSA account is staked, so it never needed this.
 
 | Step | Account | Result |
 |---|---|---|
