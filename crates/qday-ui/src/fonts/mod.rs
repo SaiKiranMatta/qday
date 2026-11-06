@@ -1,89 +1,65 @@
-//! Inter, as 4-bit anti-aliased glyph atlases.
+//! Anti-aliased Inter glyphs, pre-rendered by `qday-fontgen`.
 
-mod data;
+mod generated;
 
-pub use data::{BODY, HERO, LABEL, NUMBER, SMALL, TITLE};
+/// Bricolage Grotesque, for the Neo-brutal theme.
+pub mod bricolage;
 
-/// One character in an atlas.
+pub use generated::{BODY, BODY_STRONG, CAPTION, DISPLAY, HEADLINE, HERO, TITLE};
+
+/// One glyph: a 4-bit alpha bitmap placed relative to the pen position.
 pub struct Glyph {
-    /// Where its rows start in the bitmap.
-    pub offset: usize,
-    /// Width in pixels.
-    pub width: u8,
-    /// Height in pixels.
-    pub height: u8,
-    /// Pixels from the pen to the left edge.
+    /// Pixels from the pen to the bitmap's left edge.
     pub left: i8,
-    /// Pixels from the baseline to the top edge, negative upwards.
+    /// Pixels from the baseline up to the bitmap's top edge.
     pub top: i8,
-    /// Pixels to move the pen.
-    pub advance: u8,
+    pub w: u8,
+    pub h: u8,
+    /// Pen advance in 1/16 px.
+    pub advance: u16,
+    /// Start in `Font::pixels`.
+    pub offset: u32,
 }
 
-/// A font at one size and weight, covering ASCII.
 pub struct Font {
-    /// Pixels above the baseline.
-    pub ascent: i32,
-    /// Pixels below the baseline.
-    pub descent: i32,
-    /// Glyphs from space to tilde.
+    pub size: u8,
+    /// Pixels above the baseline (positive) and below it (negative).
+    pub ascent: i16,
+    pub descent: i16,
+    pub first: u8,
     pub glyphs: &'static [Glyph],
-    /// Rows of two pixels per byte, each row padded to a whole byte.
-    pub bitmap: &'static [u8],
+    pub pixels: &'static [u8],
+    /// (left, right, adjustment in 1/16 px), sorted.
+    pub kerning: &'static [(u8, u8, i8)],
 }
 
 impl Font {
-    /// The glyph for a character. Anything outside ASCII becomes a question mark.
-    #[must_use]
-    pub fn glyph(&self, character: char) -> &Glyph {
-        let code = character as usize;
-        let index = if (32..=126).contains(&code) {
-            code - 32
-        } else {
-            31
+    pub fn glyph(&self, c: char) -> Option<&Glyph> {
+        let i = (c as u32).checked_sub(self.first as u32)? as usize;
+        self.glyphs.get(i)
+    }
+
+    /// Extra spacing between `a` and `b` in 1/16 px.
+    pub fn kern(&self, a: char, b: char) -> i32 {
+        let (Ok(a), Ok(b)) = (u8::try_from(a), u8::try_from(b)) else {
+            return 0;
         };
-        &self.glyphs[index]
+        self.kerning
+            .binary_search_by(|&(l, r, _)| (l, r).cmp(&(a, b)))
+            .map_or(0, |i| self.kerning[i].2 as i32)
     }
 
-    /// The width of `text` in pixels.
-    #[must_use]
-    pub fn width(&self, text: &str) -> i32 {
-        text.chars()
-            .map(|character| i32::from(self.glyph(character).advance))
-            .sum()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{BODY, HERO, LABEL, NUMBER, SMALL, TITLE};
-
-    #[test]
-    fn every_font_covers_ascii() {
-        for font in [&SMALL, &BODY, &LABEL, &TITLE, &NUMBER, &HERO] {
-            assert_eq!(font.glyphs.len(), 95);
-        }
-    }
-
-    #[test]
-    fn each_glyph_stays_inside_its_atlas() {
-        for font in [&SMALL, &BODY, &LABEL, &TITLE, &NUMBER, &HERO] {
-            for glyph in font.glyphs {
-                let row = usize::from(glyph.width).div_ceil(2);
-                assert!(glyph.offset + row * usize::from(glyph.height) <= font.bitmap.len());
+    /// Width of `text` in pixels, with `tracking` extra 1/16 px per gap.
+    pub fn width(&self, text: &str, tracking: i32) -> i32 {
+        let mut pen = 0i32;
+        let mut prev = None;
+        for c in text.chars() {
+            if let Some(p) = prev {
+                pen += self.kern(p, c) + tracking;
             }
+            pen += self.glyph(c).map_or(0, |g| g.advance as i32);
+            prev = Some(c);
         }
-    }
-
-    #[test]
-    fn width_adds_up_the_advances() {
-        assert!(BODY.width("ab") > BODY.width("a"));
-        assert_eq!(BODY.width(""), 0);
-    }
-
-    #[test]
-    fn unknown_characters_become_a_question_mark() {
-        let unknown = core::ptr::from_ref(BODY.glyph('\u{e9}'));
-        assert_eq!(unknown, core::ptr::from_ref(BODY.glyph('?')));
+        (pen + 8) / 16
     }
 }

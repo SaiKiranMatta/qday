@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/qday-xmss", "crates/qday-wallet", "crates/qday-ui", "crates/qday-cli", "crates/qday-wasm"]
+members = ["crates/qday-xmss", "crates/qday-wallet", "crates/qday-ui", "crates/qday-cli", "crates/qday-wasm", "crates/qday-fontgen"]
 exclude = ["firmware"]
 
 [workspace.package]

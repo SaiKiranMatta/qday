@@ -6,17 +6,19 @@ mod common;
 use std::sync::OnceLock;
 
 use common::{SimFlash, TestRng};
-use qday_ui::app::{App, Host, Light};
+use qday_ui::app::{App, Host, Light, Shown};
 use qday_ui::fb::Framebuffer;
-use qday_ui::screens::{PAD_GAP_X, PAD_GAP_Y, PAD_KEY_HEIGHT, PAD_KEY_WIDTH, PAD_LEFT, PAD_TOP};
+use qday_ui::screens::Review;
+use qday_ui::widgets::{digit_in_slot, key_rect};
 use qday_wallet::counter::{FlashCounter, OneWayCounter};
 use qday_wallet::flash::layout;
-use qday_wallet::frame::FrameTx;
+use qday_wallet::frame::{Action, FrameTx};
 use qday_wallet::hex;
 use qday_wallet::keystore::KeyStore;
 use qday_wallet::passcode::{Code, Passcode};
 use qday_wallet::protocol::{Line, Request, Response, parse_response, request_line};
-use qday_wallet::settings::{CROSSES, Calibration, Settings, ThemeChoice};
+use qday_wallet::settings::{CROSSES, Calibration, Settings};
+use qday_wallet::tokens;
 use qday_wallet::wallet::{Wallet, WalletError};
 use qday_xmss::{PublicKey, verify};
 
@@ -54,6 +56,10 @@ impl Host for FakeHost {
 
     fn send(&mut self, line: &str) {
         self.sent.push(line.to_string());
+    }
+
+    fn pause(&mut self, ms: u32) {
+        self.now += u64::from(ms);
     }
 
     fn restart(&mut self) {
@@ -152,18 +158,11 @@ impl Rig {
 
     fn tap_digit(&mut self, digit: u8) {
         let pad = self.app.keypad().expect("a keypad is showing");
-        let position = pad
-            .iter()
-            .position(|&d| d == digit)
+        let slot = (0..12)
+            .find(|&slot| digit_in_slot(&pad, slot) == Some(digit))
             .expect("every digit is there");
-        let slot = if position == 9 {
-            10
-        } else {
-            i32::try_from(position).expect("it fits")
-        };
-        let x = PAD_LEFT + (slot % 3) * (PAD_KEY_WIDTH + PAD_GAP_X) + 25;
-        let y = PAD_TOP + (slot / 3) * (PAD_KEY_HEIGHT + PAD_GAP_Y) + 20;
-        self.touch(raw_for(x, y));
+        let rect = key_rect(slot);
+        self.touch(raw_for((rect.x + 25.0) as i32, (rect.y + 20.0) as i32));
     }
 
     fn enter(&mut self, code: Code) {
@@ -291,7 +290,7 @@ fn holding_k1_at_start_runs_calibration() {
 
 #[test]
 fn the_crosses_match_the_calibration_points() {
-    assert_eq!(CROSSES[0], (20, 20));
+    assert_eq!(CROSSES, [(30, 30), (290, 30), (30, 210)]);
     assert_eq!(raw_for(20, 20), RAW_CROSSES[0]);
 }
 
@@ -405,7 +404,8 @@ fn touching_a_gap_enters_nothing() {
     rig.sign_request(0);
     rig.wait(520);
     rig.press(3);
-    rig.touch(raw_for(PAD_LEFT + PAD_KEY_WIDTH + 2, 20));
+    let first = key_rect(0);
+    rig.touch(raw_for((first.x + first.w + 2.0) as i32, 20));
     rig.enter(CODE);
     assert!(matches!(rig.last_response(), Response::Sig { .. }));
 }
@@ -660,6 +660,130 @@ fn the_next_tree_builds_itself_from_key_900() {
     assert!(rig.app.wallet().next_key_ready().is_some());
 }
 
+#[test]
+fn an_amount_too_long_to_show_is_refused() {
+    let mut rig = rig();
+    let raw = FrameTx::transfer(SENDER, 1, 0, TO, 12_345_678_901_234_567_890_123_456).encode(&[]);
+    rig.request(&Request::SignFrame(raw));
+    assert_eq!(rig.last_response(), Response::Err(WalletError::BadRequest));
+    assert_eq!(rig.counter(), 0);
+    assert_eq!(rig.screen(), "notice");
+}
+
+#[test]
+fn the_longest_transfer_amount_is_shown() {
+    let tx = FrameTx::transfer(SENDER, 1, 0, TO, 8_888_888_888_888_888_888);
+    assert!(Shown::from_tx(&tx).is_some());
+    let tx = FrameTx::transfer(SENDER, 1, 0, TO, 18_888_888_888_888_888_888);
+    assert!(Shown::from_tx(&tx).is_none());
+}
+
+#[test]
+fn an_unknown_call_with_a_long_value_is_refused() {
+    let call = |value| {
+        let mut tx = FrameTx::transfer(SENDER, 1, 0, TO, 0);
+        tx.action = Action::Other {
+            target: Some(TO),
+            value,
+            data: vec![1, 2, 3, 4],
+            execution: 50_000,
+            state: 200_000,
+        };
+        tx
+    };
+    assert!(Shown::from_tx(&call(123_456_789_000_000_000)).is_some());
+    assert!(Shown::from_tx(&call(1_234_567_891_000_000_000)).is_some());
+    assert!(Shown::from_tx(&call(1_234_567_890_120_000_000)).is_none());
+}
+
+#[test]
+fn a_fee_too_long_to_show_is_refused() {
+    let mut tx = FrameTx::transfer(SENDER, 1, 0, TO, 1);
+    assert!(Shown::from_tx(&tx).is_some());
+    tx.max_fee = 2_000_000_001;
+    assert!(Shown::from_tx(&tx).is_none());
+}
+
+#[test]
+fn a_transfer_shows_the_exact_amount_and_checksummed_address() {
+    let tx = FrameTx::transfer(SENDER, 1, 0, TO, 1_234_567_890_123_456_789);
+    let shown = Shown::from_tx(&tx).expect("this fits");
+    let Review::Send { amount, unit, to } = shown.review() else {
+        panic!("a transfer shows as Send");
+    };
+    assert_eq!((amount, unit), ("1.234567890123456789", "ETH"));
+    assert_eq!(to.len(), 42);
+    assert_eq!(to.to_lowercase(), format!("0x{}", "22".repeat(20)));
+}
+
+#[test]
+fn a_known_token_transfer_reads_like_a_send_in_that_token() {
+    let usdc = tokens::KNOWN[0].address;
+    let tx = FrameTx::token_transfer(SENDER, 1, 0, usdc, TO, 125_500_000);
+    let shown = Shown::from_tx(&tx).expect("this fits");
+    let Review::Send { amount, unit, to } = shown.review() else {
+        panic!("a known token shows as Send");
+    };
+    assert_eq!((amount, unit), ("125.5", "USDC"));
+    assert_eq!(to.to_lowercase(), format!("0x{}", "22".repeat(20)));
+}
+
+#[test]
+fn an_unknown_token_transfer_shows_raw_units_and_the_contract() {
+    let tx = FrameTx::token_transfer(SENDER, 1, 0, [0x5c; 20], TO, 125_500_000);
+    let shown = Shown::from_tx(&tx).expect("this fits");
+    let Review::Token { amount, token, .. } = shown.review() else {
+        panic!("an unknown token shows as Token");
+    };
+    assert_eq!(amount, "125500000");
+    assert_eq!(token.to_lowercase(), format!("0x{}", "5c".repeat(20)));
+}
+
+#[test]
+fn creating_the_account_shows_as_a_call_to_the_factory() {
+    let tx = FrameTx::create(SENDER, 0, [0x33; 20], [1; 32], [2; 32]);
+    let shown = Shown::from_tx(&tx).expect("this fits");
+    let Review::Call { contract, function, .. } = shown.review() else {
+        panic!("creation shows as Call");
+    };
+    assert_eq!(function, "Create account");
+    assert_eq!(contract.to_lowercase(), format!("0x{}", "33".repeat(20)));
+}
+
+#[test]
+fn a_rotation_shows_as_a_call_and_is_not_marked_risky() {
+    let tx = FrameTx::rotation(SENDER, 1, 0, [1; 32], [2; 32]);
+    let shown = Shown::from_tx(&tx).expect("this fits");
+    assert!(matches!(shown.review(), Review::Call { .. }));
+    assert!(!shown.review().is_risky());
+}
+
+#[test]
+fn an_unknown_call_warns_with_target_value_and_selector() {
+    let mut tx = FrameTx::transfer(SENDER, 1, 0, TO, 0);
+    tx.action = Action::Other {
+        target: Some(TO),
+        value: 5_000_000_000_000_000,
+        data: vec![0xa9, 0x05, 0x9c, 0xbb, 1],
+        execution: 50_000,
+        state: 200_000,
+    };
+    let shown = Shown::from_tx(&tx).expect("this fits");
+    let review = shown.review();
+    assert!(review.is_risky());
+    let Review::UnknownCall {
+        contract,
+        value,
+        function,
+    } = review
+    else {
+        panic!("an unknown call shows its details");
+    };
+    assert_eq!(contract.to_lowercase(), format!("0x{}", "22".repeat(20)));
+    assert_eq!(value, "0.005 ETH");
+    assert_eq!(function, "0xa9059cbb");
+}
+
 // Tabs
 
 #[test]
@@ -707,7 +831,7 @@ fn the_theme_changes_and_is_saved() {
     open_device(&mut rig);
     rig.press(3);
     let saved = Settings::new(rig.flash.clone()).theme();
-    assert_eq!(saved, Ok(ThemeChoice::Dark));
+    assert_eq!(saved, Ok(1));
     assert_eq!(rig.screen(), "device-opened");
 }
 
@@ -815,8 +939,7 @@ fn the_activity_log_records_signatures_and_rejections() {
     rig.wait(2600);
     rig.press(2);
     assert_eq!(rig.screen(), "activity");
-    let drawn = rig.app.frame().pixel(40, 40);
-    assert_ne!(drawn, 0);
+    assert_ne!(rig.app.frame().pixel(40, 40), 0);
 }
 
 #[test]

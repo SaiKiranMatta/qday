@@ -6,11 +6,15 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+# Bitmap fonts for the retro terminal themes.
+embedded-graphics = "0.8"
+libm = "0.2"
 qday-wallet = { path = "../qday-wallet" }
 qday-xmss = { path = "../qday-xmss" }
 
 [dev-dependencies]
 png = "0.18"
 
-[lints]
-workspace = true
+# The drawing code is float geometry throughout, so the workspace's pedantic casts don't fit it.
+[lints.clippy]
+all = "warn"

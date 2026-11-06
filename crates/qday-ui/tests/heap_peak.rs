@@ -64,6 +64,8 @@ impl Host for NullHost {
 
     fn send(&mut self, _line: &str) {}
 
+    fn pause(&mut self, _ms: u32) {}
+
     fn restart(&mut self) {}
 }
 

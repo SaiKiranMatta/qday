@@ -1,0 +1,10 @@
+[package]
+name = "qday-fontgen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Rasterizes Inter into anti-aliased glyph tables for qday-ui (run on the host)"
+
+[dependencies]
+swash = "0.2"

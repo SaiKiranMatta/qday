@@ -1,113 +1,70 @@
-//! The two themes. Only these greys are used, because they stay neutral on the TN panel.
+//! The five themes. A theme picks a style
+//! family, which owns the layouts, fonts and colours (`ui::standard`,
+//! `ui::brutal`, `ui::terminal`); themes in a family differ only in colour.
 
-#![allow(clippy::unreadable_literal)]
+use core::sync::atomic::{AtomicU8, Ordering};
 
-use qday_wallet::settings::ThemeChoice;
-
-/// A colour in RGB565.
-pub type Color = u16;
-
-/// Converts 0xRRGGBB to RGB565.
-#[must_use]
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "the channels fill exactly 16 bits"
-)]
-pub const fn rgb(hex: u32) -> Color {
-    let red = (hex >> 19) & 0x1F;
-    let green = (hex >> 10) & 0x3F;
-    let blue = (hex >> 3) & 0x1F;
-    ((red << 11) | (green << 5) | blue) as Color
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum Theme {
+    StandardLight = 0,
+    StandardDark = 1,
+    Brutal = 2,
+    RetroGreen = 3,
+    RetroAmber = 4,
 }
 
-/// The colours of one theme.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Theme {
-    /// Screen background.
-    pub bg: Color,
-    /// Cards.
-    pub card: Color,
-    /// Controls and bars.
-    pub fill: Color,
-    /// Main text.
-    pub text: Color,
-    /// Quiet text.
-    pub muted: Color,
-    /// Empty dots.
-    pub dot: Color,
-    /// Main action.
-    pub primary: Color,
-    /// Text on the main action.
-    pub on_primary: Color,
-    /// Success only.
-    pub success: Color,
-    /// Warnings.
-    pub warning: Color,
-    /// Danger.
-    pub danger: Color,
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Family {
+    Standard,
+    Brutal,
+    Terminal,
 }
 
-/// Standard Light.
-pub const LIGHT: Theme = Theme {
-    bg: rgb(0xF7F7F7),
-    card: rgb(0xE7E7E7),
-    fill: rgb(0xD6D6D6),
-    text: rgb(0x101010),
-    muted: rgb(0x8C8C8C),
-    dot: rgb(0xCECECE),
-    primary: rgb(0x101010),
-    on_primary: rgb(0xFFFFFF),
-    success: rgb(0x2FC651),
-    warning: rgb(0xFF9500),
-    danger: rgb(0xFF3B30),
-};
+impl Theme {
+    /// Picker order.
+    pub const ALL: [Theme; 5] = [
+        Theme::StandardLight,
+        Theme::StandardDark,
+        Theme::Brutal,
+        Theme::RetroGreen,
+        Theme::RetroAmber,
+    ];
 
-/// Standard Dark.
-pub const DARK: Theme = Theme {
-    bg: rgb(0x212121),
-    card: rgb(0x313131),
-    fill: rgb(0x424242),
-    text: rgb(0xF7F7F7),
-    muted: rgb(0x8C8C8C),
-    dot: rgb(0x4A4A4A),
-    primary: rgb(0xF7F7F7),
-    on_primary: rgb(0x212121),
-    success: rgb(0x2FC651),
-    warning: rgb(0xFF9500),
-    danger: rgb(0xFF3B30),
-};
+    pub fn name(self) -> &'static str {
+        match self {
+            Theme::StandardLight => "Standard Light",
+            Theme::StandardDark => "Standard Dark",
+            Theme::Brutal => "Neo-brutal",
+            Theme::RetroGreen => "Retro Green",
+            Theme::RetroAmber => "Retro Amber",
+        }
+    }
 
-/// The theme for a saved choice.
-#[must_use]
-pub fn theme_for(choice: ThemeChoice) -> &'static Theme {
-    match choice {
-        ThemeChoice::Light => &LIGHT,
-        ThemeChoice::Dark => &DARK,
+    pub fn family(self) -> Family {
+        match self {
+            Theme::StandardLight | Theme::StandardDark => Family::Standard,
+            Theme::Brutal => Family::Brutal,
+            Theme::RetroGreen | Theme::RetroAmber => Family::Terminal,
+        }
+    }
+
+    pub fn next(self) -> Theme {
+        Self::ALL[(self as usize + 1) % Self::ALL.len()]
+    }
+
+    /// The theme stored as `byte`, or `None` (for example erased flash).
+    pub fn from_u8(byte: u8) -> Option<Theme> {
+        Self::ALL.get(byte as usize).copied()
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{DARK, LIGHT, rgb};
+static THEME: AtomicU8 = AtomicU8::new(Theme::StandardLight as u8);
 
-    #[test]
-    fn colours_pack_into_rgb565() {
-        assert_eq!(rgb(0x000000), 0x0000);
-        assert_eq!(rgb(0xFFFFFF), 0xFFFF);
-        assert_eq!(rgb(0xFF0000), 0xF800);
-        assert_eq!(rgb(0x00FF00), 0x07E0);
-        assert_eq!(rgb(0x0000FF), 0x001F);
-    }
+pub fn set(theme: Theme) {
+    THEME.store(theme as u8, Ordering::Relaxed);
+}
 
-    #[test]
-    fn no_background_is_pure_black() {
-        assert_ne!(LIGHT.bg, 0);
-        assert_ne!(DARK.bg, 0);
-    }
-
-    #[test]
-    fn success_is_the_same_green_in_both_themes() {
-        assert_eq!(LIGHT.success, DARK.success);
-        assert_eq!(LIGHT.success, rgb(0x2FC651));
-    }
+pub fn current() -> Theme {
+    Theme::from_u8(THEME.load(Ordering::Relaxed)).unwrap_or(Theme::StandardLight)
 }
