@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { isAddress } from "../lib/tokens";
 import type { TokenList } from "../lib/useTokens";
+import { Modal } from "./Modal";
 import { TokenLogo } from "./TokenLogo";
 import { Button } from "./ui";
 
@@ -9,12 +10,6 @@ export function ManageTokens({ tokens, onClose }: { tokens: TokenList; onClose: 
   const [address, setAddress] = useState("");
   const [symbol, setSymbol] = useState("");
   const [decimals, setDecimals] = useState("18");
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   const valid = isAddress(address) && symbol.trim().length > 0 && /^\d{1,2}$/.test(decimals);
 
   const add = () => {
@@ -26,16 +21,8 @@ export function ManageTokens({ tokens, onClose }: { tokens: TokenList; onClose: 
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-onyx/70 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-md rounded-3xl bg-surface p-6" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Manage tokens</h2>
-          <button onClick={onClose} className="text-sm text-muted hover:text-alabaster">
-            Done
-          </button>
-        </div>
-
-        <div className="mt-4 max-h-72 space-y-1 overflow-auto">
+    <Modal title="Manage tokens" onClose={onClose} closeLabel="Done">
+        <div className="max-h-72 space-y-1 overflow-auto overscroll-contain">
           {tokens.all.map((token) => {
             const locked = token.address === null;
             return (
@@ -101,7 +88,6 @@ export function ManageTokens({ tokens, onClose }: { tokens: TokenList; onClose: 
             Add token
           </Button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
