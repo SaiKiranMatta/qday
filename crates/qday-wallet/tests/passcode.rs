@@ -383,6 +383,37 @@ fn a_cut_while_wiping_a_full_count_stays_wiped_or_exhausted() {
 }
 
 #[test]
+fn a_cut_while_wiping_cannot_bring_back_a_lower_count() {
+    let flash = with_code();
+    let mut passcode = store(&flash);
+    for round in 0..1984_u64 {
+        assert!(
+            is_correct(&passcode.attempt(&RIGHT, round)),
+            "round {round}"
+        );
+    }
+    let old_sector = flash.peek(layout::PASSCODE as usize, 0x1000);
+
+    // Power goes just before the old sector's erase starts, so it keeps its zero failures.
+    flash.cut_after(2);
+    assert!(store(&flash).attempt(&WRONG, LATER).is_err());
+    flash.power_on();
+    flash.poke(layout::PASSCODE as usize, &old_sector);
+
+    fail_times(&flash, MAX_FAILURES - 1);
+    assert_eq!(
+        store(&flash).attempt(&WRONG, LATER * 100),
+        Ok(Attempt::Exhausted)
+    );
+
+    // The wipe's first erase is torn, and must not expose the old record.
+    flash.cut_after(0);
+    assert!(store(&flash).wipe().is_err());
+    flash.power_on();
+    assert_eq!(store(&flash).failures(), Ok(MAX_FAILURES));
+}
+
+#[test]
 fn the_keypad_holds_every_digit_once() {
     let mut digits = shuffled_digits(&mut TestRng(3));
     digits.sort_unstable();

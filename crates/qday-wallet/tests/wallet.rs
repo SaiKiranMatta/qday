@@ -310,6 +310,41 @@ fn nothing_is_signed_if_the_counter_fails() {
     );
 }
 
+/// A counter that reports a move it didn't make.
+struct JumpyCounter;
+
+impl OneWayCounter for JumpyCounter {
+    fn value(&mut self) -> Result<u32, CounterError> {
+        Ok(0)
+    }
+
+    fn advance(&mut self) -> Result<u32, CounterError> {
+        Ok(5)
+    }
+}
+
+#[test]
+fn nothing_is_signed_if_the_counter_gives_the_wrong_index() {
+    let flash = fresh();
+    let mut wallet = Wallet::open(
+        KeyStore::new(flash.clone()),
+        Passcode::new(flash.clone(), layout::PASSCODE),
+        JumpyCounter,
+        0,
+    )
+    .expect("the flash is healthy");
+    let review = wallet
+        .review(&transfer(0))
+        .expect("the transaction is fine");
+    let Ok(Attempt::Correct(proof)) = wallet.enter_passcode(&CODE, 0) else {
+        panic!("the code is right");
+    };
+    assert_eq!(
+        wallet.sign(&review, proof),
+        Err(WalletError::CounterFailure)
+    );
+}
+
 #[test]
 fn key_1007_still_signs_a_transfer() {
     let flash = fresh();

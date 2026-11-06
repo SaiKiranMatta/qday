@@ -14,6 +14,8 @@ struct State {
     /// Writes and erases allowed before the power goes.
     budget: Option<u32>,
     dead: bool,
+    /// Writes report success but change nothing, as a worn-out cell does.
+    silent: bool,
     operations: u32,
     erases: u32,
 }
@@ -28,6 +30,7 @@ impl SimFlash {
             bytes: vec![0xFF; PARTITION],
             budget: None,
             dead: false,
+            silent: false,
             operations: 0,
             erases: 0,
         })))
@@ -43,6 +46,11 @@ impl SimFlash {
         let mut state = self.0.borrow_mut();
         state.budget = None;
         state.dead = false;
+    }
+
+    /// Makes writes report success without storing anything.
+    pub fn lose_writes(&self) {
+        self.0.borrow_mut().silent = true;
     }
 
     pub fn was_cut(&self) -> bool {
@@ -114,6 +122,9 @@ impl Flash for SimFlash {
 
     fn write(&mut self, offset: u32, data: &[u8]) -> Result<(), FlashError> {
         let mut state = self.0.borrow_mut();
+        if state.silent {
+            return Ok(());
+        }
         let was_dead = state.dead;
         let whole = Self::spend(&mut state);
         if was_dead {

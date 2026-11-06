@@ -158,6 +158,17 @@ fn damage_to_an_activation_record_is_ignored() {
 }
 
 #[test]
+fn an_activation_record_copied_to_another_slot_is_ignored() {
+    let flash = with_prepared_tree();
+    let record_at = layout::KEY_SLOTS as usize + 256;
+    let record = flash.peek(record_at, 32);
+    flash.poke(record_at + layout::KEY_SLOT_SIZE as usize, &record);
+    let slots = scan(&flash);
+    assert_eq!(slots.active.map(|active| active.tree), Some(0));
+    assert_eq!(slots.prepared.map(|prepared| prepared.tree), Some(1));
+}
+
+#[test]
 fn wiping_removes_the_seed_from_flash() {
     let flash = with_prepared_tree();
     assert!(flash.contains(&SEED));

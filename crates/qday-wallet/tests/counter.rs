@@ -65,6 +65,15 @@ fn a_failed_read_is_an_error() {
     assert_eq!(live.value(), Err(CounterError));
 }
 
+#[test]
+fn a_write_that_silently_fails_is_an_error() {
+    let flash = SimFlash::new();
+    advance_to(&flash, 3);
+    flash.lose_writes();
+    assert_eq!(counter(&flash).advance(), Err(CounterError));
+    assert_eq!(counter(&flash).value(), Ok(3));
+}
+
 /// Cuts the power at every point of an advance from `start`, then checks the value afterwards.
 fn power_cut_anywhere(start: u32) {
     let mut cuts = 0;
