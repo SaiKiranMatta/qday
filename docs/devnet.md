@@ -1,20 +1,82 @@
 # Devnet notes
 
-What the runs on 2026-11-06 ran against.
+QDay runs on its own EIP-8141 devnet. The same chain setup runs in two places:
+
+| | Hosted | Local |
+|---|---|---|
+| Node RPC | `https://rpc-qday.unitlabs.xyz` | `http://127.0.0.1:8545` |
+| Gateway (frame transactions) | `https://gateway-qday.unitlabs.xyz/rpc` | `http://127.0.0.1:14337/rpc` |
+| Wallet | [qday.unitlabs.xyz](https://qday.unitlabs.xyz) | `pnpm dev` |
+| Start it | Always on ([deploy/coolify](../deploy/coolify)) | `tools/devnet/local/up.sh` |
 
 | Field | Value |
 |-------|-------|
-| Chain id | 1337 |
-| RPC URL | `http://127.0.0.1:14337/rpc` (mempool gateway), `http://127.0.0.1:8545` (ethrex) |
-| Explorer | None |
-| Funded key | The genesis premine key, kept outside the repository |
-| `web3_clientVersion` | `ethrex/v23.0.0-eip8141-tracer-9aa3645d795945c64400f41a70aace0edfa7f383/x86_64-unknown-linux-gnu/rustc-v1.93.1` |
-| Mempool rules | ERC-8421 sidecar, minimum stake 0.01 ETH |
-| Frame transaction accepted | Yes, see below |
+| Chain id | 1337, 6-second slots |
+| Clients | ethrex (`eip8141-tracer`) and Lighthouse, with the ERC-8421 gateway |
+| Explorer | Built into the wallet: `/tx/<hash>` decodes frame transactions |
+| Funded key | The devnet's premine key, public by design (`tools/devnet/local/up.sh`). Nothing of value lives here |
+| Gateway verify budget | Raised to 10,000,000 gas (the public rule is 100,000, too little for an XMSS check at about 120,000, let alone ML-DSA at about 1.25M) |
+| XMSS contracts | Factory `0xbCebAd3eCE45625983409B429406a5Dc8d38f876`, verifier `0xe0Ab78755c24867147473b12ffA430D24C1ed127`, USDC `0xd1108cBf3C5E7b44D7A58d4b2cdA492a0DDF6a72`, WBTC `0xb212346871a9a08494e165F5AeFe655f06A5B75F` |
+| ML-DSA and private payments | ML-DSA factory `0x6aD8F805f02509bdf646406b9108dd3070E4174d`, verifier `0x20a8128F20FAF48A9A26Bb83c332582520100954`, pool `0x4eBfa044FA7a52CfDE7Fc1B6d8Fb3b4b0669f354`, and on hosted the staking registry `0xb9654f4208EE0809D212B66eD145A3CC07464857` ([all of them](../deploy/coolify/README.md)) |
+| Addresses | The same on every reset, through CREATE2: `deploy/coolify` deploys them all; locally, `tools/devnet/deploy-qday.sh` then `deploy-stealth.sh` |
+| Smoke test | `tools/devnet/smoke.sh`: ETH and token transfers, approve, transferFrom, overspend refused (14 checks, passing on both) |
+
+## Hosted: ML-DSA and private payments
+
+2026-11-07, on the hosted devnet, with laptop keys through `scripts/mldsa-demo.sh` and
+`scripts/stealth-demo.sh`, after the hosted deployer had put the contracts above in place.
+
+| Transaction | Total gas | VERIFY frame |
+|---|---|---|
+| ML-DSA key blob | 31,944,704 | |
+| ML-DSA account, staking 0.012 ETH in the registry | 5,364,655 | |
+| First ML-DSA transfer, 0.0125 ETH | 1,492,003 | 1,247,821 |
+| Repeat ML-DSA transfer, 0.001 ETH | 1,309,213 | 1,248,535 |
+| Private payment of 0.05 ETH | 162,188 | |
+| Claim to a new address | 1,565,900 | |
+
+The scan found the one payment, the new address received 0.0466 ETH (the note less the 0.0034 ETH
+fee), and a second claim of the same note reverted. The hosted gateway reads no stakes and has one
+verify budget, so the ML-DSA check fits it without the stake-specific raise described below.
+
+## Hosted, signed on the board
+
+2026-11-07, on the hosted wallet at [qday.unitlabs.xyz](https://qday.unitlabs.xyz) in Chrome over Web
+Serial, with the board running main's firmware (its keys kept through the reflash). Each payment went to
+the board's own private address and was claimed back to the account that paid it.
+
+| Block | Transaction | Scheme | Total gas | VERIFY frame |
+|---|---|---|---|---|
+| 794 | 0.1 ETH private payment from the XMSS account | XMSS | 360,325 | 120,157 |
+| 799 | Claim, 0.0966 ETH to the XMSS account | One-time ML-DSA | 1,384,635 | |
+| 810 | ML-DSA key blob, paid by the dev key | | 31,944,704 | |
+| 811 | ML-DSA account, staking 0.012 ETH | | 5,181,055 | |
+| 822 | 0.1 ETH private payment from the ML-DSA account | ML-DSA-44 | 1,448,841 | 1,247,107 |
+| 827 | Claim, 0.0966 ETH to the ML-DSA account | One-time ML-DSA | 1,383,734 | |
+
+Block 822 was the first private payment from an ML-DSA account signed on a real board; it matched the
+simulated run (1,448,125 gas). Both claims paid out the note less the 0.0034 ETH fee, both notes read
+as spent afterwards, and each account's balance came to its funding less the payment and gas, plus the
+claim, to the wei. The chain then expected XMSS key 15, after the payment used key 14. Switched back to
+XMSS, the board reported the same key and tree 0, and next key 15: the ML-DSA round trip left the XMSS
+key and counter as they were, and the board and the chain still agreed.
+
+## Signed on the device
+
+Transactions the ESP32-S3 approved and signed from the web wallet, 2026-11-06, on the local devnet,
+read back with the built-in explorer.
+
+| Transaction | Total gas | Note |
+|---|---|---|
+| Create the account | 464,530 | Deploys the account (an EIP-1167 clone) and pays for it from its own balance |
+| Send 0.0001 ETH | 197,171 | VERIFY frame 123,577 |
+| Send 29.5 USDC | 207,094 | VERIFY frame 111,607; ERC-20 `transfer` decoded and shown on the device |
 
 ## Measured results
 
-Laptop key, 2026-11-06. Frame transactions go through the gateway with `eth_sendFrameTransaction`, and
+First runs with a laptop key, 2026-11-06, on the team's local devnet (ethrex `eip8141-tracer` and the
+ERC-8421 sidecar, minimum stake 0.01 ETH). The sections after this one ran on that chain too, unless
+they say otherwise. Frame transactions go through the gateway with `eth_sendFrameTransaction`, and
 ethrex itself doesn't have that method. The gateway has no `eth_feeHistory`, so plain transactions use
 legacy gas pricing.
 
@@ -90,14 +152,14 @@ them loses it. The ML-DSA account is staked, so it never needed this.
 The private payments went to the device's own private address, which is the same in both schemes.
 
 To run the wallet against a devnet not started by `up.sh`, set `VITE_QDAY_DEV_KEY` to a funded key. ML-DSA
-accounts need `VITE_QDAY_STAKING_REGISTRY` on any devnet. `tools/devnet/deploy-stealth.sh` deploys what
+accounts need `VITE_QDAY_STAKING_REGISTRY` on any devnet but the hosted one, which has its own. `tools/devnet/deploy-stealth.sh` deploys what
 ML-DSA accounts and private payments share, after `tools/devnet/deploy-qday.sh`.
 
 The wallet's limits:
 
 - Private payments carry ETH only, and ML-DSA accounts can't send tokens.
 - Only a network with a dev key can use private payments or create ML-DSA accounts, because the dev key
-  submits claims and deploys the accounts. That means QDay's own devnets.
+  submits claims and deploys the accounts. That means QDay's own devnets, local and hosted.
 - The device shows the amount and the pool for a private payment, not the recipient. The address the person
   pasted is what decides who gets paid, so a page that swaps it can't be caught on the device.
 - The view key stays in the page's memory, so each visit asks the device for it again.
@@ -128,7 +190,7 @@ next signature at each check.
 
 The last two rows ran in Chrome over real Web Serial, with the board sharing its private address and view
 key. The new address received 0.0466 ETH: the note less the 0.0034 ETH fee. A private payment from an
-ML-DSA account has only run on simulated flash.
+ML-DSA account later ran on the board too, on the hosted devnet (below).
 
 ## Demo wallet
 
@@ -161,10 +223,10 @@ Its limits:
   page, and anyone could drain it.
 - The screen for browsers with no Web Serial wasn't exercised, and Safari and phones haven't been tried.
 
-## Public reference network (not our target)
-
-ethrex hegota-testnet: chain id 8141, RPC `https://rpc1.privacy.ethrex.xyz`, explorer
-`https://dora.privacy.ethrex.xyz`. Enforces the public `MAX_VERIFY_GAS = 100,000`.
+On the hosted wallet at [qday.unitlabs.xyz](https://qday.unitlabs.xyz), 2026-11-07, after it was redeployed
+with the demo: a new demo wallet got test ETH and created its account, paid 0.05 ETH to its own private
+address (confirmed in 4.7 seconds), found the payment, and claimed it to a new address, which received
+0.0466 ETH. There, the dev key is the hosted devnet's public premine key, so the faucet holds only test ETH.
 
 ## Lattice pool
 
@@ -182,3 +244,8 @@ No real board was involved, and the signer is an unreviewed variant, so this is 
 Two recipients shared one pool. Each one's scan found only their own payments, and a recipient couldn't
 spend the other's note. A second spend of a note reverted, and a spend rejected on the device got no
 signature. A spend worked in either signing mode and left the one-way counter alone.
+
+## Public reference network (not our target)
+
+ethrex hegota-testnet: chain id 8141, RPC `https://rpc1.privacy.ethrex.xyz`, explorer
+`https://dora.privacy.ethrex.xyz`. Enforces the public `MAX_VERIFY_GAS = 100,000`.
