@@ -26,6 +26,7 @@ Built at ETHGlobal Mumbai (November 2026). A prototype: not audited, not for rea
 | A restored device skips 64 keys past the chain's `nextIndex` | `RESTORE_SKIP` in `wallet.rs` | `cargo test -p qday-wallet` |
 | The browser builds transactions with the device's own code | `crates/qday-wasm`, wrapped by `packages/frame` | `pnpm --filter @qday/frame test` (checks the WebAssembly output against the CLI byte for byte) |
 | Accounts deploy themselves from the device's key | `contracts/src/QDayAccountFactory.sol` (EIP-1167 clones, CREATE2), `web/src/lib/useCreateAccount.ts` | `forge test --match-contract QDayAccountFactory` |
+| The device, the chain and the browser agree on bytes | Contract tests verify signatures produced by `qday-xmss` (`contracts/test/fixtures/signatures.json`); `packages/frame` tests compare the WebAssembly codec with the CLI | `scripts/check-all.sh` |
 | It works end to end on a real chain | Hosted devnet (`deploy/coolify`), wallet (`web/`) | Open [qday.unitlabs.xyz](https://qday.unitlabs.xyz); measured transactions are in `docs/devnet.md` |
 
 ## Map
@@ -46,6 +47,8 @@ Built at ETHGlobal Mumbai (November 2026). A prototype: not audited, not for rea
 | `docs/` | Spec, overview, devnet measurements, fact-check, risks, roadmap |
 
 ## Commands
+
+`scripts/check-all.sh` runs all of these (except the screen renders) and stops at the first failure.
 
 ```bash
 cargo test --workspace --locked                       # every Rust crate
@@ -73,6 +76,9 @@ against its source.
 
 ## Working here
 
+- Never let a one-time key index be signed twice. Anything that touches the counter, key storage or
+  `spendIndex` must keep "advance first, then sign" on the device and "refuse below `nextIndex`" on
+  the chain.
 - Never commit `.env`: it holds the team key and the Coolify token.
 - The `no_std` crates (`qday-xmss`, `qday-wallet`, `qday-ui`) run on the device; keep them free of
   `std` and heap-heavy code.

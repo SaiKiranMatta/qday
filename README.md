@@ -30,6 +30,30 @@ hardware that never reuses a key, and an account that checks.
 | **The wallet** | A web app that connects to the device over USB with Web Serial: create the account, send ETH and tokens, follow each step, and read every transaction back with a built-in explorer. |
 | **The network** | QDay's own EIP-8141 devnet, always on: ethrex, Lighthouse and the ERC-8421 gateway that carries frame transactions. |
 
+## Why this design
+
+- **Hash-based signatures** rest only on the hash function, which a quantum computer weakens but
+  doesn't break; there is no lattice or curve assumption to bet on.
+- **A hardware device** because those signatures are stateful: a key must never sign twice, and NIST
+  SP 800-208 expects that state to live in dedicated hardware. A laptop wallet can be copied or rolled
+  back; the device holds the counter.
+- **An EIP-8141 account** because the account itself decides what a valid signature is and pays its
+  own fees, so there is no ECDSA key left in charge. EIP-7702 delegation, by contrast, keeps the old
+  ECDSA key able to sign ([fact-check](docs/fact-check.md), item 18).
+- **A second lock on-chain** because hardware can fail or be cloned: `nextIndex` makes the account
+  refuse any key it has already accepted.
+
+## Status
+
+| | |
+|---|---|
+| **Works today** | The signature scheme and its Solidity verifier; the EIP-8141 account with both locks and rotation; self-deploying accounts; the device (decoding, approval, passcode, backup and restore, five themes); the web wallet (connect, create, send ETH and ERC-20, activity, explorer); the hosted devnet and wallet |
+| **Partly** | Key refresh and restore run from the device and the [CLI](crates/qday-cli), not yet from the web wallet; restore takes the seed over USB rather than typed on the device |
+| **Simulated** | The quantum attacker in the demo |
+| **Not built** | Hardware rollback protection (eFuse or secure element), connecting other dApps, an audit, mainnet |
+
+Details, and where to check each item, are in the [roadmap](docs/ROADMAP.md).
+
 ## How a transfer works
 
 ```mermaid
@@ -54,6 +78,22 @@ sequenceDiagram
 The first transaction deploys the account: its address follows from the device's key through a
 CREATE2 factory before anything exists, so you fund it, approve **Create account**, and it pays for its
 own deployment.
+
+### Contracts
+
+The same addresses on every QDay devnet, deployed through the CREATE2 factory
+([deploy/coolify/deployer](deploy/coolify/deployer)):
+
+| Contract | Address |
+|---|---|
+| `QDayAccountFactory` | `0xbCebAd3eCE45625983409B429406a5Dc8d38f876` |
+| `XMSSVerifier` | `0xe0Ab78755c24867147473b12ffA430D24C1ed127` |
+| Test USDC (6 decimals) | `0xd1108cBf3C5E7b44D7A58d4b2cdA492a0DDF6a72` |
+| Test WBTC (8 decimals) | `0xb212346871a9a08494e165F5AeFe655f06A5B75F` |
+
+Hosted devnet: RPC `https://rpc-qday.unitlabs.xyz`, frame-transaction gateway
+`https://gateway-qday.unitlabs.xyz/rpc`, chain 1337. Any transaction opens in the wallet's explorer at
+`https://qday.unitlabs.xyz/tx/<hash>`.
 
 ## Screens
 
@@ -128,9 +168,14 @@ VITE_QDAY_NETWORK=hosted pnpm dev      # the wallet against the hosted devnet
 tools/devnet/local/up.sh && pnpm dev   # or your own devnet (Docker), then the wallet against it
 ```
 
-**The device:** wiring, flashing and first start are in [firmware/README.md](firmware/README.md).
+**The device:** a YD-ESP32-S3 N16R8 board, an MSP2807 2.8" display (ILI9341 with XPT2046 touch), four
+push buttons and a breadboard. Wiring, flashing and first start are in
+[firmware/README.md](firmware/README.md).
 
 ## Check it
+
+`scripts/check-all.sh` runs everything below plus formatting and lints, and stops at the first
+failure.
 
 ```bash
 cargo test --workspace --locked          # 405 tests: signature scheme, device logic, screens, CLI
@@ -139,8 +184,11 @@ pnpm -r test                             # 10 tests: Web Serial protocol, WebAss
 tools/devnet/smoke.sh                    # 14 checks with real transactions on a devnet
 ```
 
-CI runs the Rust and contract checks, including `clippy -D warnings` and `fmt`, on every pull
-request. [AGENTS.md](AGENTS.md) maps each claim in this README to the code and the test that back it.
+The contract tests verify signatures made by the Rust scheme ([fixtures](contracts/test/fixtures)), and
+the web tests check the browser's WebAssembly codec against the CLI byte for byte, so the device, the
+chain and the browser are tested against each other. CI runs the Rust and contract checks, including
+`clippy -D warnings` and `fmt`, on every pull request. [AGENTS.md](AGENTS.md) maps each claim in this
+README to the code and the test that back it.
 
 ## Repository
 
@@ -157,6 +205,24 @@ request. [AGENTS.md](AGENTS.md) maps each claim in this README to the code and t
 | [`deploy`](deploy) | The hosted devnet and the hosted wallet (Coolify) |
 | [`tools/devnet`](tools/devnet) | Local devnet, contract deploys and the smoke test |
 | [`hardware`](hardware) | The printable case |
+
+## What's new and what's reused
+
+**Written for QDay**, in this repository: the signature scheme and its test vectors, the Solidity
+verifier, account and factory, the device firmware and its UI, the frame-transaction encoder and its
+WebAssembly build, the web wallet and explorer, and the devnet deployment.
+
+**Reused:** [ethrex](https://github.com/lambdaclass/ethrex) in its EIP-8141 build
+(`ghcr.io/forshtat/ethrex`) and the
+[ERC-8421 gateway](https://github.com/forshtat/mempool-workshop-sidecar) (patched for a larger verify
+budget), Lighthouse and the ethpandaops genesis generator, the Rust embedded stack (`esp-hal`,
+`mipidsi`, `embedded-graphics`), React, Vite, Tailwind and viem, [Lucide](https://lucide.dev) icons
+(ISC), [cryptocurrency-icons](https://github.com/spothq/cryptocurrency-icons) (CC0), and the Inter and
+Bricolage Grotesque fonts (OFL).
+
+**AI use:** QDay was built with AI coding assistance (Claude Code). The design spec and plans that
+guided the first build are committed in [docs/superpowers](docs/superpowers), and commits made with it
+carry a `Co-Authored-By` line.
 
 ## Docs
 
