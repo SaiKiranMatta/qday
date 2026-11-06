@@ -37,6 +37,15 @@ The device signed its first transfer on this chain the same day: 0.0025 ETH, app
 passcode, mined with 468,765 gas in total and 113,915 in the VERIFY frame. The recipient gained exactly
 that amount, and the device and the chain both moved to key 1.
 
+It then rotated, all on the device:
+
+| Step | Result |
+|---|---|
+| Build tree 1 | 99 seconds |
+| Rotation | 316,334 gas, 129,827 in the VERIFY frame |
+| Activate | The device restarted on tree 1, at the same address |
+| Transfer from tree 1 | 0.004 ETH, 292,029 gas, 120,755 in the VERIFY frame |
+
 ## Public reference network (not our target)
 
 ethrex hegota-testnet: chain id 8141, RPC `https://rpc1.privacy.ethrex.xyz`, explorer

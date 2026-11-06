@@ -22,8 +22,8 @@ and skips ahead 64 keys. Keys 1008-1023 are reserved for rotating to a new tree 
 
 ## Status
 
-Steps 1 to 7 of 8 are done. The device has signed a real transfer on a local EIP-8141 chain, with the
-results in [docs/devnet.md](docs/devnet.md). Step 8, rotating keys on the device, is still to do.
+All 8 build steps are done. The device has signed transfers and rotated to a new tree on a local
+EIP-8141 chain, with the results in [docs/devnet.md](docs/devnet.md).
 
 ## Repository layout
 

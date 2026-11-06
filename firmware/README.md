@@ -96,7 +96,7 @@ leaves it alone.
 
 1. Touch the three crosses to calibrate the screen. Hold K1 at start to do this again later.
 2. The device makes a seed from the hardware random number generator and builds tree 0, with a
-   progress bar. This is expected to take about 3 minutes.
+   progress bar. Building a tree took 99 seconds when measured on the device.
 3. It restarts and asks you to choose a 6-digit passcode, twice.
 
 Later starts should take about a second.
