@@ -4,13 +4,8 @@
 # Foundry
 contracts/out/
 contracts/cache/
-contracts/out-yul/
 contracts/lib/
 broadcast/
-
-# RFC 8391 reference build
-tools/xmss-ref/xmss-reference/
-tools/xmss-ref/xmss-ref
 
 # Secrets
 .env

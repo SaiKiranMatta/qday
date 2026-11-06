@@ -10,7 +10,7 @@ Fill these in during Phase 0. Everything here is what we actually ran against.
 | Faucet / funded key | _fill in (never commit private keys)_ |
 | `web3_clientVersion` | _fill in_ |
 | Mempool rules (ERC-8421 variant?) | _fill in_ |
-| Probe tx: `[pre_verify commit(idx), self_verify, SENDER]` accepted | _tx hash, date, gas used per frame_ |
+| Probe tx: `[validate(), spendIndex(index), transfer]` accepted | _tx hash, date, gas used per frame_ |
 
 ## Public reference network (not our target)
 

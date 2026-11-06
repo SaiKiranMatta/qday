@@ -1,5 +1,10 @@
 # Phase 0–1: Signature Core and Gas Gate — Implementation Plan
 
+> **Superseded.** Kept for history. The build now uses keccak256 instead of SHA-256 and is not RFC 8391
+> compatible, the verifier is Solidity with inline assembly instead of a Yul project, the device has
+> four keys instead of two, and the 100,000 gas limit is not a design target. See
+> [the signature scheme](../../xmss-spec.md) and the [README](../../../README.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
 > **Commit rules:** Conventional Commits; the subject says what the change adds and never mentions phases, plans or tasks. Add the Claude co-author trailer only for minor changes (tests, docs, small fixes), never for feature or core work.

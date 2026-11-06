@@ -1,5 +1,10 @@
 # Plans roadmap
 
+> **Superseded.** Kept for history. The build now uses keccak256 instead of SHA-256 and is not RFC 8391
+> compatible, the verifier is Solidity with inline assembly instead of a Yul project, the device has
+> four keys instead of two, and the 100,000 gas limit is not a design target. See
+> [the signature scheme](../../xmss-spec.md) and the [README](../../../README.md).
+
 Each plan produces working, testable software on its own. A plan is written only once its inputs
 exist, because the later plans depend on the OD1 gas gate (spec §2).
 
