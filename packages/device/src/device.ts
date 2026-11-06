@@ -49,6 +49,8 @@ export class QDayDevice {
   private pending: Pending | null = null;
   private busy: Promise<unknown> = Promise.resolve();
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  /** The read loop. It holds the readable stream's lock until it ends. */
+  private reading: Promise<void> = Promise.resolve();
   private closed = false;
   private readonly logListeners = new Set<(line: string) => void>();
   private readonly closeListeners = new Set<() => void>();
@@ -80,7 +82,7 @@ export class QDayDevice {
     const opening = (async () => {
       await port.open({ baudRate: BAUD });
       const device = new QDayDevice(port);
-      void device.readLoop();
+      device.reading = device.readLoop();
       return device;
     })();
     connections.set(port, opening);
@@ -147,10 +149,12 @@ export class QDayDevice {
     } catch {
       // The port may already be gone.
     }
+    // A port with a locked stream refuses to close and stays open, so let the read loop let go first.
+    await this.reading;
     try {
       await this.port.close();
-    } catch {
-      // Same.
+    } catch (error) {
+      console.warn("[qday] closing the port failed", error);
     }
     this.closeListeners.forEach((listener) => listener());
   }
