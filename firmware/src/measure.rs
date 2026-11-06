@@ -12,6 +12,7 @@ use qday_ui::nav::Setting;
 use qday_ui::screens::{self, DeviceInfo, Review, ReviewInfo, Status};
 use qday_ui::text::Text;
 use qday_ui::theme::{self, Theme};
+use qday_wallet::flash::{Flash, layout};
 use qday_wallet::settings::Scheme;
 
 use crate::hardware::now_ms;
@@ -28,6 +29,8 @@ const WRITE_STALL_MS: u64 = 20;
 const ROUNDS: usize = 3;
 const SCREENS: usize = 4;
 const SAMPLES: usize = ROUNDS * SCREENS;
+
+const FLASH_PASSES: usize = 256;
 
 const ROOT: [u8; 32] = [0x9E; 32];
 const TO: &str = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed";
@@ -143,12 +146,34 @@ pub struct Report {
     themes: [ThemeTimes; Theme::ALL.len()],
     /// Sending a frame in which nothing changed: the cost of checking every row.
     unchanged: Spread,
+    /// Whether the screen changed while flash was being read.
+    disturbed: bool,
     reported_ms: u64,
+}
+
+fn screen_sum(fb: &Framebuffer) -> u32 {
+    (0..240)
+        .flat_map(|y| (0..320).map(move |x| (x, y)))
+        .fold(0, |sum: u32, (x, y)| {
+            sum.rotate_left(1) ^ u32::from(fb.pixel(x, y))
+        })
+}
+
+/// Reads flash many times, and says whether the screen changed meanwhile. The screen is in PSRAM,
+/// which shares a bus with flash, so this would catch one disturbing the other. It only reads.
+fn flash_disturbs_the_screen(fb: &mut Framebuffer, mut flash: impl Flash) -> bool {
+    draw(&mut fb.canvas(), 3);
+    let before = screen_sum(fb);
+    let mut buffer = [0_u8; 4096];
+    for _ in 0..FLASH_PASSES {
+        let _ = flash.read(layout::SETTINGS, &mut buffer);
+    }
+    screen_sum(fb) != before
 }
 
 impl Report {
     /// Times four screens in every theme, on the real display.
-    pub fn run(fb: &mut Framebuffer, host: &mut impl Host) -> Self {
+    pub fn run(fb: &mut Framebuffer, host: &mut impl Host, flash: impl Flash) -> Self {
         let mut themes = [ThemeTimes::default(); Theme::ALL.len()];
         let mut unchanged = [0; SAMPLES];
         for (times, &candidate) in themes.iter_mut().zip(Theme::ALL.iter()) {
@@ -177,6 +202,7 @@ impl Report {
         Self {
             themes,
             unchanged: Spread::of(&mut unchanged),
+            disturbed: flash_disturbs_the_screen(fb, flash),
             reported_ms: 0,
         }
     }
@@ -217,8 +243,8 @@ impl Report {
         let mut line = Text::<96>::new();
         let _ = write!(
             line,
-            "I qday-measure unchanged {}/{} us\n",
-            self.unchanged.middle, self.unchanged.worst,
+            "I qday-measure unchanged {}/{} us flash-disturbed {}\n",
+            self.unchanged.middle, self.unchanged.worst, self.disturbed,
         );
         write_line(usb, line.as_str());
     }

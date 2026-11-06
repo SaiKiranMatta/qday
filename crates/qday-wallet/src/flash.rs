@@ -51,6 +51,13 @@ pub trait Flash {
     fn erase(&mut self, offset: u32) -> Result<(), FlashError>;
 }
 
+/// Whether `bytes` lies at least partly in `region`, a range of addresses.
+#[must_use]
+pub fn touches(region: core::ops::Range<usize>, bytes: &[u8]) -> bool {
+    let start = bytes.as_ptr() as usize;
+    !bytes.is_empty() && start < region.end && region.start < start + bytes.len()
+}
+
 /// Flash that can only be written in aligned 4-byte words, as the chip's raw writes are.
 pub trait WordFlash {
     /// Reads `buffer.len()` bytes from `offset`, with no alignment needed.
@@ -152,7 +159,44 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
-    use super::{Aligned, Flash, FlashError, WordFlash};
+    use super::{Aligned, Flash, FlashError, WordFlash, touches};
+
+    #[test]
+    fn a_buffer_inside_a_region_touches_it() {
+        let bytes = [0_u8; 16];
+        let start = bytes.as_ptr() as usize;
+        assert!(touches(start..start + 16, &bytes));
+        assert!(touches(start - 100..start + 100, &bytes));
+    }
+
+    #[test]
+    fn a_buffer_overlapping_either_end_touches_it() {
+        let bytes = [0_u8; 16];
+        let start = bytes.as_ptr() as usize;
+        assert!(touches(start + 15..start + 100, &bytes));
+        assert!(touches(start - 100..start + 1, &bytes));
+    }
+
+    #[test]
+    fn a_buffer_next_to_a_region_does_not_touch_it() {
+        let bytes = [0_u8; 16];
+        let start = bytes.as_ptr() as usize;
+        assert!(!touches(start + 16..start + 100, &bytes));
+        assert!(!touches(start - 100..start, &bytes));
+    }
+
+    #[test]
+    fn an_empty_region_touches_nothing() {
+        let bytes = [0_u8; 16];
+        assert!(!touches(0..0, &bytes));
+    }
+
+    #[test]
+    fn an_empty_buffer_touches_nothing() {
+        let bytes: [u8; 0] = [];
+        let start = bytes.as_ptr() as usize;
+        assert!(!touches(start - 1..start + 1, &bytes));
+    }
 
     /// Refuses anything a real chip would refuse, and can only clear bits.
     struct StrictFlash {

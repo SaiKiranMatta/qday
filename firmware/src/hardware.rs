@@ -1,5 +1,7 @@
 //! The hardware behind `qday-ui`'s traits.
 
+use core::ops::Range;
+
 use embedded_graphics::{pixelcolor::Rgb565, pixelcolor::raw::RawU16};
 use embedded_hal::digital::OutputPin;
 use esp_hal::{
@@ -18,7 +20,7 @@ use mipidsi::{Display, interface::Interface, models::Model};
 use qday_ui::app::{Host, Light};
 use qday_ui::canvas::WIDTH;
 use qday_ui::fb::Framebuffer;
-use qday_wallet::flash::{FlashError, SECTOR, WordFlash};
+use qday_wallet::flash::{FlashError, SECTOR, WordFlash, touches};
 use qday_wallet::rng::Rng;
 
 /// Where the `qday` partition starts in flash.
@@ -53,24 +55,37 @@ pub fn now_ms() -> u64 {
 
 /// The `qday` partition, through raw NOR writes. The chip's convenience write erases whole
 /// sectors behind the scenes, which would undo every power-cut guarantee, so it's never used.
-pub struct PartitionFlash<'d>(pub FlashStorage<'d>);
+pub struct PartitionFlash<'d> {
+    /// The flash.
+    pub storage: FlashStorage<'d>,
+    /// Where PSRAM is mapped. Flash and PSRAM share a bus, so no flash operation may touch it.
+    pub psram: Range<usize>,
+}
 
 impl WordFlash for PartitionFlash<'_> {
     fn read(&mut self, offset: u32, buffer: &mut [u8]) -> Result<(), FlashError> {
-        self.0
+        if touches(self.psram.clone(), buffer) {
+            return Err(FlashError);
+        }
+        self.storage
             .read(PARTITION + offset, buffer)
             .map_err(|_| FlashError)
     }
 
     fn write_words(&mut self, offset: u32, data: &[u8]) -> Result<(), FlashError> {
-        self.0
+        if touches(self.psram.clone(), data) {
+            return Err(FlashError);
+        }
+        self.storage
             .write_nor(PARTITION + offset, data)
             .map_err(|_| FlashError)
     }
 
     fn erase(&mut self, offset: u32) -> Result<(), FlashError> {
         let start = PARTITION + offset;
-        self.0.erase(start, start + SECTOR).map_err(|_| FlashError)
+        self.storage
+            .erase(start, start + SECTOR)
+            .map_err(|_| FlashError)
     }
 }
 
