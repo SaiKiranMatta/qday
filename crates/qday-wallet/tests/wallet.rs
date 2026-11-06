@@ -743,8 +743,8 @@ fn the_device_creates_only_its_own_account() {
     let key = wallet.active().expect("the wallet has a key").key;
     let own = FrameTx::create(SENDER, 0, FACTORY, key.root, key.pub_seed).encode(&[]);
     let review = wallet.review(&own).expect("its own account");
-    assert!(matches!(review.tx.action, Action::Create { .. }));
-    assert_eq!(review.message, review.tx.sig_hash());
+    assert!(matches!(review.tx().action, Action::Create { .. }));
+    assert_eq!(*review.message(), review.tx().sig_hash());
 
     let other = FrameTx::create(SENDER, 0, FACTORY, [0xaa; 32], key.pub_seed).encode(&[]);
     assert_eq!(wallet.review(&other), Err(WalletError::BadRequest));
