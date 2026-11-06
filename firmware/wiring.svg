@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="680" height="745" viewBox="0 0 680 745" role="img" font-family="Helvetica, Arial, sans-serif">
 <title>Breadboard wiring for the MSP2807 screen and the YD-ESP32-S3</title>
-<desc>The ESP32 header sits in column d and the screen header in column g. CS, RESET, DC, MOSI, SCK and LED are straight jumpers from column e to column f on strips 4 to 9. VCC runs from e21 along the centre gap to f2. GND runs from e1 to f1, then h1 to h3 under the screen.</desc>
+<desc>The ESP32 header sits in column d and the screen header in column g. CS, RESET, DC, MOSI, SCK and LED are straight jumpers from column e to column f on strips 4 to 9. T_CLK, T_CS, T_DIN and T_DO are straight jumpers on strips 11 to 14. MISO and T_IRQ are not connected. VCC runs from e21 along the centre gap to f2. GND runs from e1 to f1, then h1 to h3 under the screen.</desc>
 <rect width="680" height="745" fill="#FFFFFF"/>
 <rect x="170" y="70" width="260" height="620" rx="6" fill="#F3F1EA" stroke="#B4B2A9"/>
 <rect x="288" y="76" width="24" height="608" rx="3" fill="#E2DED2"/>
@@ -327,6 +327,10 @@
 <polyline points="270,210 330,210" fill="none" stroke="#1F6FEB" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
 <polyline points="270,230 330,230" fill="none" stroke="#1F6FEB" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
 <polyline points="270,250 330,250" fill="none" stroke="#1F6FEB" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="270,290 330,290" fill="none" stroke="#2A9D3F" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="270,310 330,310" fill="none" stroke="#2A9D3F" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="270,330 330,330" fill="none" stroke="#2A9D3F" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="270,350 330,350" fill="none" stroke="#2A9D3F" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
 <circle cx="250" cy="90" r="4.5" fill="#1B6B61"/>
 <text x="92" y="94" font-size="12" text-anchor="end" fill="#2C2C2A" font-weight="bold">GND</text>
 <circle cx="250" cy="110" r="4.5" fill="#8FB8B2"/>
@@ -347,14 +351,14 @@
 <text x="92" y="254" font-size="12" text-anchor="end" fill="#2C2C2A" font-weight="bold">GPIO46</text>
 <circle cx="250" cy="270" r="4.5" fill="#8FB8B2"/>
 <text x="92" y="274" font-size="12" text-anchor="end" fill="#8A887F" font-weight="normal">GPIO3</text>
-<circle cx="250" cy="290" r="4.5" fill="#8FB8B2"/>
-<text x="92" y="294" font-size="12" text-anchor="end" fill="#8A887F" font-weight="normal">GPIO8</text>
-<circle cx="250" cy="310" r="4.5" fill="#8FB8B2"/>
-<text x="92" y="314" font-size="12" text-anchor="end" fill="#8A887F" font-weight="normal">GPIO18</text>
-<circle cx="250" cy="330" r="4.5" fill="#8FB8B2"/>
-<text x="92" y="334" font-size="12" text-anchor="end" fill="#8A887F" font-weight="normal">GPIO17</text>
-<circle cx="250" cy="350" r="4.5" fill="#8FB8B2"/>
-<text x="92" y="354" font-size="12" text-anchor="end" fill="#8A887F" font-weight="normal">GPIO16</text>
+<circle cx="250" cy="290" r="4.5" fill="#1B6B61"/>
+<text x="92" y="294" font-size="12" text-anchor="end" fill="#2C2C2A" font-weight="bold">GPIO8</text>
+<circle cx="250" cy="310" r="4.5" fill="#1B6B61"/>
+<text x="92" y="314" font-size="12" text-anchor="end" fill="#2C2C2A" font-weight="bold">GPIO18</text>
+<circle cx="250" cy="330" r="4.5" fill="#1B6B61"/>
+<text x="92" y="334" font-size="12" text-anchor="end" fill="#2C2C2A" font-weight="bold">GPIO17</text>
+<circle cx="250" cy="350" r="4.5" fill="#1B6B61"/>
+<text x="92" y="354" font-size="12" text-anchor="end" fill="#2C2C2A" font-weight="bold">GPIO16</text>
 <circle cx="250" cy="370" r="4.5" fill="#8FB8B2"/>
 <text x="92" y="374" font-size="12" text-anchor="end" fill="#8A887F" font-weight="normal">GPIO15</text>
 <circle cx="250" cy="390" r="4.5" fill="#8FB8B2"/>
@@ -420,22 +424,24 @@
 <text x="548" y="254" font-size="12" text-anchor="start" fill="#2C2C2A" font-weight="bold">LED</text>
 <circle cx="350" cy="270" r="4.5" fill="#B8B3E2"/>
 <text x="548" y="274" font-size="12" text-anchor="start" fill="#8A887F" font-weight="normal">SDO (MISO)</text>
-<circle cx="350" cy="290" r="4.5" fill="#B8B3E2"/>
-<text x="548" y="294" font-size="12" text-anchor="start" fill="#8A887F" font-weight="normal">T_CLK</text>
-<circle cx="350" cy="310" r="4.5" fill="#B8B3E2"/>
-<text x="548" y="314" font-size="12" text-anchor="start" fill="#8A887F" font-weight="normal">T_CS</text>
-<circle cx="350" cy="330" r="4.5" fill="#B8B3E2"/>
-<text x="548" y="334" font-size="12" text-anchor="start" fill="#8A887F" font-weight="normal">T_DIN</text>
-<circle cx="350" cy="350" r="4.5" fill="#B8B3E2"/>
-<text x="548" y="354" font-size="12" text-anchor="start" fill="#8A887F" font-weight="normal">T_DO</text>
+<circle cx="350" cy="290" r="4.5" fill="#534AB7"/>
+<text x="548" y="294" font-size="12" text-anchor="start" fill="#2C2C2A" font-weight="bold">T_CLK</text>
+<circle cx="350" cy="310" r="4.5" fill="#534AB7"/>
+<text x="548" y="314" font-size="12" text-anchor="start" fill="#2C2C2A" font-weight="bold">T_CS</text>
+<circle cx="350" cy="330" r="4.5" fill="#534AB7"/>
+<text x="548" y="334" font-size="12" text-anchor="start" fill="#2C2C2A" font-weight="bold">T_DIN</text>
+<circle cx="350" cy="350" r="4.5" fill="#534AB7"/>
+<text x="548" y="354" font-size="12" text-anchor="start" fill="#2C2C2A" font-weight="bold">T_DO</text>
 <circle cx="350" cy="370" r="4.5" fill="#B8B3E2"/>
 <text x="548" y="374" font-size="12" text-anchor="start" fill="#8A887F" font-weight="normal">T_IRQ</text>
-<polyline points="60,716 86,716" fill="none" stroke="#D62828" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-<text x="94" y="720" font-size="12" text-anchor="start" fill="#2C2C2A" font-weight="normal">3V3, lay first</text>
-<polyline points="210,716 236,716" fill="none" stroke="#222222" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-<text x="244" y="720" font-size="12" text-anchor="start" fill="#2C2C2A" font-weight="normal">Ground</text>
-<polyline points="320,716 346,716" fill="none" stroke="#222222" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 4"/>
-<text x="354" y="720" font-size="12" text-anchor="start" fill="#2C2C2A" font-weight="normal">Ground, under the screen</text>
-<polyline points="530,716 556,716" fill="none" stroke="#1F6FEB" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-<text x="564" y="720" font-size="12" text-anchor="start" fill="#2C2C2A" font-weight="normal">Signal</text>
+<polyline points="40,716 66,716" fill="none" stroke="#D62828" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="74" y="720" font-size="12" text-anchor="start" fill="#2C2C2A" font-weight="normal">3V3, lay first</text>
+<polyline points="175,716 201,716" fill="none" stroke="#222222" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="209" y="720" font-size="12" text-anchor="start" fill="#2C2C2A" font-weight="normal">Ground</text>
+<polyline points="265,716 291,716" fill="none" stroke="#222222" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="5 4"/>
+<text x="299" y="720" font-size="12" text-anchor="start" fill="#2C2C2A" font-weight="normal">Ground, under the screen</text>
+<polyline points="450,716 476,716" fill="none" stroke="#1F6FEB" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="484" y="720" font-size="12" text-anchor="start" fill="#2C2C2A" font-weight="normal">Signal</text>
+<polyline points="545,716 571,716" fill="none" stroke="#2A9D3F" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="579" y="720" font-size="12" text-anchor="start" fill="#2C2C2A" font-weight="normal">Touch</text>
 </svg>
