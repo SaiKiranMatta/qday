@@ -166,6 +166,19 @@ impl<P: Read + Write> Device<P> {
         ))
     }
 
+    /// Signs the account's first transaction, which deploys it with the device's active key, and
+    /// returns the submission JSON.
+    pub fn create(&mut self, sender: Address, factory: Address) -> Result<Value> {
+        let status = self.status()?;
+        self.sign(&FrameTx::create(
+            sender,
+            status.next_index,
+            factory,
+            status.root,
+            status.pub_seed,
+        ))
+    }
+
     /// Signs a rotation to the prepared tree and returns the submission JSON.
     pub fn rotate(&mut self, sender: Address, nonce: u64) -> Result<Value> {
         let status = self.status()?;

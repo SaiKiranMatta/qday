@@ -49,6 +49,17 @@ enum Command {
     FrameRotateJson(SignedRotation),
     /// Print a signed rotation as wire bytes
     FrameRotateRaw(SignedRotation),
+    /// Print the sig hash of an account's first transaction, which deploys it
+    FrameCreateHash(Create),
+    /// Print a signed account creation as submission JSON
+    FrameCreateJson(SignedCreate),
+    /// Create the device's account: sign its deploying transaction on the device and print submission JSON
+    DeviceCreate {
+        port: String,
+        /// The account's address, from the factory's accountAddress(root, pubSeed)
+        sender: String,
+        factory: String,
+    },
     /// Print the device's keys, then any prepared next key
     DevicePubkey { port: String },
     /// Print what the device logs
@@ -94,6 +105,35 @@ struct SignedTransfer {
     #[command(flatten)]
     transfer: Transfer,
     signature: String,
+}
+
+#[derive(Args)]
+struct Create {
+    /// The account's address, from the factory's accountAddress(root, pubSeed)
+    sender: String,
+    index: u32,
+    factory: String,
+    root: String,
+    pub_seed: String,
+}
+
+#[derive(Args)]
+struct SignedCreate {
+    #[command(flatten)]
+    create: Create,
+    signature: String,
+}
+
+impl Create {
+    fn tx(&self) -> Result<FrameTx> {
+        Ok(FrameTx::create(
+            address(&self.sender)?,
+            self.index,
+            address(&self.factory)?,
+            hash(&self.root)?,
+            hash(&self.pub_seed)?,
+        ))
+    }
 }
 
 #[derive(Args)]
@@ -201,6 +241,18 @@ fn run(command: Command) -> Result<String> {
             let tx = args.rotation.tx()?;
             Ok(json::submission(&tx, &signature(&args.signature)?).to_string())
         }
+        Command::FrameCreateHash(create) => Ok(hex::encode(&create.tx()?.sig_hash())),
+        Command::FrameCreateJson(args) => {
+            let tx = args.create.tx()?;
+            Ok(json::submission(&tx, &signature(&args.signature)?).to_string())
+        }
+        Command::DeviceCreate {
+            port,
+            sender,
+            factory,
+        } => Ok(device::open(&port)?
+            .create(address(&sender)?, address(&factory)?)?
+            .to_string()),
         Command::DevicePubkey { port } => Ok(device::open(&port)?.status()?.line()),
         Command::DeviceLog { port, seconds } => {
             device::open(&port)?.log(seconds)?;
