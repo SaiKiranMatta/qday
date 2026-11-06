@@ -1479,6 +1479,35 @@ fn the_stealth_review_says_a_one_time_ml_dsa_key_signs() {
 }
 
 #[test]
+fn signing_a_stealth_spend_is_on_screen_before_the_signature_goes_out() {
+    let _theme = theme_lock();
+    let mut rig = rig();
+    let spend = stealth_spend(&mut rig, FEE);
+    rig.request(&spend_request(spend));
+    rig.wait(520);
+    rig.press(3);
+    rig.host.capture = true;
+    rig.enter(CODE);
+    let mut want = Framebuffer::new();
+    screens::notice(&mut want.canvas(), "Signing...", "One-time ML-DSA");
+    assert!(rig.host.at_last_send.as_ref() == Some(&pixels(&want)));
+}
+
+#[test]
+fn signing_an_invoice_is_on_screen_before_the_signature_goes_out() {
+    let _theme = theme_lock();
+    let mut rig = rig();
+    rig.request(&Request::SpendInvoice(invoice_spend(7)));
+    rig.wait(520);
+    rig.press(3);
+    rig.host.capture = true;
+    rig.enter(CODE);
+    let mut want = Framebuffer::new();
+    screens::notice(&mut want.canvas(), "Signing...", "One-time hash");
+    assert!(rig.host.at_last_send.as_ref() == Some(&pixels(&want)));
+}
+
+#[test]
 fn a_spent_stealth_note_is_in_the_activity_log() {
     let mut rig = rig();
     let spend = stealth_spend(&mut rig, FEE);

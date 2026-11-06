@@ -92,3 +92,20 @@ spent key. An invoice works in both signing modes and leaves the one-way counter
 Limits: the spend log holds 480 spends. The device shows the recipient and fee, but not the pool
 address or the note's balance, which it can't check. A wrong pool can't take funds, but it would use up
 the invoice's one signature.
+
+## Lattice pool
+
+`scripts/stealth-demo.sh`, 2026-11-06, on the same chain, as plain transactions with the funding key
+as the relayer. Both a laptop key and the device code were tested, the device code on simulated flash.
+No real board was involved, and the signer is an unreviewed variant, so this is for test networks only.
+
+| Transaction | Total gas |
+|---|---|
+| Helper deployment (once per chain) | 33,632,276 |
+| Matrix deployment (once per chain) | 25,496,912 |
+| Pay and announce | 162,152-162,212 |
+| Spend, recipient already exists | 1,381,678-1,384,417 |
+
+Two recipients shared one pool. Each one's scan found only their own payments, and a recipient couldn't
+spend the other's note. A second spend of a note reverted, and a spend rejected on the device got no
+signature. A spend worked in either signing mode and left the one-way counter alone.

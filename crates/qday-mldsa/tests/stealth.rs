@@ -65,10 +65,11 @@ fn the_standard_verifier_accepts_a_one_time_signature() {
     assert!(verify(&signer.public_key(), &MESSAGE, &signature));
 }
 
+/// Enough to catch a check that only matters for about one signature in ten.
 #[test]
 fn many_signatures_all_verify() {
     let master = Master::from_seed(&SEED);
-    for n in 0..12 {
+    for n in 0..200 {
         let signer = master.one_time(&secret(n));
         let message = [n; 32];
         let rnd = [n.wrapping_add(100); 32];

@@ -19,6 +19,32 @@ contract Burns {
     }
 }
 
+/// @notice A submitter that tries to spend again from inside its fee payment.
+contract Reenters {
+    QDayLatticePool private immutable pool;
+    bytes private key;
+    bytes private signature;
+    address private to;
+    uint256 private fee;
+    bool public blocked;
+
+    constructor(QDayLatticePool pool_) {
+        pool = pool_;
+    }
+
+    function run(bytes calldata key_, bytes calldata signature_, address to_, uint256 fee_) external {
+        (key, signature, to, fee) = (key_, signature_, to_, fee_);
+        pool.spend(key, signature, to, fee);
+    }
+
+    receive() external payable {
+        try pool.spend(key, signature, to, fee) {}
+        catch {
+            blocked = true;
+        }
+    }
+}
+
 /// Real keys and signatures from the Rust signer, through the real verifier.
 contract QDayLatticePoolTest is TestBase {
     event log_named_uint(string key, uint256 val);
@@ -32,6 +58,7 @@ contract QDayLatticePoolTest is TestBase {
     QDayLatticePool private pool = QDayLatticePool(POOL);
     IMLDSAInlineVerifier private verifier;
     address private matrix;
+    address private helper;
     bytes private ciphertext;
 
     function _deployRaw(bytes memory runtime) private returns (address at) {
@@ -46,7 +73,7 @@ contract QDayLatticePoolTest is TestBase {
 
     function setUp() public {
         _loadFixtures("test/fixtures/lattice.json");
-        address helper = _deployRaw(_bytes("helperRuntime"));
+        helper = _deployRaw(_bytes("helperRuntime"));
         bytes memory code = abi.encodePacked(_bytes("verifierInitcode"), abi.encode(helper));
         address at;
         assembly {
@@ -230,6 +257,24 @@ contract QDayLatticePoolTest is TestBase {
         pool.spend(key, signature, TO, FEE);
         _assertTrue(before - gasleft() < 1_700_000, "the payee burned the submitter's gas");
         _assertEq(pool.owed(TO), 1 ether - FEE, "not kept");
+    }
+
+    function test_a_verifier_that_reverts_means_not_accepted() public {
+        _pay("key0", 1 ether);
+        bytes memory key = _bytes("key0");
+        bytes memory signature = _bytes("sig0");
+        vm.etch(helper, hex"5f5ffd");
+        vm.expectRevert(QDayLatticePool.BadSignature.selector);
+        pool.spend(key, signature, TO, FEE);
+    }
+
+    function test_reentering_from_the_fee_payment_gets_nothing_more() public {
+        _pay("key0", 1 ether);
+        _pay("key1", 1 ether);
+        Reenters submitter = new Reenters(pool);
+        submitter.run(_bytes("key0"), _bytes("sig0"), TO, FEE);
+        _assertTrue(submitter.blocked(), "the second spend wasn't refused");
+        _assertEq(TO.balance, 1 ether - FEE, "paid twice");
     }
 
     function test_withdrawing_nothing_is_refused() public {

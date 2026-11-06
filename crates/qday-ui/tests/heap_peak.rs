@@ -23,6 +23,7 @@ use qday_wallet::mlkey::MlKeyStore;
 use qday_wallet::passcode::{Attempt, Passcode};
 use qday_wallet::protocol::{Line, LineBuffer, Request, request_line};
 use qday_wallet::settings::{Calibration, Scheme, Settings};
+use qday_wallet::stealth::{StealthSpend, pay_to};
 use qday_wallet::wallet::{MAIN_ACCOUNT, Pending, Wallet};
 
 /// The firmware's main heap region. The reclaimed region on top of it is the room for
@@ -158,6 +159,22 @@ fn the_heaviest_flows_fit_in_the_heap() {
     };
     wallet
         .ml_sign(&review, MAIN_ACCOUNT, proof, &mut TestRng(5))
+        .expect("it signs");
+    // Stealth: the address, a payment to it, and a spend.
+    let meta = wallet.meta_address(MAIN_ACCOUNT).expect("it derives");
+    let paid = pay_to(&meta, &[0x55; 64]).expect("the address is good");
+    let spend = StealthSpend {
+        ciphertext: paid.ciphertext,
+        key_hash: paid.key_hash,
+        pool: [0x90; 20],
+        to: [0x22; 20],
+        fee: 1,
+    };
+    let Ok(Attempt::Correct(proof)) = wallet.enter_passcode(&CODE, 0) else {
+        panic!("the code is right");
+    };
+    wallet
+        .sign_stealth(&spend, MAIN_ACCOUNT, proof, &mut TestRng(6))
         .expect("it signs");
     drop(app);
     let mut app = start(&flash, &mut host, third_screen);
