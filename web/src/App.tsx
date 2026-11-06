@@ -9,6 +9,7 @@ import { ReceiveModal } from "./components/ReceiveModal";
 import { SendModal } from "./components/SendModal";
 import { useDevice } from "./lib/useDevice";
 import { useTokens } from "./lib/useTokens";
+import { NATIVE_ID } from "./lib/tokens";
 import { MOCK, MOCK_ACCOUNT } from "./lib/wallet";
 import { ActivityPage, DevicePage, WalletPage } from "./pages";
 
@@ -142,11 +143,14 @@ function ConnectedApp({
       )}
       {dialog === "send" && (
         <SendModal
-          balance={account.balance}
           step={send.step}
+          eth={tokens.byId.get(NATIVE_ID)}
+          balanceWei={live.onChain?.balanceWei ?? 0n}
+          feeWei={send.feeWei}
+          ownAddress={account.address}
           onReview={(to, amount) => void send.review(to, amount)}
           onConfirm={() => void send.confirm()}
-          onBack={send.reset}
+          onEdit={send.edit}
           onClose={closeDialog}
         />
       )}

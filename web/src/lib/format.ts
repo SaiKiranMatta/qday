@@ -12,3 +12,20 @@ export function keyNumber(index: number): string {
 export function groupThousands(value: number): string {
   return value.toLocaleString("en-US");
 }
+
+/**
+ * An address in two lines of four-character groups, exactly as the device's review screen draws it,
+ * so the two can be compared group by group.
+ */
+export function addressLines(address: string): [string, string] {
+  const digits = address.toLowerCase().replace(/^0x/, "");
+  const groups = (part: string) => part.match(/.{1,4}/g)?.join(" ") ?? part;
+  return [`0x${groups(digits.slice(0, 20))}`, groups(digits.slice(20))];
+}
+
+/** An exact ETH amount with trailing zeros trimmed, as the device shows it (no rounding). */
+export function exactEth(wei: bigint): string {
+  const whole = (wei / 10n ** 18n).toLocaleString("en-US");
+  const fraction = (wei % 10n ** 18n).toString().padStart(18, "0").replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : whole;
+}

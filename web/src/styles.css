@@ -68,3 +68,21 @@ body {
     radial-gradient(60% 160% at 62% 70%, #536878 0%, rgb(83 104 120 / 0) 72%),
     linear-gradient(90deg, #0a0a0a 0%, #161b20 38%, #2f3b45 100%);
 }
+
+/* Browser surfaces, themed from the palette rather than left at defaults. */
+::selection {
+  background: rgb(83 104 120 / 0.55);
+  color: var(--color-alabaster);
+}
+:focus-visible {
+  outline: 2px solid var(--color-slate);
+  outline-offset: 2px;
+}
+input,
+textarea {
+  caret-color: var(--color-alabaster);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
