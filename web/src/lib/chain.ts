@@ -28,6 +28,14 @@ const NETWORKS: Record<string, Network> = {
     faucet: { kind: "key", key: "0x06f911c1ecb2053bb443ba0a0e28d630c583c3c0c2f334a9ecdc8c7c6ad4ea15" },
     blockSeconds: 6,
   },
+  hosted: {
+    name: "QDay devnet",
+    rpc: "https://rpc-qday.unitlabs.xyz",
+    gateway: "https://gateway-qday.unitlabs.xyz/rpc",
+    // The same throwaway premine key as the local devnet: deploy/coolify runs the same chain setup.
+    faucet: { kind: "key", key: "0x06f911c1ecb2053bb443ba0a0e28d630c583c3c0c2f334a9ecdc8c7c6ad4ea15" },
+    blockSeconds: 6,
+  },
   public: {
     name: "Public devnet",
     rpc: "https://altmempool.forshtat.com",
@@ -37,7 +45,10 @@ const NETWORKS: Record<string, Network> = {
   },
 };
 
-/** Pick with VITE_QDAY_NETWORK=local|public. Local is the default: the public gateway stalls often. */
+/**
+ * Pick with VITE_QDAY_NETWORK=local|hosted|public. Local is the default; hosted is QDay's own devnet
+ * (deploy/coolify), always on; public is the shared alt-mempool devnet, whose gateway stalls often.
+ */
 export const NETWORK: Network = NETWORKS[import.meta.env.VITE_QDAY_NETWORK ?? "local"] ?? NETWORKS.local!;
 export const RPC_URL = NETWORK.rpc;
 export const GATEWAY_URL = NETWORK.gateway;

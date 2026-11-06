@@ -14,11 +14,23 @@ and QDay's contracts at their usual addresses.
 
 Frame transactions work about 7 minutes after the first start, when Hegota activates at epoch 2.
 
+## Live
+
+QDay's own instance runs on Coolify in the `qday` project:
+
+| Endpoint | URL |
+|---|---|
+| Node RPC | `https://rpc-qday.unitlabs.xyz` |
+| Gateway | `https://gateway-qday.unitlabs.xyz/rpc` |
+
+Run the web app against it with `VITE_QDAY_NETWORK=hosted pnpm dev`.
+
 ## On Coolify
 
 A Docker Compose application from this repository:
 
-- Compose file: `/deploy/coolify/docker-compose.yml`, base directory `/`.
+- Base directory `/deploy/coolify`, compose file `/docker-compose.yml`. Coolify resolves the build
+  folders (`./genesis`, `./gateway`, `./deployer`) from the base directory, so it must be this folder.
 - Domains: `ethrex` on port 8545 (the RPC) and `gateway` on port 14337.
 - The server must be x86-64: the node and gateway images are published for it only.
 
