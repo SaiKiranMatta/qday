@@ -5,6 +5,11 @@
 extern crate alloc;
 
 pub mod backup;
+pub mod counter;
+pub mod flash;
 pub mod frame;
 pub mod hex;
+pub mod keystore;
+pub mod passcode;
 pub mod rlp;
+pub mod rng;
