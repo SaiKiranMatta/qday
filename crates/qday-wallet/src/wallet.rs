@@ -176,7 +176,8 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
     }
 
     /// The prepared tree, if it is the one that follows the active tree.
-    fn next_key_ready(&self) -> Option<PreparedKey> {
+    #[must_use]
+    pub fn next_key_ready(&self) -> Option<PreparedKey> {
         let active = self.slots.active?;
         self.slots
             .prepared
