@@ -65,8 +65,11 @@ export function WalletPage({
               <SetupCard {...setup} />
             ) : (
               <div>
-                <div className="text-sm text-alabaster/80">Total balance</div>
-                <div className="mt-2 text-5xl font-semibold tracking-tight">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-alabaster/90">{account.name}</span>
+                  {account.address !== "0x" && <CopyAddress address={account.address} />}
+                </div>
+                <div className="mt-3 text-5xl font-semibold tracking-tight">
                   {chain === "loading" ? "…" : account.balance} <span className="text-alabaster/60">ETH</span>
                 </div>
                 {chain === "error" && <div className="mt-2 text-xs text-bad">Couldn't reach the devnet. Retrying.</div>}
@@ -142,6 +145,30 @@ export function WalletPage({
 
       {managing && <ManageTokens tokens={tokens} onClose={() => setManaging(false)} />}
     </div>
+  );
+}
+
+/** The short address; a click copies the whole of it. */
+function CopyAddress({ address }: { address: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard blocked; Receive shows the full address.
+    }
+  };
+  return (
+    <button
+      onClick={() => void copy()}
+      title={address}
+      aria-label="Copy address"
+      className="rounded-full bg-onyx/40 px-2.5 py-1 font-mono text-xs text-alabaster/70 transition-colors hover:bg-onyx/60 hover:text-alabaster"
+    >
+      {copied ? "Copied" : shortHex(address, 6, 4)}
+    </button>
   );
 }
 

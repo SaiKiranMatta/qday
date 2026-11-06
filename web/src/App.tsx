@@ -118,7 +118,7 @@ function ConnectedApp({
   };
 
   return (
-    <Shell page={page} onNavigate={setPage} status={status} account={account} onDisconnect={onDisconnect}>
+    <Shell page={page} onNavigate={setPage} onDisconnect={onDisconnect}>
       {page === "wallet" && (
         <WalletPage
           account={account}
