@@ -11,6 +11,8 @@ use crate::{PUBLIC_KEY_BYTES, PublicKey};
 
 /// Length of a blob.
 pub const BLOB_BYTES: usize = 20_545;
+/// Length of the part of a blob that belongs to one key.
+pub const KEY_PART_BYTES: usize = 4160;
 
 const Q: u64 = 8_380_417;
 const COEFFICIENTS: usize = 256;
@@ -115,23 +117,31 @@ fn push_compact(blob: &mut Vec<u8>, poly: &Poly) {
     }
 }
 
+/// The part of a blob that belongs to this key alone: `tr`, then `t1` in the NTT domain. The rest of
+/// a blob is the matrix, which keys can share.
+#[must_use]
+pub fn key_part(public: &PublicKey) -> Vec<u8> {
+    let mut part = Vec::with_capacity(KEY_PART_BYTES);
+    let mut shake = Shake256::default();
+    shake.update(public);
+    let mut tr = vec![0; TR_BYTES];
+    shake.finalize_xof().read(&mut tr);
+    part.extend_from_slice(&tr);
+
+    for row in 0..ROWS {
+        let mut poly = row_coefficients(public, row).map(|value| (u64::from(value) << D) % Q);
+        ntt(&mut poly);
+        push_compact(&mut part, &poly);
+    }
+    part
+}
+
 /// The exact blob for a public key.
 #[must_use]
 pub fn prepare(public: &PublicKey) -> Vec<u8> {
     let mut blob = Vec::with_capacity(BLOB_BYTES);
     blob.push(0);
-
-    let mut shake = Shake256::default();
-    shake.update(public);
-    let mut tr = vec![0; TR_BYTES];
-    shake.finalize_xof().read(&mut tr);
-    blob.extend_from_slice(&tr);
-
-    for row in 0..ROWS {
-        let mut poly = row_coefficients(public, row).map(|value| (u64::from(value) << D) % Q);
-        ntt(&mut poly);
-        push_compact(&mut blob, &poly);
-    }
+    blob.extend_from_slice(&key_part(public));
 
     let rho = &public[..RHO_BYTES];
     for row in 0_u8..4 {

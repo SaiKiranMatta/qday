@@ -6,6 +6,7 @@
 extern crate alloc;
 
 pub mod blob;
+pub mod stealth;
 
 use fips204::ml_dsa_44;
 use fips204::traits::{KeyGen, SerDes, Signer as _, Verifier as _};
