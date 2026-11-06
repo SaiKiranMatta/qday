@@ -6,6 +6,8 @@ import type { Address, Token } from "./tokens";
 export const REQUEST_TIMEOUT_MS = 15_000;
 /** How long to wait for a submitted transaction to be mined. */
 export const MINE_TIMEOUT_MS = 120_000;
+/** How often to check for the receipt of a submitted transaction. */
+const RECEIPT_POLL_MS = 500;
 
 interface Network {
   name: string;
@@ -46,7 +48,11 @@ export const devnet = defineChain({
   rpcUrls: { default: { http: [RPC_URL] } },
 });
 
-export const client = createPublicClient({ chain: devnet, transport: http(RPC_URL, { timeout: REQUEST_TIMEOUT_MS }) });
+export const client = createPublicClient({
+  chain: devnet,
+  transport: http(RPC_URL, { timeout: REQUEST_TIMEOUT_MS }),
+  pollingInterval: RECEIPT_POLL_MS,
+});
 
 export const accountAbi = [
   { type: "function", name: "root", stateMutability: "view", inputs: [], outputs: [{ type: "bytes32" }] },
@@ -197,7 +203,7 @@ export async function submitFrameTx(submission: Record<string, unknown>): Promis
       console.info("[qday] mined", result);
       return result;
     }
-    await new Promise((r) => setTimeout(r, 3_000));
+    await new Promise((r) => setTimeout(r, RECEIPT_POLL_MS));
   }
   throw new Error(`Not mined within ${MINE_TIMEOUT_MS / 1000}s. The gateway may be stalled. Transaction ${hash}`);
 }
