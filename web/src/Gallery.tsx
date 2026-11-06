@@ -16,6 +16,9 @@ const BALANCES: Record<string, bigint> = {
   [KNOWN_TOKENS.find((t) => t.symbol === "WBTC")!.id]: 5_000_000n,
 };
 
+/** A send that took 4.2 s from the device's signature to the block. */
+const SAMPLE_TIMING = { signedAt: 0, submittedAt: 600, confirmedAt: 4200 };
+
 /** Dev only (`?gallery`): every send state side by side, without a device or a chain. */
 export function Gallery() {
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -50,14 +53,23 @@ export function Gallery() {
     { label: "Review token", step: { kind: "review", draft: tokenDraft } },
     { label: "Rejected", step: { kind: "review", draft, error: "Rejected on the device. Nothing was signed." } },
     { label: "Approve", step: { kind: "approve", draft } },
-    { label: "Sending", step: { kind: "submitting", draft } },
+    { label: "Sending", step: { kind: "submitting", draft, timing: { signedAt: Date.now() } } },
+    {
+      label: "Confirming",
+      step: {
+        kind: "submitting",
+        draft,
+        hash: "0x7508072f568cf40faa110f50274c5408ca24f3b525fc8b2a68b0cd811ad9852d",
+        timing: { signedAt: Date.now(), submittedAt: Date.now(), nextBlockAt: Date.now() + 4000 },
+      },
+    },
     {
       label: "Done",
-      step: { kind: "done", draft, block: 412, hash: "0x7508072f568cf40faa110f50274c5408ca24f3b525fc8b2a68b0cd811ad9852d" },
+      step: { kind: "done", draft, block: 412, hash: "0x7508072f568cf40faa110f50274c5408ca24f3b525fc8b2a68b0cd811ad9852d", timing: SAMPLE_TIMING },
     },
     {
       label: "Done token",
-      step: { kind: "done", draft: tokenDraft, block: 413, hash: "0x51ac2e0a7c1f6d3b9e8a4f2c7d0b5e3a9c6f1d8e4b7a2c5f0e9d3b6a8c1f4e7d" },
+      step: { kind: "done", draft: tokenDraft, block: 413, hash: "0x51ac2e0a7c1f6d3b9e8a4f2c7d0b5e3a9c6f1d8e4b7a2c5f0e9d3b6a8c1f4e7d", timing: SAMPLE_TIMING },
     },
   ];
 
@@ -78,11 +90,17 @@ export function Gallery() {
           onConfirm={() => {
             const draft = tokenDraft;
             setPlaying({ kind: "approve", draft });
-            setTimeout(() => setPlaying({ kind: "submitting", draft }), 2500);
-            setTimeout(
-              () => setPlaying({ kind: "done", draft, block: 1612, hash: "0x51ac2e0a7c1f6d3b9e8a4f2c7d0b5e3a9c6f1d8e4b7a2c5f0e9d3b6a8c1f4e7d" }),
-              5500,
-            );
+            // The real timings: signed, accepted by the gateway half a second later, mined at the next block.
+            const hash = "0x51ac2e0a7c1f6d3b9e8a4f2c7d0b5e3a9c6f1d8e4b7a2c5f0e9d3b6a8c1f4e7d";
+            setTimeout(() => {
+              const signedAt = Date.now();
+              setPlaying({ kind: "submitting", draft, timing: { signedAt } });
+              setTimeout(() => {
+                const timing = { signedAt, submittedAt: Date.now(), nextBlockAt: Date.now() + 3200 };
+                setPlaying({ kind: "submitting", draft, timing, hash });
+                setTimeout(() => setPlaying({ kind: "done", draft, block: 1612, hash, timing: { ...timing, confirmedAt: Date.now() } }), 3400);
+              }, 500);
+            }, 2500);
           }}
           onEdit={() => setPlaying({ kind: "edit" })}
           onClose={() => setPlaying(null)}

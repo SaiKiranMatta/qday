@@ -15,6 +15,8 @@ interface Network {
   gateway: string;
   /** Where test ETH comes from: the gateway's faucet, or a funded dev key on a private chain. */
   faucet: { kind: "gateway" } | { kind: "key"; key: Hex };
+  /** Seconds between blocks, for telling people when the next one is due. */
+  blockSeconds: number;
 }
 
 const NETWORKS: Record<string, Network> = {
@@ -24,12 +26,14 @@ const NETWORKS: Record<string, Network> = {
     gateway: "http://127.0.0.1:14337/rpc",
     // The local devnet's premine key. Throwaway by design: it's published with the devnet setup.
     faucet: { kind: "key", key: "0x06f911c1ecb2053bb443ba0a0e28d630c583c3c0c2f334a9ecdc8c7c6ad4ea15" },
+    blockSeconds: 6,
   },
   public: {
     name: "Public devnet",
     rpc: "https://altmempool.forshtat.com",
     gateway: "https://altmempoolgateway.forshtat.com/rpc",
     faucet: { kind: "gateway" },
+    blockSeconds: 12,
   },
 };
 
@@ -189,10 +193,24 @@ export interface FrameReceipt {
   gasUsed: bigint;
 }
 
-/** Submits a signed frame transaction through the gateway and waits, with a limit, for it to be mined. */
-export async function submitFrameTx(submission: Record<string, unknown>): Promise<FrameReceipt> {
+/** Time between blocks on this network, in milliseconds. */
+export const BLOCK_MS = NETWORK.blockSeconds * 1000;
+
+/** Hands a signed frame transaction to the gateway. Resolves with its hash once the gateway accepts it. */
+export async function broadcastFrameTx(submission: Record<string, unknown>): Promise<Hex> {
   const hash = await rpc<Hex>(GATEWAY_URL, "eth_sendFrameTransaction", [submission]);
   console.info("[qday] submitted", hash);
+  return hash;
+}
+
+/** When the next block is due (epoch ms), from the latest block's timestamp. Later slots follow every BLOCK_MS. */
+export async function nextBlockAt(): Promise<number> {
+  const latest = await rpc<{ timestamp: Hex }>(RPC_URL, "eth_getBlockByNumber", ["latest", false]);
+  return Number(BigInt(latest.timestamp)) * 1000 + BLOCK_MS;
+}
+
+/** Waits, with a limit, for a submitted transaction to be mined. */
+export async function waitForFrameReceipt(hash: Hex): Promise<FrameReceipt> {
   const deadline = Date.now() + MINE_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const receipt = await rpc<{ blockNumber: Hex; status: Hex; gasUsed: Hex } | null>(RPC_URL, "eth_getTransactionReceipt", [hash]).catch(
@@ -206,4 +224,9 @@ export async function submitFrameTx(submission: Record<string, unknown>): Promis
     await new Promise((r) => setTimeout(r, RECEIPT_POLL_MS));
   }
   throw new Error(`Not mined within ${MINE_TIMEOUT_MS / 1000}s. The gateway may be stalled. Transaction ${hash}`);
+}
+
+/** Submits a signed frame transaction and waits for it to be mined. */
+export async function submitFrameTx(submission: Record<string, unknown>): Promise<FrameReceipt> {
+  return waitForFrameReceipt(await broadcastFrameTx(submission));
 }

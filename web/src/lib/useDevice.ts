@@ -125,7 +125,11 @@ export function useDevice() {
     const current = device.current;
     if (!current) throw new DeviceError("Connect your QDay first");
     const signature = await current.signFrame(raw);
-    setState({ kind: "connected", status: await current.status() });
+    // Hand the signature back at once and refresh the key state alongside, not before, the submission.
+    void current
+      .status()
+      .then((status) => setState({ kind: "connected", status }))
+      .catch((error: unknown) => console.warn("[qday] couldn't refresh the device after signing", error));
     return signature;
   }, []);
 

@@ -2,7 +2,7 @@ import type { DeviceStatus } from "@qday/device";
 import { type TxDescription, loadFrame } from "@qday/frame";
 import { useCallback, useEffect, useState } from "react";
 import { hexToBytes } from "viem";
-import { submitFrameTx } from "./chain";
+import { broadcastFrameTx, nextBlockAt, waitForFrameReceipt } from "./chain";
 import { parseAmount } from "./format";
 import { type Address, NATIVE_ID, type Token } from "./tokens";
 
@@ -22,12 +22,22 @@ export interface SendFees {
 
 export const feeFor = (fees: SendFees, token: Token) => (token.address ? fees.token : fees.eth);
 
+/** When each stage after approval finished (epoch ms), so the screen can show the send moving. */
+export interface SendTiming {
+  signedAt: number;
+  /** The gateway accepted it. */
+  submittedAt?: number;
+  /** When the next block is due, while waiting for it. */
+  nextBlockAt?: number;
+  confirmedAt?: number;
+}
+
 export type SendStep =
   | { kind: "edit"; error?: string }
   | { kind: "review"; draft: Draft; error?: string }
   | { kind: "approve"; draft: Draft }
-  | { kind: "submitting"; draft: Draft }
-  | { kind: "done"; draft: Draft; block: number; hash: string };
+  | { kind: "submitting"; draft: Draft; timing: SendTiming; hash?: string }
+  | { kind: "done"; draft: Draft; block: number; hash: string; timing: SendTiming };
 
 function message(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
@@ -98,10 +108,16 @@ export function useSend(
       setStep({ kind: "approve", draft });
       const signature = await signFrame(draft.raw);
       signed = true;
-      setStep({ kind: "submitting", draft });
-      const receipt = await submitFrameTx(frame.submission(draft.raw, hexToBytes(signature)));
+      // Each stage shows as it finishes: signed, accepted by the gateway, then mined.
+      const timing: SendTiming = { signedAt: Date.now() };
+      setStep({ kind: "submitting", draft, timing });
+      const hash = await broadcastFrameTx(frame.submission(draft.raw, hexToBytes(signature)));
+      timing.submittedAt = Date.now();
+      timing.nextBlockAt = await nextBlockAt().catch(() => undefined);
+      setStep({ kind: "submitting", draft, timing: { ...timing }, hash });
+      const receipt = await waitForFrameReceipt(hash);
       if (!receipt.ok) throw new Error(`The transaction was mined but failed (block ${receipt.block}).`);
-      setStep({ kind: "done", draft, block: receipt.block, hash: receipt.hash });
+      setStep({ kind: "done", draft, block: receipt.block, hash: receipt.hash, timing: { ...timing, confirmedAt: Date.now() } });
       onSent();
     } catch (e) {
       console.error("[qday] send failed", e);
