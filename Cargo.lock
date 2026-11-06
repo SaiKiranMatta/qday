@@ -535,7 +535,9 @@ name = "qday-wallet"
 version = "0.1.0"
 dependencies = [
  "bip39",
+ "qday-mldsa",
  "qday-xmss",
+ "zeroize",
 ]
 
 [[package]]

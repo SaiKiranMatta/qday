@@ -13,7 +13,7 @@ use qday_wallet::passcode::{Attempt, CODE_DIGITS, Code, MAX_FAILURES, Proof, shu
 use qday_wallet::protocol::{Line, NextKey, Request, Response, parse_request, response_line};
 use qday_wallet::rng::Rng;
 use qday_wallet::settings::{CROSSES, Calibration, Settings};
-use qday_wallet::wallet::{RESTORE_SKIP, Review, Wallet, WalletError};
+use qday_wallet::wallet::{MAIN_ACCOUNT, Pending, RESTORE_SKIP, Review, Wallet, WalletError};
 use qday_xmss::{Hash, LEAVES};
 
 use crate::canvas::Canvas;
@@ -1222,6 +1222,16 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             None => {}
             Some(Err(error)) => Self::respond(host, &Response::Err(error)),
             Some(Ok(Request::PubKey)) => self.report_keys(host),
+            Some(Ok(Request::Scheme)) => {
+                Self::respond(host, &Response::Scheme(self.wallet.scheme()));
+            }
+            Some(Ok(Request::MlPubKey)) => {
+                let response = self
+                    .wallet
+                    .ml_public_key(MAIN_ACCOUNT)
+                    .map_or_else(Response::Err, |key| Response::MlPubKey(key.to_vec()));
+                Self::respond(host, &response);
+            }
             Some(Ok(_)) if !self.idle() => {
                 Self::respond(host, &Response::Err(WalletError::BadRequest));
             }
@@ -1231,6 +1241,10 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
     }
 
     fn report_keys(&mut self, host: &mut impl Host) {
+        if let Err(error) = self.wallet.require_xmss() {
+            Self::respond(host, &Response::Err(error));
+            return;
+        }
         let response = match (self.wallet.active(), self.wallet.next_index()) {
             (Some(active), Ok(next_index)) => Response::PubKey {
                 root: active.key.root,
@@ -1248,7 +1262,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
     fn handle(&mut self, host: &mut impl Host, request: Request) {
         let now_ms = host.now_ms();
         match request {
-            Request::PubKey => {}
+            Request::PubKey | Request::Scheme | Request::MlPubKey => {}
             Request::SignFrame(raw) => self.start_review(host, &raw, now_ms),
             Request::Prepare => {
                 let response = self
@@ -1296,8 +1310,12 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
     }
 
     fn start_review(&mut self, host: &mut impl Host, raw: &[u8], now_ms: u64) {
-        match self.wallet.review(raw) {
-            Ok(review) => {
+        match self.wallet.check_transaction(raw) {
+            // The ML-DSA review arrives with its screens.
+            Ok(Pending::MlDsa(_)) => {
+                Self::respond(host, &Response::Err(WalletError::WrongScheme));
+            }
+            Ok(Pending::Xmss(review)) => {
                 let Some(shown) = Shown::from_tx(&review.tx) else {
                     Self::respond(host, &Response::Err(WalletError::BadRequest));
                     self.show_notice("Not shown", "That amount is too long to show whole.");

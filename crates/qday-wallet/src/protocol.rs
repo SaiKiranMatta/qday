@@ -4,9 +4,11 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use qday_mldsa::{PUBLIC_KEY_BYTES, SIGNATURE_BYTES};
 use qday_xmss::{Hash, SIG_BYTES};
 
 use crate::hex;
+use crate::settings::Scheme;
 use crate::wallet::WalletError;
 
 /// Every protocol line starts with this. Anything else is log output.
@@ -19,6 +21,10 @@ pub const MAX_LINE: usize = 8192;
 pub enum Request {
     /// Report the keys.
     PubKey,
+    /// Report the active scheme.
+    Scheme,
+    /// Report the stored ML-DSA public key.
+    MlPubKey,
     /// Review and sign a raw unsigned frame transaction.
     SignFrame(Vec<u8>),
     /// Build the next tree.
@@ -55,9 +61,13 @@ pub enum Response {
         /// The prepared key, if there is one.
         next: Option<NextKey>,
     },
+    /// The active scheme.
+    Scheme(Scheme),
+    /// The 1,312-byte ML-DSA public key.
+    MlPubKey(Vec<u8>),
     /// A signature.
     Sig {
-        /// The 2,500-byte signature.
+        /// The signature: 2,500 bytes for XMSS, 2,420 for ML-DSA.
         signature: Vec<u8>,
         /// The prepared key, if there is one.
         next: Option<NextKey>,
@@ -68,7 +78,7 @@ pub enum Response {
     Err(WalletError),
 }
 
-const ERROR_CODES: [(WalletError, &str); 7] = [
+const ERROR_CODES: [(WalletError, &str); 9] = [
     (WalletError::BadRequest, "bad-request"),
     (WalletError::Rejected, "rejected"),
     (WalletError::KeysExhausted, "keys-exhausted"),
@@ -76,6 +86,8 @@ const ERROR_CODES: [(WalletError, &str); 7] = [
     (WalletError::RotationNeeded, "rotation-needed"),
     (WalletError::NothingPending, "nothing-pending"),
     (WalletError::StorageFailure, "storage-failure"),
+    (WalletError::WrongScheme, "wrong-scheme"),
+    (WalletError::SigningFailed, "signing-failed"),
 ];
 
 /// The word for an error on the USB line.
@@ -85,6 +97,15 @@ pub fn error_code(error: WalletError) -> &'static str {
         .iter()
         .find(|(known, _)| *known == error)
         .map_or("storage-failure", |(_, code)| code)
+}
+
+/// The word for a scheme on the USB line.
+#[must_use]
+pub fn scheme_name(scheme: Scheme) -> &'static str {
+    match scheme {
+        Scheme::Xmss => "xmss",
+        Scheme::MlDsa44 => "ml-dsa-44",
+    }
 }
 
 /// Reads a line. `None` means it isn't a protocol line, so it's log output.
@@ -98,6 +119,8 @@ fn parse_body(body: &str) -> Option<Request> {
     let mut words = body.split(' ');
     let request = match words.next()? {
         "PUBKEY" => Request::PubKey,
+        "SCHEME" => Request::Scheme,
+        "MLPUBKEY" => Request::MlPubKey,
         "PREPARE" => Request::Prepare,
         "SIGNFRAME" => Request::SignFrame(hex::decode(words.next()?)?),
         "ACTIVATE" => Request::Activate(number(words.next()?)?),
@@ -122,6 +145,8 @@ fn number(text: &str) -> Option<u32> {
 pub fn request_line(request: &Request) -> String {
     match request {
         Request::PubKey => format!("{PREFIX}PUBKEY\n"),
+        Request::Scheme => format!("{PREFIX}SCHEME\n"),
+        Request::MlPubKey => format!("{PREFIX}MLPUBKEY\n"),
         Request::Prepare => format!("{PREFIX}PREPARE\n"),
         Request::SignFrame(raw) => format!("{PREFIX}SIGNFRAME {}\n", hex::encode(raw)),
         Request::Activate(tree) => format!("{PREFIX}ACTIVATE {tree}\n"),
@@ -165,6 +190,8 @@ pub fn response_line(response: &Response) -> String {
             hex::encode(signature),
             next_key_text(next.as_ref())
         ),
+        Response::Scheme(scheme) => format!("{PREFIX}SCHEME {}\n", scheme_name(*scheme)),
+        Response::MlPubKey(key) => format!("{PREFIX}MLPUBKEY {}\n", hex::encode(key)),
         Response::Ok => format!("{PREFIX}OK\n"),
         Response::Err(error) => format!("{PREFIX}ERR {}\n", error_code(*error)),
     }
@@ -196,13 +223,26 @@ pub fn parse_response(line: &str) -> Option<Response> {
             tree: number(words.next()?)?,
             next: parse_next(words).ok()?,
         }),
+        "SCHEME" => {
+            let scheme = match words.next()? {
+                "xmss" => Scheme::Xmss,
+                "ml-dsa-44" => Scheme::MlDsa44,
+                _ => return None,
+            };
+            words.next().is_none().then_some(Response::Scheme(scheme))
+        }
+        "MLPUBKEY" => {
+            let key = hex::decode(words.next()?)?;
+            (key.len() == PUBLIC_KEY_BYTES && words.next().is_none())
+                .then_some(Response::MlPubKey(key))
+        }
         "SIG" => {
             let signature = hex::decode(words.next()?)?;
-            (signature.len() == SIG_BYTES).then_some(())?;
-            Some(Response::Sig {
-                signature,
-                next: parse_next(words).ok()?,
-            })
+            let next = parse_next(words).ok()?;
+            // Only XMSS has a next key to report.
+            let fits = signature.len() == SIG_BYTES
+                || (signature.len() == SIGNATURE_BYTES && next.is_none());
+            fits.then_some(Response::Sig { signature, next })
         }
         "OK" => words.next().is_none().then_some(Response::Ok),
         "ERR" => {
@@ -257,6 +297,9 @@ impl LineBuffer {
 
 #[cfg(test)]
 mod tests {
+    use crate::settings::Scheme;
+    use qday_mldsa::PUBLIC_KEY_BYTES;
+
     use alloc::format;
     use alloc::string::ToString;
     use alloc::vec;
@@ -409,6 +452,80 @@ mod tests {
     }
 
     #[test]
+    fn scheme_and_ml_key_requests_match_the_protocol() {
+        assert_eq!(request_line(&Request::Scheme), "QDAY1 SCHEME\n");
+        assert_eq!(request_line(&Request::MlPubKey), "QDAY1 MLPUBKEY\n");
+        for request in [Request::Scheme, Request::MlPubKey] {
+            let line = request_line(&request);
+            assert_eq!(parse_request(line.trim_end()), Some(Ok(request)));
+        }
+    }
+
+    #[test]
+    fn scheme_and_ml_key_requests_take_no_arguments() {
+        for line in ["QDAY1 SCHEME xmss", "QDAY1 MLPUBKEY 0"] {
+            assert_eq!(parse_request(line), Some(Err(WalletError::BadRequest)));
+        }
+    }
+
+    #[test]
+    fn scheme_responses_match_the_protocol() {
+        assert_eq!(
+            response_line(&Response::Scheme(Scheme::Xmss)),
+            "QDAY1 SCHEME xmss\n"
+        );
+        assert_eq!(
+            response_line(&Response::Scheme(Scheme::MlDsa44)),
+            "QDAY1 SCHEME ml-dsa-44\n"
+        );
+    }
+
+    #[test]
+    fn ml_key_responses_match_the_protocol() {
+        let key = vec![0xAB; 1312];
+        assert_eq!(
+            response_line(&Response::MlPubKey(key.clone())),
+            format!("QDAY1 MLPUBKEY {}\n", hex::encode(&key))
+        );
+    }
+
+    #[test]
+    fn the_new_errors_have_their_codes() {
+        assert_eq!(
+            response_line(&Response::Err(WalletError::WrongScheme)),
+            "QDAY1 ERR wrong-scheme\n"
+        );
+        assert_eq!(
+            response_line(&Response::Err(WalletError::SigningFailed)),
+            "QDAY1 ERR signing-failed\n"
+        );
+    }
+
+    #[test]
+    fn an_ml_dsa_signature_is_accepted_at_its_own_length() {
+        let response = Response::Sig {
+            signature: vec![3; 2420],
+            next: None,
+        };
+        let line = response_line(&response);
+        assert_eq!(parse_response(line.trim_end()), Some(response));
+    }
+
+    #[test]
+    fn other_signature_lengths_are_refused() {
+        for length in [2419, 2421, 2499, 2501] {
+            let line = format!("QDAY1 SIG {}", hex::encode(&vec![3; length]));
+            assert_eq!(parse_response(&line), None, "{length}");
+        }
+    }
+
+    #[test]
+    fn an_ml_dsa_signature_carries_no_next_key() {
+        let line = format!("QDAY1 SIG {} {} {}", hex::encode(&vec![3; 2420]), a(), b());
+        assert_eq!(parse_response(&line), None);
+    }
+
+    #[test]
     fn ok_and_errors_match_the_protocol() {
         assert_eq!(response_line(&Response::Ok), "QDAY1 OK\n");
         assert_eq!(
@@ -422,6 +539,11 @@ mod tests {
         for response in [
             Response::Ok,
             Response::Err(WalletError::RotationNeeded),
+            Response::Err(WalletError::WrongScheme),
+            Response::Err(WalletError::SigningFailed),
+            Response::Scheme(Scheme::Xmss),
+            Response::Scheme(Scheme::MlDsa44),
+            Response::MlPubKey(vec![4; 1312]),
             Response::PubKey {
                 root: A,
                 pub_seed: B,
@@ -451,6 +573,12 @@ mod tests {
     }
 
     #[test]
+    fn an_ml_key_response_fits_in_a_line() {
+        let response = Response::MlPubKey(vec![0; PUBLIC_KEY_BYTES]);
+        assert!(response_line(&response).len() <= MAX_LINE);
+    }
+
+    #[test]
     fn a_signed_response_fits_in_a_line() {
         let response = Response::Sig {
             signature: vec![0; 2500],
@@ -466,6 +594,12 @@ mod tests {
             "QDAY1 WHAT",
             "QDAY1 ERR nonsense",
             "QDAY1 SIG 0x00",
+            "QDAY1 SCHEME",
+            "QDAY1 SCHEME sphincs",
+            "QDAY1 SCHEME xmss extra",
+            "QDAY1 MLPUBKEY",
+            "QDAY1 MLPUBKEY 0x00",
+            "QDAY1 MLPUBKEY 0x00 extra",
             "QDAY1 PUBKEY 0x00 0x00 1 1",
         ] {
             assert_eq!(parse_response(line), None, "{line}");

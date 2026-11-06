@@ -11,6 +11,7 @@ pub mod frame;
 pub mod hex;
 pub mod input;
 pub mod keystore;
+pub mod mlkey;
 pub mod passcode;
 pub mod protocol;
 pub mod rlp;

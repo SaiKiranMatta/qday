@@ -116,10 +116,22 @@ impl Calibration {
 
 const THEME_MAGIC: &[u8; 4] = b"QSET";
 const THEME_BODY: usize = 8;
+const THEME_AT: usize = 4;
+const SCHEME_AT: usize = 5;
 const CALIBRATION_MAGIC: &[u8; 4] = b"QCAL";
 const CALIBRATION_BODY: usize = 60;
 /// Bytes of keccak256 that follow each record.
 const CHECK: usize = 8;
+
+/// How the device signs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Scheme {
+    /// One-time keys, with a counter and rotation.
+    #[default]
+    Xmss,
+    /// ML-DSA-44, with no key limit.
+    MlDsa44,
+}
 
 /// Small saved records. A damaged record reads as missing.
 pub struct Settings<F> {
@@ -132,17 +144,25 @@ impl<F: Flash> Settings<F> {
         Self { flash }
     }
 
+    /// The theme and scheme bytes, or a fresh record if none was saved. A record from before the
+    /// scheme existed has a zero there, which reads as the default.
+    fn saved(&mut self) -> Result<[u8; THEME_BODY], StoreError> {
+        let mut body = [0; THEME_BODY];
+        if self.read_record(layout::SETTINGS, &mut body)? && body.starts_with(THEME_MAGIC) {
+            return Ok(body);
+        }
+        let mut fresh = [0; THEME_BODY];
+        fresh[..4].copy_from_slice(THEME_MAGIC);
+        Ok(fresh)
+    }
+
     /// The saved theme's number, or 0 if none was saved.
     ///
     /// # Errors
     ///
     /// Fails if the flash can't be read.
     pub fn theme(&mut self) -> Result<u8, StoreError> {
-        let mut body = [0; THEME_BODY];
-        if !self.read_record(layout::SETTINGS, &mut body)? || !body.starts_with(THEME_MAGIC) {
-            return Ok(0);
-        }
-        Ok(body[4])
+        Ok(self.saved()?[THEME_AT])
     }
 
     /// Saves the theme's number.
@@ -151,9 +171,32 @@ impl<F: Flash> Settings<F> {
     ///
     /// Fails if the flash can't be written.
     pub fn set_theme(&mut self, theme: u8) -> Result<(), StoreError> {
-        let mut body = [0; THEME_BODY];
-        body[..4].copy_from_slice(THEME_MAGIC);
-        body[4] = theme;
+        let mut body = self.saved()?;
+        body[THEME_AT] = theme;
+        self.write_record(layout::SETTINGS, &body)
+    }
+
+    /// The saved scheme, or the default.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the flash can't be read.
+    pub fn scheme(&mut self) -> Result<Scheme, StoreError> {
+        Ok(if self.saved()?[SCHEME_AT] == 1 {
+            Scheme::MlDsa44
+        } else {
+            Scheme::Xmss
+        })
+    }
+
+    /// Saves the scheme.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the flash can't be written.
+    pub fn set_scheme(&mut self, scheme: Scheme) -> Result<(), StoreError> {
+        let mut body = self.saved()?;
+        body[SCHEME_AT] = u8::from(scheme == Scheme::MlDsa44);
         self.write_record(layout::SETTINGS, &body)
     }
 

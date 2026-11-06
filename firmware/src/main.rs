@@ -37,6 +37,7 @@ use qday_ui::app::{App, Light};
 use qday_wallet::counter::FlashCounter;
 use qday_wallet::flash::{Aligned, layout};
 use qday_wallet::keystore::KeyStore;
+use qday_wallet::mlkey::MlKeyStore;
 use qday_wallet::passcode::Passcode;
 use qday_wallet::protocol::LineBuffer;
 use qday_wallet::settings::Settings;
@@ -128,6 +129,8 @@ fn main() -> ! {
         KeyStore::new(&flash),
         Passcode::new(&flash, layout::PASSCODE),
         FlashCounter::new(&flash, layout::COUNTER),
+        Settings::new(&flash),
+        MlKeyStore::new(&flash),
         now_ms(),
     )
     .expect("the qday partition can be read");

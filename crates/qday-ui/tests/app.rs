@@ -12,13 +12,14 @@ use qday_ui::screens::Review;
 use qday_ui::widgets::{digit_in_slot, key_rect};
 use qday_wallet::counter::{FlashCounter, OneWayCounter};
 use qday_wallet::flash::layout;
-use qday_wallet::frame::{Action, FrameTx};
+use qday_wallet::frame::{Action, FrameTx, MlFrameTx};
 use qday_wallet::hex;
 use qday_wallet::keystore::KeyStore;
+use qday_wallet::mlkey::MlKeyStore;
 use qday_wallet::passcode::{Code, Passcode};
 use qday_wallet::protocol::{Line, Request, Response, parse_response, request_line};
-use qday_wallet::settings::{CROSSES, Calibration, Settings};
-use qday_wallet::wallet::{Wallet, WalletError};
+use qday_wallet::settings::{CROSSES, Calibration, Scheme, Settings};
+use qday_wallet::wallet::{MAIN_ACCOUNT, Wallet, WalletError};
 use qday_xmss::{PublicKey, verify};
 
 const CODE: Code = [1, 2, 3, 4, 5, 6];
@@ -80,6 +81,8 @@ fn boot(flash: &SimFlash, seed: u64, hold_k1: bool) -> (FakeHost, TestApp) {
         KeyStore::new(flash.clone()),
         Passcode::new(flash.clone(), layout::PASSCODE),
         FlashCounter::new(flash.clone(), layout::COUNTER),
+        Settings::new(flash.clone()),
+        MlKeyStore::new(flash.clone()),
         0,
     )
     .expect("the flash is healthy");
@@ -97,6 +100,8 @@ fn image() -> &'static Vec<u8> {
             KeyStore::new(flash.clone()),
             Passcode::new(flash.clone(), layout::PASSCODE),
             FlashCounter::new(flash.clone(), layout::COUNTER),
+            Settings::new(flash.clone()),
+            MlKeyStore::new(flash.clone()),
             0,
         )
         .expect("the flash is healthy");
@@ -545,6 +550,100 @@ fn log_lines_and_overlong_lines_are_handled() {
     assert!(rig.host.sent.is_empty());
     rig.app.on_line(&mut rig.host, &Line::Bad);
     assert_eq!(rig.last_response(), Response::Err(WalletError::BadRequest));
+}
+
+// Scheme requests
+
+const STORED_ML_KEY: [u8; 1312] = [7; 1312];
+
+/// A provisioned device switched to ML-DSA.
+fn ml_rig() -> Rig {
+    let flash = SimFlash::new();
+    flash.poke(0, image());
+    Settings::new(flash.clone())
+        .set_scheme(Scheme::MlDsa44)
+        .expect("the flash is healthy");
+    MlKeyStore::new(flash.clone())
+        .store(MAIN_ACCOUNT, &STORED_ML_KEY)
+        .expect("the flash is healthy");
+    let (host, app) = boot(&flash, 11, false);
+    Rig { flash, host, app }
+}
+
+#[test]
+fn scheme_reports_xmss_by_default() {
+    let mut rig = rig();
+    rig.request(&Request::Scheme);
+    assert_eq!(rig.last_response(), Response::Scheme(Scheme::Xmss));
+}
+
+#[test]
+fn scheme_reports_ml_dsa_once_switched() {
+    let mut rig = ml_rig();
+    rig.request(&Request::Scheme);
+    assert_eq!(rig.last_response(), Response::Scheme(Scheme::MlDsa44));
+}
+
+#[test]
+fn scheme_is_answered_during_a_review_and_the_review_stands() {
+    let mut rig = rig();
+    rig.sign_request(0);
+    rig.request(&Request::Scheme);
+    assert_eq!(rig.last_response(), Response::Scheme(Scheme::Xmss));
+    assert_eq!(rig.screen(), "review");
+}
+
+#[test]
+fn mlpubkey_reports_the_stored_key_with_no_passcode() {
+    let mut rig = ml_rig();
+    rig.request(&Request::MlPubKey);
+    assert_eq!(
+        rig.last_response(),
+        Response::MlPubKey(STORED_ML_KEY.to_vec())
+    );
+    assert_eq!(rig.screen(), "wallet");
+}
+
+#[test]
+fn mlpubkey_with_no_stored_key_says_nothing_is_pending() {
+    let mut rig = rig();
+    rig.request(&Request::MlPubKey);
+    assert_eq!(
+        rig.last_response(),
+        Response::Err(WalletError::NothingPending)
+    );
+}
+
+#[test]
+fn pubkey_prepare_and_activate_are_the_wrong_scheme_in_ml_dsa_mode() {
+    let mut rig = ml_rig();
+    for request in [Request::PubKey, Request::Prepare, Request::Activate(1)] {
+        rig.request(&request);
+        assert_eq!(
+            rig.last_response(),
+            Response::Err(WalletError::WrongScheme),
+            "{request:?}"
+        );
+        assert_eq!(rig.screen(), "wallet");
+    }
+}
+
+#[test]
+fn a_two_frame_transfer_is_the_wrong_scheme_in_xmss_mode() {
+    let mut rig = rig();
+    let raw = MlFrameTx::transfer(SENDER, 1, TO, 1000).encode(&[]);
+    rig.request(&Request::SignFrame(raw));
+    assert_eq!(rig.last_response(), Response::Err(WalletError::WrongScheme));
+    assert_eq!(rig.screen(), "wallet");
+}
+
+#[test]
+fn an_xmss_transfer_is_the_wrong_scheme_in_ml_dsa_mode() {
+    let mut rig = ml_rig();
+    rig.sign_request(0);
+    assert_eq!(rig.last_response(), Response::Err(WalletError::WrongScheme));
+    assert_eq!(rig.screen(), "wallet");
+    assert_eq!(rig.counter(), 0);
 }
 
 // Other requests

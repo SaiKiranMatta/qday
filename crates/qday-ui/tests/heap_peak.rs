@@ -17,6 +17,7 @@ use qday_wallet::counter::FlashCounter;
 use qday_wallet::flash::layout;
 use qday_wallet::frame::FrameTx;
 use qday_wallet::keystore::KeyStore;
+use qday_wallet::mlkey::MlKeyStore;
 use qday_wallet::passcode::Passcode;
 use qday_wallet::protocol::{Line, LineBuffer, Request, request_line};
 use qday_wallet::settings::{Calibration, Settings};
@@ -74,6 +75,8 @@ fn start(flash: &SimFlash, host: &mut NullHost) -> App<SimFlash, FlashCounter<Si
         KeyStore::new(flash.clone()),
         Passcode::new(flash.clone(), layout::PASSCODE),
         FlashCounter::new(flash.clone(), layout::COUNTER),
+        Settings::new(flash.clone()),
+        MlKeyStore::new(flash.clone()),
         0,
     )
     .expect("the flash is healthy");

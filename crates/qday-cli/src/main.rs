@@ -10,6 +10,7 @@ use qday_mldsa::{KeySeed, Signer, StandardSigner};
 use qday_wallet::backup::words_to_seed;
 use qday_wallet::frame::{Address, FrameTx, MlFrameTx};
 use qday_wallet::hex;
+use qday_wallet::protocol::scheme_name;
 use qday_xmss::{Hash, KeySet, Tree};
 
 #[derive(Parser)]
@@ -75,16 +76,16 @@ enum Command {
     MlFrameRaw(SignedMlTransfer),
     /// Print the device's keys, then any prepared next key
     DevicePubkey { port: String },
+    /// Print the device's signing scheme
+    DeviceScheme { port: String },
+    /// Print the device's stored ML-DSA public key
+    DeviceMlpubkey { port: String },
+    /// Sign a two-frame transfer on the device and print submission JSON
+    DeviceMlSend(DeviceTransfer),
     /// Print what the device logs
     DeviceLog { port: String, seconds: u64 },
     /// Sign a transfer on the device and print submission JSON
-    DeviceSend {
-        port: String,
-        sender: String,
-        nonce: u64,
-        to: String,
-        value_wei: u128,
-    },
+    DeviceSend(DeviceTransfer),
     /// Sign a rotation on the device and print submission JSON
     DeviceRotate {
         port: String,
@@ -102,6 +103,15 @@ enum Command {
         tree: u32,
         chain_next_index: u32,
     },
+}
+
+#[derive(Args)]
+struct DeviceTransfer {
+    port: String,
+    sender: String,
+    nonce: u64,
+    to: String,
+    value_wei: u128,
 }
 
 #[derive(Args)]
@@ -289,20 +299,24 @@ fn run(command: Command) -> Result<String> {
             &args.transfer.tx()?.encode(&signature(&args.signature)?),
         )),
         Command::DevicePubkey { port } => Ok(device::open(&port)?.status()?.line()),
+        Command::DeviceScheme { port } => {
+            Ok(scheme_name(device::open(&port)?.scheme()?).to_string())
+        }
+        Command::DeviceMlpubkey { port } => Ok(hex::encode(&device::open(&port)?.ml_pubkey()?)),
+        Command::DeviceMlSend(args) => {
+            let (sender, to) = (address(&args.sender)?, address(&args.to)?);
+            Ok(device::open(&args.port)?
+                .ml_send(sender, args.nonce, to, args.value_wei)?
+                .to_string())
+        }
         Command::DeviceLog { port, seconds } => {
             device::open(&port)?.log(seconds)?;
             Ok(String::new())
         }
-        Command::DeviceSend {
-            port,
-            sender,
-            nonce,
-            to,
-            value_wei,
-        } => {
-            let (sender, to) = (address(&sender)?, address(&to)?);
-            Ok(device::open(&port)?
-                .send(sender, nonce, to, value_wei)?
+        Command::DeviceSend(args) => {
+            let (sender, to) = (address(&args.sender)?, address(&args.to)?);
+            Ok(device::open(&args.port)?
+                .send(sender, args.nonce, to, args.value_wei)?
                 .to_string())
         }
         Command::DeviceRotate {
