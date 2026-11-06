@@ -250,6 +250,7 @@ fn summary_text(summary: &Summary) -> String {
     match summary {
         Summary::Transfer { value, .. } => eth(*value),
         Summary::Rotation => "Rotation".to_string(),
+        Summary::Creation => "Account created".to_string(),
         Summary::Other => "Unknown call".to_string(),
     }
 }
@@ -462,6 +463,14 @@ fn draw_review(fb: &mut Framebuffer, theme: &Theme, tx: &FrameTx) {
                 &format!("{start}{middle}...{end}"),
             );
             y += ROW_STEP;
+        }
+        TxAction::Create { factory, .. } => {
+            fb.text(&SMALL, MARGIN, 24, "Set up this wallet", theme.muted);
+            draw_amount(fb, theme, "Create account");
+            draw_address(fb, theme, y, "Account", &tx.sender);
+            y += 15 + ROW_STEP;
+            draw_address(fb, theme, y, "Factory", factory);
+            y += 15 + ROW_STEP;
         }
         TxAction::Other {
             target,
