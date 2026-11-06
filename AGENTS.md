@@ -76,7 +76,8 @@ needs the ESP toolchain (`firmware/README.md`) and is built separately.
 ## What is not real or not done
 
 - The demo's quantum attacker is simulated. The signatures, counter and on-chain checks are real.
-- EIP-8141 is a draft. QDay runs only on devnets.
+- EIP-8141 is scheduled for the Hegotá upgrade (since 27 August 2026), but its spec is still a draft
+  and it is not on mainnet. QDay runs only on devnets.
 - The ESP32-S3 is not a certified secure element, and its flash counter can be rolled back by
   re-flashing (`docs/risks-and-blockers.md`, R8). The chain's `nextIndex` still refuses reuse.
 - The scheme is QDay's own keccak256 variant of XMSS, not RFC 8391 (`docs/xmss-spec.md`).

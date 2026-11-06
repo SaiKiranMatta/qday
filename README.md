@@ -10,12 +10,17 @@ can spend it.
   accounts with no ECDSA key at all. Earlier post-quantum hardware wallets sign for other chains, and
   Ethereum's post-quantum accounts so far keep ECDSA beside the new key
   ([fact-check](docs/fact-check.md#beyond-the-pitch), item 22).
+- **Built on EIP-8141, Ethereum's next account model.** Frame transactions let an account's own code
+  decide what a valid signature is and pay its own gas, which is what lets QDay drop ECDSA entirely.
+  Core developers scheduled EIP-8141 for the Hegotá upgrade in August 2026, and the EF's protocol
+  cluster ranks it one of two must-ship EIPs. QDay runs on it today, on its own devnet, signed on real
+  hardware ([fact-check](docs/fact-check.md), item 6).
 - **Quantum-safe by construction.** Every key QDay uses is post-quantum: XMSS, whose security rests on
   the hash function alone, and ML-DSA-44, NIST's standard. Nothing a quantum computer is known to break
   holds any authority over the funds.
 - **Privacy built in, post-quantum end to end.** Private payments hide who was paid with X-Wing
   (ML-KEM-768 with X25519) and are spent with one-time ML-DSA keys, so neither finding nor spending a
-  payment rests on an elliptic curve. Post-quantum stealth-address proposals so far protect only the
+  payment depends on an elliptic curve; X-Wing keeps X25519 only as a backstop beside ML-KEM. Post-quantum stealth-address proposals so far protect only the
   finding (item 23).
 
 **[Open the wallet](https://qday.unitlabs.xyz)** · [Roadmap](docs/ROADMAP.md) · [Signature spec](docs/xmss-spec.md) · [Measured on-chain](docs/devnet.md) · [For AI reviewers](AGENTS.md)
@@ -44,7 +49,7 @@ weakness: the stealth-address scheme in ERC-5564 is built on secp256k1 too.
 | **The accounts** | EIP-8141 smart accounts, one per scheme. The XMSS account checks a 2,500-byte hash-based signature in its VERIFY frame and moves `nextIndex` forward, so a used key is refused. The ML-DSA account checks a 2,420-byte FIPS 204 signature against its key, which lives in a data contract. |
 | **Private payments** | A post-quantum stealth address. A payer derives a one-time ML-DSA key from it with X-Wing (ML-KEM-768 with X25519) and pays a shared pool; the owner's wallet finds the payment with a view key that can't spend, and the device signs the claim. |
 | **The wallet** | A web app that connects to the device over USB with Web Serial: create the account, send ETH and tokens, pay and claim privately, follow each step, and read every transaction back with a built-in explorer. |
-| **The network** | QDay's own EIP-8141 devnet, always on: ethrex, Lighthouse and the ERC-8421 gateway that carries frame transactions. |
+| **The network** | QDay's own EIP-8141 devnet, always on: ethrex, Lighthouse and the ERC-8421 gateway that carries frame transactions. EIP-8141 isn't on mainnet yet; it is scheduled for the Hegotá upgrade. |
 
 ## Why this design
 
@@ -57,8 +62,12 @@ weakness: the stealth-address scheme in ERC-5564 is built on secp256k1 too.
   SP 800-208 expects that state to live in dedicated hardware. A laptop wallet can be copied or rolled
   back; the device holds the counter.
 - **An EIP-8141 account** because the account itself decides what a valid signature is and pays its
-  own fees, so there is no ECDSA key left in charge. EIP-7702 delegation, by contrast, keeps the old
-  ECDSA key able to sign ([fact-check](docs/fact-check.md), item 18).
+  own fees, so there is no ECDSA key left in charge. A frame transaction carries the account's own
+  checks in a VERIFY frame, so a 2,500-byte or 2,420-byte post-quantum signature is just data the
+  account reads. EIP-7702 delegation, by contrast, keeps the old ECDSA key able to sign
+  ([fact-check](docs/fact-check.md), item 18), and ERC-4337 needs a bundler's ECDSA transaction to
+  carry the operation. EIP-8141 is also where Ethereum is heading: it is scheduled for the Hegotá
+  upgrade.
 - **A second lock on-chain** because hardware can fail or be cloned: `nextIndex` makes the account
   refuse any key it has already accepted.
 - **Private payments from post-quantum parts.** X-Wing gives payer and owner a shared secret, which
@@ -236,7 +245,8 @@ For a private payment the device shows the amount and the pool, not the recipien
 swaps the pasted private address can't be caught on the device. The one-time signer is an unreviewed
 variant of ML-DSA, and hiding who a payment is for rests on ML-KEM ciphertexts not revealing their
 recipient, which is an assumption, not a proven property.
-EIP-8141 is a draft considered for the Hegotá upgrade, so QDay runs only on devnets. The scheme is
+EIP-8141 is scheduled for the Hegotá upgrade, expected in 2027, but its spec is still a draft and it
+isn't on mainnet or Sepolia, so QDay runs only on devnets. The scheme is
 QDay's own keccak256 variant of XMSS, not RFC 8391, and nothing here is audited.
 
 ## Try it

@@ -105,8 +105,8 @@ In rough order of value for the people who would use it.
 
 These are outside the code, and none is done:
 
-- **EIP-8141 on mainnet.** It is a draft, considered for the Hegotá upgrade; until then QDay runs on
-  devnets only ([fact-check](fact-check.md), item 6).
+- **EIP-8141 on mainnet.** It is scheduled for the Hegotá upgrade, expected in 2027, and its spec is
+  still a draft; until then QDay runs on devnets only ([fact-check](fact-check.md), item 6).
 - **An independent audit** of the signature scheme, both verifiers, the accounts and the pool.
 - **A review of the one-time ML-DSA signer** used for private payments, which is QDay's own unreviewed
   variant, and of the privacy assumption that ML-KEM ciphertexts don't reveal their recipient.
