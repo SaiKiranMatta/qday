@@ -14,6 +14,6 @@ mod wots;
 pub use adrs::Adrs;
 pub use hash::{Hash, Hasher, keccak256};
 pub use keys::KeySet;
-pub use sign::{PublicKey, SIG_BYTES, SignError, verify};
+pub use sign::{ONE_TIME_SIG_BYTES, PublicKey, SIG_BYTES, SignError, verify, verify_one_time};
 pub use tree::{HEIGHT, LEAVES, NODES, Tree, node_slot};
 pub use wots::{CHAINS, digits};
