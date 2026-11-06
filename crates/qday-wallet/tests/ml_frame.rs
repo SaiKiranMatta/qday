@@ -208,7 +208,7 @@ fn the_frames_are_presented_in_order() {
         (transfer.execution, transfer.state, transfer.value),
         (50_000, 200_000, VALUE)
     );
-    assert!(transfer.data.is_empty());
+    assert_eq!(transfer.data, [] as [u8; 0]);
 }
 
 #[test]
