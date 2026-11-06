@@ -159,6 +159,20 @@ export class QDayDevice {
     this.closeListeners.forEach((listener) => listener());
   }
 
+  /**
+   * Closes the connection and drops the browser's permission for the port, so a reload doesn't
+   * reopen it. Connecting again asks the user to pick the device.
+   */
+  async forget(): Promise<void> {
+    await this.close();
+    try {
+      await this.port.forget();
+    } catch (error) {
+      // Older browsers can't forget a port; the caller's own flag still stops the reconnect.
+      console.warn("[qday] forgetting the port failed", error);
+    }
+  }
+
   /** Queues requests so only one is ever on the wire. */
   private exchange(request: Request, timeoutMs: number): Promise<Response | null> {
     const run = async (): Promise<Response | null> => {

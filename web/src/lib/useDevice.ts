@@ -11,6 +11,19 @@ export type ConnectionState =
 
 const LOG_LIMIT = 200;
 
+/** Set by Disconnect so a reload stays disconnected until the user connects again. */
+const STAY_DISCONNECTED = "qday.stayDisconnected";
+
+function stayDisconnected(value?: boolean): boolean {
+  try {
+    if (value === true) localStorage.setItem(STAY_DISCONNECTED, "1");
+    if (value === false) localStorage.removeItem(STAY_DISCONNECTED);
+    return localStorage.getItem(STAY_DISCONNECTED) === "1";
+  } catch {
+    return false; // Storage blocked: forgetting the port is enough on its own.
+  }
+}
+
 /** Dev only: `?mock` shows a sample device so the layout can be reviewed without hardware. */
 const MOCK_STATUS: DeviceStatus | null =
   MOCK
@@ -59,6 +72,7 @@ export function useDevice() {
   }, []);
 
   const connect = useCallback(async () => {
+    stayDisconnected(false);
     setState({ kind: "connecting" });
     try {
       await attach(await QDayDevice.request());
@@ -79,14 +93,15 @@ export function useDevice() {
   }, [fail]);
 
   const disconnect = useCallback(async () => {
-    await device.current?.close();
+    stayDisconnected(true);
+    await device.current?.forget();
     device.current = null;
     setState({ kind: "idle" });
   }, []);
 
-  // Reconnect quietly on reload if the user already allowed one device.
+  // Reconnect quietly on reload if the user already allowed one device and didn't disconnect it.
   useEffect(() => {
-    if (MOCK_STATUS || !QDayDevice.isSupported()) return;
+    if (MOCK_STATUS || !QDayDevice.isSupported() || stayDisconnected()) return;
     let cancelled = false;
     void QDayDevice.reconnect()
       .then(async (found) => {
