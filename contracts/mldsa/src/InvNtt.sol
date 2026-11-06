@@ -128,7 +128,7 @@ function nttInvV3(uint256[] memory a, uint256[] memory prof, uint256 psirev)
     assembly ("memory-safe") {
         let B := add(a, 0x20)
         let PR := add(prof, 0x20)
-        mstore(PR, gas())
+        mstore(PR, 0)
 
         // ---- Layers 1+2 fused (in-word), with the matvec accumulator's
         //      reduction FOLDED IN. Input lanes are raw lazy-accumulator
@@ -255,7 +255,7 @@ function nttInvV3(uint256[] memory a, uint256[] memory prof, uint256 psirev)
                 }
             }
         }
-        mstore(add(PR, 0x20), gas())
+        mstore(add(PR, 0x20), 0)
 
         // ---- Layers 3+4 fused (radix-4): one quad of 4 CONSECUTIVE words is
         //      loaded once and both GS layers run on the stack (4 loads +
@@ -311,7 +311,7 @@ function nttInvV3(uint256[] memory a, uint256[] memory prof, uint256 psirev)
                 }
             }
         }
-        mstore(add(PR, 0x40), gas())
+        mstore(add(PR, 0x40), 0)
 
         // ---- Layers 5+6 fused (radix-4): quad (w, w+4, w+8, w+12) inside each
         //      16-word layer-6 group g. L5 (t=16, word stride 4, K=16, Q4_16)
@@ -359,7 +359,7 @@ function nttInvV3(uint256[] memory a, uint256[] memory prof, uint256 psirev)
                 gp := add(gp, 0x200)
             }
         }
-        mstore(add(PR, 0x60), gas())
+        mstore(add(PR, 0x60), 0)
 
         // ---- Layers 7+8 fused, n^{-1} scaling and canonicalization folded in.
         //      L7 (t=64, h=2): word w pairs w+16 with S7a = idx2 = 0x467a98,
@@ -428,7 +428,7 @@ function nttInvV3(uint256[] memory a, uint256[] memory prof, uint256 psirev)
                 pD := add(pD, 0x20)
             }
         }
-        mstore(add(PR, 0x80), gas())
+        mstore(add(PR, 0x80), 0)
     }
     return a;
 }

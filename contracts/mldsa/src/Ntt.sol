@@ -123,7 +123,7 @@ function nttFwV2(uint256[] memory a, uint256[] memory prof) view returns (uint25
     assembly ("memory-safe") {
         let B := add(a, 0x20)
         let PR := add(prof, 0x20)
-        mstore(PR, gas())
+        mstore(PR, 0)
 
         // ---- Layer 1: m=1, t=128 (tb=0x1000), single group, S = psirev[1]
         {
@@ -157,7 +157,7 @@ function nttFwV2(uint256[] memory a, uint256[] memory prof) view returns (uint25
                 pt := add(pt, 0x20)
             }
         }
-        mstore(add(PR, 0x20), gas())
+        mstore(add(PR, 0x20), 0)
 
         // ---- Layer 2: m=2, t=64 (tb=0x800), 2 groups, S = psirev[2..3]
         {
@@ -198,7 +198,7 @@ function nttFwV2(uint256[] memory a, uint256[] memory prof) view returns (uint25
                 gp := add(gp, 0x1000)
             }
         }
-        mstore(add(PR, 0x40), gas())
+        mstore(add(PR, 0x40), 0)
 
         // ---- Layer 3: m=4, t=32 (tb=0x400), 4 groups, S = psirev[4..7]
         {
@@ -239,7 +239,7 @@ function nttFwV2(uint256[] memory a, uint256[] memory prof) view returns (uint25
                 gp := add(gp, 0x800)
             }
         }
-        mstore(add(PR, 0x60), gas())
+        mstore(add(PR, 0x60), 0)
 
         // ---- Layer 4: m=8, t=16 (tb=0x200), 8 groups, S = psirev[8..15] (word 1)
         {
@@ -280,7 +280,7 @@ function nttFwV2(uint256[] memory a, uint256[] memory prof) view returns (uint25
                 gp := add(gp, 0x400)
             }
         }
-        mstore(add(PR, 0x80), gas())
+        mstore(add(PR, 0x80), 0)
 
         // ---- Layer 5: m=16, t=8 (tb=0x100), 16 groups, words 2..3; 8 bflys straight-line
         {
@@ -344,7 +344,7 @@ function nttFwV2(uint256[] memory a, uint256[] memory prof) view returns (uint25
                 }
             }
         }
-        mstore(add(PR, 0xa0), gas())
+        mstore(add(PR, 0xa0), 0)
 
         // ---- Layer 6: m=32, t=4 (tb=0x80), 32 groups, words 4..7; 4 bflys straight-line
         {
@@ -384,7 +384,7 @@ function nttFwV2(uint256[] memory a, uint256[] memory prof) view returns (uint25
                 }
             }
         }
-        mstore(add(PR, 0xc0), gas())
+        mstore(add(PR, 0xc0), 0)
 
         // ---- Layer 7: m=64, t=2 (tb=0x40), 64 groups, words 8..15; 2 bflys straight-line
         {
@@ -408,7 +408,7 @@ function nttFwV2(uint256[] memory a, uint256[] memory prof) view returns (uint25
                 }
             }
         }
-        mstore(add(PR, 0xe0), gas())
+        mstore(add(PR, 0xe0), 0)
 
         // ---- Layer 8: m=128, t=1 (tb=0x20), 128 groups, words 16..31
         {
@@ -428,7 +428,7 @@ function nttFwV2(uint256[] memory a, uint256[] memory prof) view returns (uint25
                 }
             }
         }
-        mstore(add(PR, 0x100), gas())
+        mstore(add(PR, 0x100), 0)
     }
     return a;
 }
@@ -504,7 +504,7 @@ function nttFwV3(uint256[] memory a, uint256[] memory prof, uint256 psirev)
     assembly ("memory-safe") {
         let B := add(a, 0x20)
         let PR := add(prof, 0x20)
-        mstore(PR, gas())
+        mstore(PR, 0)
 
         // ---- Pass A: layers 1+2+3 fused (RADIX-8). One OCTET of words
         //      (i, i+8, i+16, ..., i+56) is loaded ONCE and all THREE layers
@@ -591,7 +591,7 @@ function nttFwV3(uint256[] memory a, uint256[] memory prof, uint256 psirev)
                 mstore(add(p, 0x700), sub(add(c6, TWOQ4), t0))
             }
         }
-        mstore(add(PR, 0x20), gas())
+        mstore(add(PR, 0x20), 0)
 
         // ---- Pass B: layers 4+5+6 fused (RADIX-8). The octet is 8
         //      CONSECUTIVE words; layer 4 (word stride 4) pairs slots (k, k+4)
@@ -693,7 +693,7 @@ function nttFwV3(uint256[] memory a, uint256[] memory prof, uint256 psirev)
                 }
             }
         }
-        mstore(add(PR, 0x40), gas())
+        mstore(add(PR, 0x40), 0)
         // ---- Layers 7+8 fused (radix-4 style), LAZY output.
         //      L7 (m=64, t=2): in-word, lanes (0,1) pair (2,3), shared S7
         //      (table words 8..15). L8 (m=128, t=1): lane 0 pairs 1 with Sa,
@@ -816,7 +816,7 @@ function nttFwV3(uint256[] memory a, uint256[] memory prof, uint256 psirev)
                 }
             }
         }
-        mstore(add(PR, 0x60), gas())
+        mstore(add(PR, 0x60), 0)
     }
     return a;
 }
