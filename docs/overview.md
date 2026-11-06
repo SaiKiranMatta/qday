@@ -3,7 +3,7 @@
 > Summary of `QDay-Overview.pdf` (team doc, ETHGlobal Mumbai, Nov 5–7 2026). Fact-check notes are
 > linked inline; see [fact-check.md](fact-check.md).
 
-**One line:** a small hardware device plus an Ethereum smart account. It signs with **XMSS**, a hash-only
+**One line:** a small hardware device plus an Ethereum smart account. It signs with an **XMSS-style**, hash-only
 signature that quantum computers can't forge, and makes reuse of a one-time key impossible.
 
 ## Problem
@@ -16,19 +16,19 @@ so on Q-Day the funds can be taken. 2026 estimates put the attack at ~1,200 logi
 
 | Part | Role |
 |------|------|
-| Device | ESP32-S3 with a screen and two buttons. Holds the XMSS key, shows what you sign, signs only on Approve |
-| Account | EIP-8141 smart account. Accepts only a valid XMSS signature. No ECDSA key anywhere |
+| Device | ESP32-S3 with a touch screen and four keys. Holds the signing keys, shows what you sign, signs only on Approve |
+| Account | EIP-8141 smart account. Accepts only a valid QDay signature. No ECDSA key anywhere |
 
 ## The one catch: one-time keys
 
-XMSS-SHA2_10_256 is a "cheque book" of **1,024 pages**. Signing two *different* messages on one page lets
+Each QDay key tree is a "cheque book" of **1,024 pages**. Signing two *different* messages on one page lets
 an attacker forge. QDay has two locks:
 
 1. **Device counter:** moves forward before every signature.
-2. **Chain remembers:** the account's `commit(idx)` rejects `idx < nextIndex`.
+2. **Chain remembers:** the account's `spendIndex(index)` rejects `index < nextIndex`.
 
 **Restore rule:** a restored device reads `nextIndex` from the chain and skips ahead 64 pages.
-**Rotation:** the last page registers a new book; the address stays the same.
+**Rotation:** the last 16 pages (1008-1023) can only register a new book; the address stays the same.
 
 ## Solves / doesn't solve
 
@@ -55,4 +55,6 @@ hardware-wallet users.
 
 The quantum computer is simulated, and we say so. The signatures, counter and on-chain checks are real.
 
-For the build design, see [superpowers/specs/2026-11-05-qday-design.md](superpowers/specs/2026-11-05-qday-design.md).
+For the exact signature scheme, see [xmss-spec.md](xmss-spec.md). The original design is kept in
+[superpowers/specs/2026-11-05-qday-design.md](superpowers/specs/2026-11-05-qday-design.md), but the
+build has moved on from it.

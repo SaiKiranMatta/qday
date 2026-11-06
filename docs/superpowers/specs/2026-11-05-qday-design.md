@@ -1,5 +1,10 @@
 # QDay — Design Spec
 
+> **Superseded.** Kept for history. The build now uses keccak256 instead of SHA-256 and is not RFC 8391
+> compatible, the verifier is Solidity with inline assembly instead of a Yul project, the device has
+> four keys instead of two, and the 100,000 gas limit is not a design target. See
+> [the signature scheme](../../xmss-spec.md) and the [README](../../../README.md).
+
 - **Date:** 2026-11-05 (ETHGlobal Mumbai, Nov 5–7, 2026)
 - **Status:** Draft for team review
 - **Source idea:** `QDay-Overview.pdf` (summarised in [../../overview.md](../../overview.md))

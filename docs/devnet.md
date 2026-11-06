@@ -1,16 +1,50 @@
 # Devnet notes
 
-Fill these in during Phase 0. Everything here is what we actually ran against.
+What the runs on 2026-11-06 ran against.
 
 | Field | Value |
 |-------|-------|
 | Chain id | 1337 |
-| RPC URL | _fill in_ |
-| Explorer | _fill in_ |
-| Faucet / funded key | _fill in (never commit private keys)_ |
-| `web3_clientVersion` | _fill in_ |
-| Mempool rules (ERC-8421 variant?) | _fill in_ |
-| Probe tx: `[pre_verify commit(idx), self_verify, SENDER]` accepted | _tx hash, date, gas used per frame_ |
+| RPC URL | `http://127.0.0.1:14337/rpc` (mempool gateway), `http://127.0.0.1:8545` (ethrex) |
+| Explorer | None |
+| Funded key | The genesis premine key, kept outside the repository |
+| `web3_clientVersion` | `ethrex/v23.0.0-eip8141-tracer-9aa3645d795945c64400f41a70aace0edfa7f383/x86_64-unknown-linux-gnu/rustc-v1.93.1` |
+| Mempool rules | ERC-8421 sidecar, minimum stake 0.01 ETH |
+| Frame transaction accepted | Yes, see below |
+
+## Measured results
+
+Laptop key, 2026-11-06. Frame transactions go through the gateway with `eth_sendFrameTransaction`, and
+ethrex itself doesn't have that method. The gateway has no `eth_feeHistory`, so plain transactions use
+legacy gas pricing.
+
+| Transaction | Total gas | VERIFY frame |
+|---|---|---|
+| First transfer on a tree | 475,641 (291,981 after a rotation) | 120,755 |
+| Repeat transfer | 188,979 to 189,015 | 115,625 |
+| Rotation | 297,572 | 111,017 |
+
+The first transfer on a tree costs more because it writes `nextIndex` from zero.
+
+Refused by the chain, with a valid signature in each case:
+
+| Attempt | Error |
+|---|---|
+| Reusing spent key 0 on tree 1 | `KeyAlreadyUsed` |
+| Signing with key 5 of retired tree 0 | `BadSignature` |
+
+The device signed its first transfer on this chain the same day: 0.0025 ETH, approved on K4 with the
+passcode, mined with 468,765 gas in total and 113,915 in the VERIFY frame. The recipient gained exactly
+that amount, and the device and the chain both moved to key 1.
+
+It then rotated, all on the device:
+
+| Step | Result |
+|---|---|
+| Build tree 1 | 99 seconds |
+| Rotation | 316,334 gas, 129,827 in the VERIFY frame |
+| Activate | The device restarted on tree 1, at the same address |
+| Transfer from tree 1 | 0.004 ETH, 292,029 gas, 120,755 in the VERIFY frame |
 
 ## Public reference network (not our target)
 

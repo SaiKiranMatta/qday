@@ -1,5 +1,9 @@
 # Fact-check of `QDay-Overview.pdf`
 
+> This checks the original pitch, which assumed RFC 8391 XMSS with SHA-256. The build now uses
+> keccak256 and is not RFC 8391 compatible (see [xmss-spec.md](xmss-spec.md)), so the RFC gas estimates
+> in items 8 and 9 no longer describe it. Use measured gas instead.
+
 Checked 2026-11-05. Verdicts: ✅ holds · ⚠️ partly right / needs rewording · ❌ wrong or unsupported · 🔍 not yet verified.
 
 | # | Claim in the PDF | Verdict | What we found | Source |
@@ -33,4 +37,4 @@ Checked 2026-11-05. Verdicts: ✅ holds · ⚠️ partly right / needs rewording
 3. Item 15: "follows NIST SP 800-208's hardware requirement in spirit; a production device needs a
    certified secure element".
 4. Item 17: say what the counter actually protects against.
-5. If OD1 goes to a non-RFC variant, stop calling it "standards-aligned".
+5. The build is a non-RFC variant, so don't call it "standards-aligned".

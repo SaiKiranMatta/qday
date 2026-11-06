@@ -1,0 +1,16 @@
+[package]
+name = "qday-ui"
+description = "Screens, soft keys and themes for the QDay device"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+qday-wallet = { path = "../qday-wallet" }
+qday-xmss = { path = "../qday-xmss" }
+
+[dev-dependencies]
+png = "0.18"
+
+[lints]
+workspace = true

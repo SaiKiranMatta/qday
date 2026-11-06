@@ -1,0 +1,21 @@
+[package]
+name = "qday-cli"
+description = "The qday laptop tool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "qday"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.6", features = ["derive"] }
+qday-wallet = { path = "../qday-wallet" }
+qday-xmss = { path = "../qday-xmss" }
+serde_json = "1"
+serialport = { version = "4.10", default-features = false }
+
+[lints]
+workspace = true
