@@ -1,12 +1,20 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
+export const __wbg_softkeys_free: (a: number, b: number) => void;
 export const createTx: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
 export const describe: (a: number, b: number) => [number, number, number, number];
 export const mlBlob: (a: number, b: number) => [number, number, number, number];
 export const mlStealthPayTx: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number, number];
 export const mlTransferTx: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number) => [number, number, number, number];
 export const signingMessage: (a: number, b: number) => [number, number, number, number];
+export const softkeys_new: (a: number, b: number) => [number, number, number];
+export const softkeys_pubSeed: (a: number) => [number, number];
+export const softkeys_root: (a: number) => [number, number];
+export const softkeys_sign: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+export const softkeys_spendStealth: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => [number, number, number, number];
+export const softkeys_stealthAddress: (a: number) => [number, number];
+export const softkeys_viewKey: (a: number) => [number, number];
 export const stealthFinds: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
 export const stealthKey: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const stealthPay: (a: number, b: number, c: number, d: number) => [number, number, number, number];
