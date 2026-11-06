@@ -1,0 +1,17 @@
+{
+  "name": "@qday/device",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/w3c-web-serial": "^1.0.9",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}

@@ -266,7 +266,20 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
                     return Err(WalletError::NothingPending);
                 }
             }
-            Action::Transfer { .. } | Action::Other { .. } => {
+            Action::Create { root, pub_seed, .. } => {
+                // Only create the account that belongs to this device's active key.
+                let mine = PublicKey {
+                    root: *root,
+                    pub_seed: *pub_seed,
+                };
+                if self.active().is_none_or(|active| active.key != mine) {
+                    return Err(WalletError::BadRequest);
+                }
+                if next >= RESERVED_FROM {
+                    return Err(WalletError::RotationNeeded);
+                }
+            }
+            Action::Transfer { .. } | Action::TokenTransfer { .. } | Action::Other { .. } => {
                 if next >= RESERVED_FROM {
                     return Err(WalletError::RotationNeeded);
                 }

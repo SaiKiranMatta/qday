@@ -13,12 +13,13 @@ use qday_wallet::passcode::{Attempt, CODE_DIGITS, Code, MAX_FAILURES, Proof, shu
 use qday_wallet::protocol::{Line, NextKey, Request, Response, parse_request, response_line};
 use qday_wallet::rng::Rng;
 use qday_wallet::settings::{CROSSES, Calibration, Settings};
+use qday_wallet::tokens;
 use qday_wallet::wallet::{RESTORE_SKIP, Review, Wallet, WalletError};
 use qday_xmss::{Hash, LEAVES};
 
 use crate::canvas::Canvas;
 use crate::fb::Framebuffer;
-use crate::format::{checksum_address, eth, short_address, wait_text};
+use crate::format::{checksum_address, eth, short_address, token_amount, wait_text};
 use crate::nav::{self, Action, Keys, Scroll, Setting};
 use crate::screens::{self, ACTIVITY_ROWS, Activity, DeviceInfo, Passcode, ReviewInfo, Status};
 use crate::theme::{self, Theme};
@@ -116,6 +117,8 @@ pub struct Shown {
     b: String,
     c: String,
     fee: String,
+    /// What `a` is counted in, for sends: ETH or a known token's symbol.
+    unit: &'static str,
     rotation: bool,
     /// Short lines for the Activity tab.
     summary: String,
@@ -125,6 +128,8 @@ pub struct Shown {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShownKind {
     Send,
+    /// A token the device doesn't know: raw units and the contract.
+    Token,
     Call,
     UnknownCall,
 }
@@ -158,15 +163,63 @@ impl Shown {
                     b: checksum_address(to),
                     c: String::new(),
                     fee,
+                    unit: "ETH",
                     rotation: false,
                 })
             }
+            TxAction::TokenTransfer { token, to, amount } => {
+                // A token on the device's own list reads like a send; any other shows its raw units.
+                if let Some(known) = tokens::known(token) {
+                    let shown = token_amount(*amount, known.decimals, known.symbol);
+                    if shown.len() > LONGEST_AMOUNT {
+                        return None;
+                    }
+                    return Some(Self {
+                        kind: ShownKind::Send,
+                        summary: format!("Sent {shown}"),
+                        detail: format!("to {}", short_address(to)),
+                        a: shown.trim_end_matches(known.symbol).trim_end().to_string(),
+                        b: checksum_address(to),
+                        c: String::new(),
+                        fee,
+                        unit: known.symbol,
+                        rotation: false,
+                    });
+                }
+                let raw = amount.to_string();
+                if raw.len() > LONGEST_AMOUNT {
+                    return None;
+                }
+                Some(Self {
+                    kind: ShownKind::Token,
+                    summary: "Token transfer".to_string(),
+                    detail: format!("to {}", short_address(to)),
+                    a: raw,
+                    b: checksum_address(to),
+                    c: checksum_address(token),
+                    fee,
+                    unit: "",
+                    rotation: false,
+                })
+            }
+            TxAction::Create { factory, .. } => Some(Self {
+                kind: ShownKind::Call,
+                a: checksum_address(factory),
+                b: eth(0),
+                c: "Create account".to_string(),
+                fee,
+                unit: "ETH",
+                rotation: false,
+                summary: "Created account".to_string(),
+                detail: format!("at {}", short_address(&tx.sender)),
+            }),
             TxAction::Rotate { .. } => Some(Self {
                 kind: ShownKind::Call,
                 a: checksum_address(&tx.sender),
                 b: eth(0),
                 c: "Rotate keys".to_string(),
                 fee,
+                unit: "ETH",
                 rotation: true,
                 summary: "Rotated keys".to_string(),
                 detail: "to the next tree".to_string(),
@@ -191,6 +244,7 @@ impl Shown {
                     b: amount,
                     c: function,
                     fee,
+                    unit: "ETH",
                     rotation: false,
                 })
             }
@@ -203,8 +257,13 @@ impl Shown {
         match self.kind {
             ShownKind::Send => screens::Review::Send {
                 amount: &self.a,
-                unit: "ETH",
+                unit: self.unit,
                 to: &self.b,
+            },
+            ShownKind::Token => screens::Review::Token {
+                amount: &self.a,
+                to: &self.b,
+                token: &self.c,
             },
             ShownKind::Call => screens::Review::Call {
                 contract: &self.a,

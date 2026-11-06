@@ -21,6 +21,20 @@ pub fn eth(wei: u128) -> String {
     format!("{whole}.{} ETH", digits.trim_end_matches('0'))
 }
 
+/// An amount of a token with `decimals` places, every significant digit: `125.5 USDC`.
+#[must_use]
+pub fn token_amount(amount: u128, decimals: u8, symbol: &str) -> String {
+    let places = usize::from(decimals);
+    let (whole, fraction) = 10_u128
+        .checked_pow(u32::from(decimals))
+        .map_or((0, amount), |unit| (amount / unit, amount % unit));
+    if fraction == 0 {
+        return format!("{whole} {symbol}");
+    }
+    let digits = format!("{fraction:0places$}");
+    format!("{whole}.{} {symbol}", digits.trim_end_matches('0'))
+}
+
 /// An address with its EIP-55 mixed-case checksum.
 #[must_use]
 pub fn checksum_address(address: &Address) -> String {
@@ -61,7 +75,14 @@ pub fn wait_text(ms: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{checksum_address, eth, short_address, wait_text};
+    use super::{checksum_address, eth, short_address, token_amount, wait_text};
+
+    #[test]
+    fn token_amounts_use_the_tokens_decimals() {
+        assert_eq!(token_amount(125_500_000, 6, "USDC"), "125.5 USDC");
+        assert_eq!(token_amount(2_500_000_000, 6, "USDC"), "2500 USDC");
+        assert_eq!(token_amount(1, 8, "WBTC"), "0.00000001 WBTC");
+    }
 
     #[test]
     fn amounts_are_exact() {

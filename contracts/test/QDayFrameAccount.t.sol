@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+import {QDayAccountFactory} from "../src/QDayAccountFactory.sol";
 import {QDayFrameAccount} from "../src/QDayFrameAccount.sol";
 import {XMSSVerifier} from "../src/XMSSVerifier.sol";
 import {
@@ -25,6 +26,7 @@ contract QDayFrameAccountTest is TestBase {
     address private constant RECIPIENT = address(0x2222);
     bytes private constant REVERTS = hex"5f5ffd";
 
+    QDayAccountFactory private factory;
     QDayFrameAccount private account;
     FrameState private state;
     StakingRegistryStub private registry;
@@ -46,9 +48,8 @@ contract QDayFrameAccountTest is TestBase {
         hashB = _word("hashB");
 
         registry = new StakingRegistryStub();
-        account = new QDayFrameAccount{value: STAKE}(
-            address(new XMSSVerifier()), root0, pubSeed0, address(registry), STAKE, UNSTAKE_DELAY
-        );
+        factory = new QDayAccountFactory(address(new XMSSVerifier()));
+        account = QDayFrameAccount(payable(factory.createAccount(root0, pubSeed0)));
     }
 
     /// @dev Swaps the helpers for stand-ins, which Foundry's EVM can run.
@@ -104,14 +105,53 @@ contract QDayFrameAccountTest is TestBase {
 
     // Deployment
 
-    function test_constructor_installs_the_key_and_stakes() public view {
+    function test_constructor_installs_the_key() public view {
         _assertEq(account.root(), root0, "root");
         _assertEq(account.pubSeed(), pubSeed0, "pubSeed");
         _assertEq(account.nextIndex(), 0, "nextIndex");
         _assertEq(account.tree(), 0, "tree");
+        _assertTrue(account.factory() == address(factory), "factory");
+        (bytes32 firstRoot, bytes32 firstPubSeed) = account.firstKey();
+        _assertEq(firstRoot, root0, "first root");
+        _assertEq(firstPubSeed, pubSeed0, "first pubSeed");
+    }
+
+    function test_the_account_is_a_small_proxy() public view {
+        _assertEq(address(account).code.length, 45 + 64, "proxy plus key");
+    }
+
+    function test_the_account_stakes_from_its_own_balance() public {
+        vm.deal(address(account), STAKE);
+        vm.prank(address(account));
+        account.addStake(address(registry), STAKE, UNSTAKE_DELAY);
         _assertTrue(registry.staker() == address(account), "staker");
         _assertEq(registry.staked(), STAKE, "stake");
         _assertEq(uint256(registry.delay()), UNSTAKE_DELAY, "delay");
+    }
+
+    function test_only_the_account_can_stake() public {
+        _expect(QDayFrameAccount.NotSelf.selector);
+        account.addStake(address(registry), 0, UNSTAKE_DELAY);
+    }
+
+    function test_a_deploy_frame_in_front_is_allowed() public {
+        _useStandIns();
+        state.setSignature(hashA, 0, _bytes("sig5"));
+        state.addFrame(address(0x4444), 0, hex"deadbeef");
+        state.addFrame(address(account), VERIFY, abi.encodeCall(QDayFrameAccount.validate, ()));
+        state.addFrame(address(account), SENDER, _spendData(5));
+        state.addFrame(RECIPIENT, SENDER, "");
+        account.validate();
+        _assertApproved();
+    }
+
+    function test_a_spend_frame_must_follow_the_verify_frame() public {
+        _useStandIns();
+        state.setSignature(hashA, 0, _bytes("sig5"));
+        state.addFrame(address(account), SENDER, _spendData(5));
+        state.addFrame(address(account), VERIFY, abi.encodeCall(QDayFrameAccount.validate, ()));
+        _expect(QDayFrameAccount.NoSpendFrame.selector);
+        account.validate();
     }
 
     function test_constants_match_the_scheme() public view {
