@@ -1,0 +1,17 @@
+[package]
+name = "qday-wasm"
+description = "The device's frame transaction code for the browser, so the web app builds exactly what the device signs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+qday-wallet = { path = "../qday-wallet" }
+wasm-bindgen = "=0.2.130"
+
+[lints]
+workspace = true
