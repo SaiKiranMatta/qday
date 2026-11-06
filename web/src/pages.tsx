@@ -15,7 +15,6 @@ import type { AccountView } from "./lib/wallet";
 /** Balance, assets and recent activity. */
 export function WalletPage({
   account,
-  status,
   tokens,
   chain,
   error,
@@ -26,7 +25,6 @@ export function WalletPage({
   onOpenActivity,
 }: {
   account: AccountView;
-  status: DeviceStatus;
   tokens: TokenList;
   chain: ChainState;
   error: string | null;
@@ -59,7 +57,7 @@ export function WalletPage({
     }
   };
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+    <div>
       <div className="space-y-6">
         <section className="chrome-wide grain overflow-hidden rounded-3xl p-8">
           <div className="relative z-10 flex flex-wrap items-end justify-between gap-6">
@@ -143,48 +141,13 @@ export function WalletPage({
       </div>
 
       {managing && <ManageTokens tokens={tokens} onClose={() => setManaging(false)} />}
-      <aside className="space-y-6">
-        <SecurityCard status={status} />
-        <section className="rounded-3xl bg-surface p-6">
-          <h2 className="text-base font-semibold">Receive address</h2>
-          <p className="mt-3 break-all font-mono text-xs leading-relaxed text-alabaster/80">
-            {account.address === "0x" ? "Finding your address…" : account.address}
-          </p>
-        </section>
-      </aside>
     </div>
-  );
-}
-
-/** The one security summary people need: protected, and how many signatures are left. */
-function SecurityCard({ status }: { status: DeviceStatus }) {
-  const cap = capacity(status);
-  return (
-    <section className="rounded-3xl bg-surface p-6">
-      <h2 className="text-base font-semibold">Security</h2>
-      <p className="mt-3 text-sm text-muted">
-        Every transaction is approved on your QDay. No key on this computer can move your funds.
-      </p>
-      {cap.left !== null && (
-        <div className="mt-5">
-          <div className="flex items-baseline justify-between text-sm">
-            <span className="text-muted">Signatures left</span>
-            <span className="font-semibold">{groupThousands(cap.left)}</span>
-          </div>
-          {cap.low && (
-            <div className="mt-3 rounded-xl bg-warn/10 p-3 text-xs text-warn">
-              {cap.empty ? "Refresh your keys on the device to keep signing." : "Running low. Refresh your keys soon."}
-            </div>
-          )}
-        </div>
-      )}
-    </section>
   );
 }
 
 export function ActivityPage({ account, tokens }: { account: AccountView; tokens: TokenList }) {
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="max-w-3xl">
       <PageTitle title="Activity" subtitle="Everything this account sent and received" />
       <section className="rounded-3xl bg-surface p-6">
         {account.activity.length ? (
@@ -201,7 +164,7 @@ export function DevicePage({ status, log, onRefresh }: { status: DeviceStatus; l
   const [showDetails, setShowDetails] = useState(false);
   const cap = capacity(status);
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="max-w-3xl">
       <PageTitle title="Device" subtitle="Your connected QDay" />
       <section className="rounded-3xl bg-surface p-6">
         <div className="flex items-center gap-2 text-sm">

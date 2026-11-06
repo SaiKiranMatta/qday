@@ -122,7 +122,6 @@ function ConnectedApp({
       {page === "wallet" && (
         <WalletPage
           account={account}
-          status={status}
           tokens={tokens}
           chain={MOCK ? "live" : live.chain}
           error={MOCK ? null : live.error}

@@ -2,7 +2,7 @@ import type { DeviceStatus } from "@qday/device";
 import type { ReactNode } from "react";
 import { shortHex } from "../lib/format";
 import type { AccountView } from "../lib/wallet";
-import { Badge, StatusDot, Wordmark } from "./ui";
+import { StatusDot, Wordmark } from "./ui";
 
 export type Page = "wallet" | "activity" | "device";
 
@@ -59,13 +59,10 @@ export function Shell({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between gap-4 px-6 py-5 sm:px-8">
+        <header className="mx-auto flex w-full max-w-[52rem] items-center justify-between gap-4 px-6 py-5 sm:px-8">
           <AccountPill account={account} fallbackId={status.root} />
-          <Badge>
-            <StatusDot tone="ok" /> Devnet · chain 1337
-          </Badge>
         </header>
-        <main className="flex-1 px-6 pb-10 sm:px-8">{children}</main>
+        <main className="mx-auto w-full max-w-[52rem] flex-1 px-6 pb-10 sm:px-8">{children}</main>
       </div>
     </div>
   );
