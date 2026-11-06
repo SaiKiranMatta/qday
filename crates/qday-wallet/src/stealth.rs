@@ -140,6 +140,12 @@ fn secret_for(view: &Hash, ciphertext: &Ciphertext) -> Option<[u8; SECRET_BYTES]
     ))
 }
 
+/// The view tag an announcement should have, which is cheap to check before deriving a key.
+#[must_use]
+pub fn open_view_tag(view: &Hash, ciphertext: &Ciphertext) -> Option<u8> {
+    Some(view_tag_of(&secret_for(view, ciphertext)?))
+}
+
 /// Opens an announcement with a view seed. A ciphertext for someone else gives an unrelated secret
 /// rather than an error, so the owner compares the key hash. `None` if the address is malformed.
 #[must_use]

@@ -13,6 +13,7 @@ use qday_wallet::protocol::{
     NextKey, PREFIX, Request, Response, error_code, parse_response, request_line, scheme_name,
 };
 use qday_wallet::settings::Scheme;
+use qday_wallet::stealth::StealthSpend;
 use qday_xmss::ONE_TIME_SIG_BYTES;
 use serde_json::Value;
 
@@ -192,6 +193,33 @@ impl<P: Read + Write> Device<P> {
         }
     }
 
+    /// Asks the device for its stealth address, which the person has to agree to.
+    pub fn stealth_address(&mut self) -> Result<Vec<u8>> {
+        self.scheme()?;
+        match self.request(&Request::StealthAddress)? {
+            Response::StealthAddress(address) => Ok(address),
+            _ => bail!("the device gave the wrong response"),
+        }
+    }
+
+    /// Asks the device for its view seed, which needs the person's passcode.
+    pub fn view_key(&mut self) -> Result<[u8; 32]> {
+        self.scheme()?;
+        match self.request(&Request::ViewKey)? {
+            Response::ViewKey(view) => Ok(view),
+            _ => bail!("the device gave the wrong response"),
+        }
+    }
+
+    /// Signs a spend of a stealth note on the device.
+    pub fn spend_stealth(&mut self, spend: &StealthSpend) -> Result<Vec<u8>> {
+        self.scheme()?;
+        match self.request(&Request::SpendStealth(Box::new(*spend)))? {
+            Response::Sig { signature, .. } if signature.len() == SIGNATURE_BYTES => Ok(signature),
+            _ => bail!("the device gave the wrong response"),
+        }
+    }
+
     /// Signs a two-frame transfer on the device and returns the submission JSON.
     pub fn ml_send(
         &mut self,
@@ -297,6 +325,7 @@ mod tests {
     use qday_wallet::invoice::{Invoice, Spend};
     use qday_wallet::protocol::{Request, Response, parse_request, response_line};
     use qday_wallet::settings::Scheme;
+    use qday_wallet::stealth::StealthSpend;
     use qday_wallet::wallet::WalletError;
 
     use super::Device;
@@ -584,6 +613,76 @@ mod tests {
             .spend_invoice(spend())
             .expect_err("nothing is signed");
         assert!(error.to_string().contains("invoice-used"), "{error}");
+    }
+
+    fn stealth_spend() -> StealthSpend {
+        StealthSpend {
+            ciphertext: [3; 1120],
+            key_hash: [4; 32],
+            pool: SENDER,
+            to: TO,
+            fee: 1000,
+        }
+    }
+
+    #[test]
+    fn stealth_address_says_hello_with_scheme_then_asks() {
+        let mut fake = FakeDevice::new(vec![
+            Some(Response::Scheme(Scheme::Xmss)),
+            Some(Response::StealthAddress(vec![7; 4160])),
+        ]);
+        let got = Device::new(&mut fake)
+            .stealth_address()
+            .expect("it answers");
+        assert_eq!(got, vec![7; 4160]);
+        assert_eq!(fake.requests, [Request::Scheme, Request::StealthAddress]);
+    }
+
+    #[test]
+    fn view_key_returns_the_seed() {
+        let mut fake = FakeDevice::new(vec![
+            Some(Response::Scheme(Scheme::MlDsa44)),
+            Some(Response::ViewKey([8; 32])),
+        ]);
+        assert_eq!(
+            Device::new(&mut fake).view_key().expect("it answers"),
+            [8; 32]
+        );
+    }
+
+    #[test]
+    fn spend_stealth_returns_the_ml_dsa_signature() {
+        let mut fake = FakeDevice::new(vec![
+            Some(Response::Scheme(Scheme::Xmss)),
+            Some(Response::Sig {
+                signature: vec![9; 2420],
+                next: None,
+            }),
+        ]);
+        let signature = Device::new(&mut fake)
+            .spend_stealth(&stealth_spend())
+            .expect("the device signs");
+        assert_eq!(signature, vec![9; 2420]);
+        assert_eq!(
+            fake.requests[1],
+            Request::SpendStealth(Box::new(stealth_spend()))
+        );
+    }
+
+    #[test]
+    fn spend_stealth_refuses_another_signature_length() {
+        let mut fake = FakeDevice::new(vec![
+            Some(Response::Scheme(Scheme::Xmss)),
+            Some(Response::Sig {
+                signature: vec![9; 2176],
+                next: None,
+            }),
+        ]);
+        assert!(
+            Device::new(&mut fake)
+                .spend_stealth(&stealth_spend())
+                .is_err()
+        );
     }
 
     #[test]

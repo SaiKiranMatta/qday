@@ -5,13 +5,18 @@ mod json;
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
-use qday_mldsa::blob::{BlobError, prepare_checked};
+use qday_mldsa::blob::{BlobError, KEY_PART_BYTES, prepare, prepare_checked};
+use qday_mldsa::stealth::Master;
 use qday_mldsa::{KeySeed, Signer, StandardSigner};
 use qday_wallet::backup::words_to_seed;
 use qday_wallet::frame::{Address, FrameTx, MlFrameTx};
 use qday_wallet::hex;
 use qday_wallet::invoice::{Spend, keys_for, spend_hash};
 use qday_wallet::protocol::scheme_name;
+use qday_wallet::stealth::{
+    Ciphertext, MetaAddress, StealthSpend, key_for, meta_address_for, open, open_view_tag, pay_to,
+    signer_for, view_seed_for,
+};
 use qday_xmss::{Hash, KeySet, Tree};
 
 #[derive(Parser)]
@@ -79,6 +84,8 @@ enum Command {
     DevicePubkey { port: String },
     #[command(flatten)]
     Invoice(InvoiceCommand),
+    #[command(flatten)]
+    Stealth(StealthCommand),
     /// Print the device's signing scheme
     DeviceScheme { port: String },
     /// Print the device's stored ML-DSA public key
@@ -106,6 +113,174 @@ enum Command {
         tree: u32,
         chain_next_index: u32,
     },
+}
+
+/// Stealth payments through the lattice pool.
+#[derive(Subcommand)]
+enum StealthCommand {
+    /// Print the shared matrix's data contract
+    StealthMatrix,
+    /// Print the stealth address for a laptop key
+    StealthAddress { seed: String },
+    /// Print the view seed for a laptop key
+    StealthView { seed: String },
+    /// Make a payment to an address: prints the key hash, view tag and ciphertext
+    StealthPay { address: String, random: String },
+    /// Print the key hash and ciphertext of each announcement in a file that's for this view seed
+    StealthScan {
+        view: String,
+        address: String,
+        file: String,
+    },
+    /// Print the key a spend gives the pool
+    StealthKey {
+        view: String,
+        address: String,
+        ciphertext: String,
+    },
+    /// Sign a spend of a stealth note with a laptop key
+    StealthSign {
+        seed: String,
+        #[command(flatten)]
+        spend: StealthNote,
+        rnd: String,
+    },
+    /// Ask the device for its stealth address
+    DeviceStealthAddress { port: String },
+    /// Ask the device for its view seed
+    DeviceViewKey { port: String },
+    /// Sign a spend of a stealth note on the device
+    DeviceStealthSpend {
+        port: String,
+        #[command(flatten)]
+        spend: StealthNote,
+    },
+}
+
+#[derive(Args)]
+struct StealthNote {
+    ciphertext: String,
+    key_hash: String,
+    pool: String,
+    to: String,
+    fee_wei: u128,
+}
+
+impl StealthNote {
+    fn parsed(&self) -> Result<StealthSpend> {
+        Ok(StealthSpend {
+            ciphertext: ciphertext(&self.ciphertext)?,
+            key_hash: hash(&self.key_hash)?,
+            pool: address(&self.pool)?,
+            to: address(&self.to)?,
+            fee: self.fee_wei,
+        })
+    }
+}
+
+fn ciphertext(text: &str) -> Result<Ciphertext> {
+    hex::decode_array(text).context("a ciphertext is 1,120 bytes of 0x-prefixed hex")
+}
+
+fn meta_address(text: &str) -> Result<MetaAddress> {
+    hex::decode_array(text).context("a stealth address is 4,160 bytes of 0x-prefixed hex")
+}
+
+/// The data contract holding the shared matrix: a zero byte, then the matrix.
+fn matrix() -> String {
+    let public = Master::from_seed(&[0; 32]).one_time(&[0; 64]).public_key();
+    let blob = prepare(&public);
+    let mut contract = vec![0];
+    contract.extend_from_slice(&blob[1 + KEY_PART_BYTES..]);
+    hex::encode(&contract)
+}
+
+/// Finds the announcements in a file that are for this view seed. Each line holds a key hash, a view
+/// tag and a ciphertext. Other people's payments fail the tag almost every time, which saves
+/// deriving a key for them.
+fn scan(view: &str, meta: &str, file: &str) -> Result<String> {
+    let (view, meta) = (hash(view)?, meta_address(meta)?);
+    let text = std::fs::read_to_string(file).context("couldn't read the announcements")?;
+    let mut found = Vec::new();
+    for line in text.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        let [key_hash, tag, text] = fields[..] else {
+            bail!("an announcement is a key hash, a view tag and a ciphertext");
+        };
+        let (key_hash, tag): (Hash, u8) = (hash(key_hash)?, tag.parse()?);
+        let sealed = ciphertext(text)?;
+        let Some(tag_now) = open_view_tag(&view, &sealed) else {
+            continue;
+        };
+        if tag_now != tag {
+            continue;
+        }
+        let opened = open(&view, &meta, &sealed).context("the stealth address is malformed")?;
+        if opened.key_hash == key_hash {
+            found.push(format!("{} {text}", hex::encode(&key_hash)));
+        }
+    }
+    Ok(found.join("\n"))
+}
+
+fn run_stealth(command: StealthCommand) -> Result<String> {
+    match command {
+        StealthCommand::StealthMatrix => Ok(matrix()),
+        StealthCommand::StealthAddress { seed } => {
+            Ok(hex::encode(&meta_address_for(&hash(&seed)?, 0)))
+        }
+        StealthCommand::StealthView { seed } => Ok(hex::encode(&view_seed_for(&hash(&seed)?, 0))),
+        StealthCommand::StealthPay { address, random } => {
+            let random: [u8; 64] =
+                hex::decode_array(&random).context("the randomness is 64 bytes of hex")?;
+            let paid = pay_to(&meta_address(&address)?, &random)
+                .context("the stealth address is malformed")?;
+            Ok(format!(
+                "{} {} {}",
+                hex::encode(&paid.key_hash),
+                paid.view_tag,
+                hex::encode(&paid.ciphertext)
+            ))
+        }
+        StealthCommand::StealthScan {
+            view,
+            address,
+            file,
+        } => scan(&view, &address, &file),
+        StealthCommand::StealthKey {
+            view,
+            address,
+            ciphertext: sealed,
+        } => {
+            let key = key_for(
+                &hash(&view)?,
+                &meta_address(&address)?,
+                &ciphertext(&sealed)?,
+            )
+            .context("the stealth address is malformed")?;
+            Ok(hex::encode(&key))
+        }
+        StealthCommand::StealthSign { seed, spend, rnd } => {
+            let spend = spend.parsed()?;
+            let signer = signer_for(&hash(&seed)?, 0, &spend.ciphertext, &spend.key_hash)
+                .context("that ciphertext isn't for that key")?;
+            let message = spend_hash(&spend.pool, &spend.key_hash, &spend.to, spend.fee);
+            let signature = signer
+                .sign(&message, &hash(&rnd)?)
+                .map_err(|error| anyhow!("signing failed: {error:?}"))?;
+            Ok(hex::encode(&signature))
+        }
+        StealthCommand::DeviceStealthAddress { port } => {
+            Ok(hex::encode(&device::open(&port)?.stealth_address()?))
+        }
+        StealthCommand::DeviceViewKey { port } => {
+            Ok(hex::encode(&device::open(&port)?.view_key()?))
+        }
+        StealthCommand::DeviceStealthSpend { port, spend } => {
+            let signature = device::open(&port)?.spend_stealth(&spend.parsed()?)?;
+            Ok(hex::encode(&signature))
+        }
+    }
 }
 
 /// Fresh one-time keys, paid through the hash pool.
@@ -389,6 +564,7 @@ fn run(command: Command) -> Result<String> {
         )),
         Command::DevicePubkey { port } => Ok(device::open(&port)?.status()?.line()),
         Command::Invoice(invoice) => run_invoice(invoice),
+        Command::Stealth(stealth) => run_stealth(stealth),
         Command::DeviceScheme { port } => {
             Ok(scheme_name(device::open(&port)?.scheme()?).to_string())
         }
