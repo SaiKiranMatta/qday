@@ -46,6 +46,27 @@ It then rotated, all on the device:
 | Activate | The device restarted on tree 1, at the same address |
 | Transfer from tree 1 | 0.004 ETH, 292,029 gas, 120,755 in the VERIFY frame |
 
+## ML-DSA account
+
+Laptop key, 2026-11-06, on the same chain. The sidecar's `MAX_VERIFY_GAS_STAKED_ENTITY` was raised from
+1,000,000 to 10,000,000 first, because a verify costs about 1.25M.
+
+| Transaction | Total gas | VERIFY frame |
+|---|---|---|
+| Keccak helper deployment (shared) | 33,632,238 | |
+| Key blob deployment | 31,944,668 | |
+| Account deployment | 5,365,324 | |
+| First transfer | 1,492,592 | 1,248,350 |
+| Repeat transfer | 1,309,131 | 1,248,489 |
+
+Code costs about 1,555 gas per byte on this chain, not the usual 200, so deployment costs far more
+than a standard EVM estimate.
+
+A forged signature, a signature for another amount, a signature one byte short and a signature from
+another key were all refused with `BadSignature`. A replay was refused with a nonce mismatch. The
+gateway reports that replay as `prefix gas budget exceeded`, because it shows the node's public
+mempool note ahead of the real error.
+
 ## Public reference network (not our target)
 
 ethrex hegota-testnet: chain id 8141, RPC `https://rpc1.privacy.ethrex.xyz`, explorer

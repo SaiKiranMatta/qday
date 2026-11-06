@@ -125,6 +125,9 @@ impl Shape {
     }
 }
 
+/// One way of breaking the shape.
+type Change = Box<dyn Fn(&mut Shape)>;
+
 fn tx() -> MlFrameTx {
     MlFrameTx::transfer(SENDER, 7, TO, VALUE)
 }
@@ -247,7 +250,7 @@ fn a_signed_transaction_is_refused() {
 
 #[test]
 fn every_changed_field_is_refused() {
-    let cases: Vec<Box<dyn Fn(&mut Shape)>> = vec![
+    let cases: Vec<Change> = vec![
         Box::new(|shape| shape.chain = 1),
         Box::new(|shape| shape.keys = vec![1]),
         Box::new(|shape| shape.keys = vec![0, 0]),
@@ -285,8 +288,7 @@ fn every_changed_field_is_refused() {
             shape.frames.push(extra);
         }),
     ];
-    for (case, change) in cases.iter().enumerate() {
+    for change in &cases {
         refused(&Shape::new().with(|shape| change(shape)).build());
-        let _ = case;
     }
 }
