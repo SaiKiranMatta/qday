@@ -83,6 +83,12 @@ fn opened_device_moves_between_settings_and_acts_on_one() {
         "Open"
     );
     assert_eq!(
+        tab_keys(Tab::Device, true, Setting::Signing)[3]
+            .expect("K4 acts")
+            .label,
+        "Change"
+    );
+    assert_eq!(
         tab_keys(Tab::Device, true, Setting::Passcode)[3]
             .unwrap()
             .label,
@@ -90,11 +96,17 @@ fn opened_device_moves_between_settings_and_acts_on_one() {
     );
     assert_eq!(
         Setting::ALL,
-        [Setting::Theme, Setting::Passcode, Setting::Backup]
+        [
+            Setting::Theme,
+            Setting::Passcode,
+            Setting::Backup,
+            Setting::Signing
+        ]
     );
     assert_eq!(Setting::Theme.next(), Setting::Passcode);
-    assert_eq!(Setting::Backup.next(), Setting::Theme, "wraps");
-    assert_eq!(Setting::Theme.prev(), Setting::Backup, "wraps");
+    assert_eq!(Setting::Backup.next(), Setting::Signing);
+    assert_eq!(Setting::Signing.next(), Setting::Theme, "wraps");
+    assert_eq!(Setting::Theme.prev(), Setting::Signing, "wraps");
 }
 
 #[test]

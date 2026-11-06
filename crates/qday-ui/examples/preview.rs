@@ -11,10 +11,16 @@ use qday_ui::canvas::{Canvas, Color, HEIGHT, WIDTH};
 use qday_ui::nav::Setting;
 use qday_ui::screens::*;
 use qday_ui::theme::{self, Theme};
+use qday_wallet::settings::Scheme;
 
 const ROOT: [u8; 32] = [
     0x9e, 0x83, 0xa9, 0x01, 0xb7, 0x57, 0xcb, 0xa3, 0x39, 0xa4, 0xd2, 0x22, 0x89, 0xdc, 0x64, 0x3b,
     0x2b, 0x22, 0xc7, 0x94, 0xa8, 0xe5, 0xc9, 0xa3, 0xb9, 0x4f, 0x85, 0x88, 0x2a, 0xf6, 0x01, 0x9c,
+];
+/// A made-up `keccak256(pk)`, for the ML-DSA screens.
+const FINGERPRINT: [u8; 32] = [
+    0x4c, 0x1d, 0x7e, 0x20, 0xb9, 0x33, 0x6a, 0x05, 0xe8, 0x1f, 0x52, 0xc4, 0x9d, 0x77, 0x0a, 0x6e,
+    0x38, 0xf1, 0x2b, 0xd6, 0x84, 0x19, 0xac, 0x63, 0x5e, 0xc0, 0x27, 0x9b, 0x11, 0xfa, 0x73, 0xd2,
 ];
 const TO: &str = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed";
 const TOKEN: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
@@ -84,6 +90,11 @@ fn screens() -> Vec<(&'static str, Draw)> {
         tree: 0,
         next_index: 67,
         connected: true,
+        scheme: Scheme::Xmss,
+    };
+    let ml = Status {
+        scheme: Scheme::MlDsa44,
+        ..status
     };
     let send = || ReviewInfo {
         review: Review::Send {
@@ -93,6 +104,7 @@ fn screens() -> Vec<(&'static str, Draw)> {
         },
         fee: "0.0026 ETH",
         chain_id: 31337,
+        scheme: Scheme::Xmss,
         index: 67,
         rotation: false,
         seconds_left: 24,
@@ -365,6 +377,81 @@ fn screens() -> Vec<(&'static str, Draw)> {
         (
             "20-notice",
             Box::new(|c: &mut Canvas| notice(c, "Tree switched", "Now signing with tree 1")),
+        ),
+        (
+            "22-wallet-ml-dsa",
+            Box::new(move |c: &mut Canvas| {
+                let sent = Activity {
+                    index: None,
+                    ..latest()
+                };
+                home(c, &ml, &FINGERPRINT, false, Some(&sent), None)
+            }),
+        ),
+        (
+            "23-keys-ml-dsa",
+            Box::new(move |c: &mut Canvas| keys_ml(c, &ml, &FINGERPRINT, None)),
+        ),
+        (
+            "24-device-ml-dsa",
+            Box::new(move |c: &mut Canvas| {
+                device(
+                    c,
+                    &ml,
+                    &DeviceInfo {
+                        firmware: "qday 0.8",
+                        root: &FINGERPRINT,
+                        counter: 67,
+                    },
+                    Setting::Signing,
+                    true,
+                    None,
+                )
+            }),
+        ),
+        (
+            "25-review-ml-dsa",
+            Box::new(move |c: &mut Canvas| {
+                review(
+                    c,
+                    &ReviewInfo {
+                        fee: "0.0035 ETH",
+                        scheme: Scheme::MlDsa44,
+                        ..send()
+                    },
+                    None,
+                )
+            }),
+        ),
+        (
+            "26-switch-to-ml-dsa",
+            Box::new(|c: &mut Canvas| scheme_confirm(c, Scheme::MlDsa44, 24, 30, None)),
+        ),
+        (
+            "27-switch-to-xmss",
+            Box::new(|c: &mut Canvas| scheme_confirm(c, Scheme::Xmss, 24, 30, None)),
+        ),
+        (
+            "28-signing",
+            Box::new(|c: &mut Canvas| notice(c, "Signing...", "ML-DSA-44")),
+        ),
+        (
+            "29-signed-ml-dsa",
+            Box::new(|c: &mut Canvas| result(c, true, "Signed", "ML-DSA-44 signature sent")),
+        ),
+        (
+            "30-switched",
+            Box::new(|c: &mut Canvas| result(c, true, "Switched", "Now signing with ML-DSA-44")),
+        ),
+        (
+            "31-activity-ml-dsa",
+            Box::new(move |c: &mut Canvas| {
+                let items = [Activity {
+                    index: None,
+                    ..latest()
+                }];
+                activity(c, &ml, &items, 0, false, None)
+            }),
         ),
         (
             "21-calibrate",

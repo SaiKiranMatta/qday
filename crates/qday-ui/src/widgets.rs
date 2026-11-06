@@ -7,6 +7,8 @@ use embedded_graphics::pixelcolor::Rgb888;
 use embedded_graphics::prelude::*;
 use embedded_graphics::text::{Baseline, Text};
 
+use qday_wallet::settings::Scheme;
+
 use crate::canvas::{Canvas, Color, HEIGHT, Rect, WIDTH};
 
 /// What the tabs show about the device.
@@ -16,6 +18,7 @@ pub struct Status {
     pub next_index: u32,
     /// A request has arrived over USB since boot.
     pub connected: bool,
+    pub scheme: Scheme,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

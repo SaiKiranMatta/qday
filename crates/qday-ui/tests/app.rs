@@ -3,16 +3,19 @@
 #[path = "../../qday-wallet/tests/common/mod.rs"]
 mod common;
 
-use std::sync::OnceLock;
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 use common::{SimFlash, TestRng};
 use qday_ui::app::{App, Host, Light, Shown};
 use qday_ui::fb::Framebuffer;
-use qday_ui::screens::Review;
+use qday_ui::format::checksum_address;
+use qday_ui::nav::Setting;
+use qday_ui::screens::{self, Review};
+use qday_ui::theme::{self, Theme};
 use qday_ui::widgets::{digit_in_slot, key_rect};
 use qday_wallet::counter::{FlashCounter, OneWayCounter};
 use qday_wallet::flash::layout;
-use qday_wallet::frame::{Action, FrameTx, MlFrameTx};
+use qday_wallet::frame::{Action, CHAIN_ID, FrameTx, MlFrameTx};
 use qday_wallet::hex;
 use qday_wallet::keystore::KeyStore;
 use qday_wallet::mlkey::MlKeyStore;
@@ -20,7 +23,7 @@ use qday_wallet::passcode::{Code, Passcode};
 use qday_wallet::protocol::{Line, Request, Response, parse_response, request_line};
 use qday_wallet::settings::{CROSSES, Calibration, Scheme, Settings};
 use qday_wallet::wallet::{MAIN_ACCOUNT, Wallet, WalletError};
-use qday_xmss::{PublicKey, verify};
+use qday_xmss::{PublicKey, keccak256, verify};
 
 const CODE: Code = [1, 2, 3, 4, 5, 6];
 const OTHER: Code = [6, 5, 4, 3, 2, 1];
@@ -38,6 +41,10 @@ struct FakeHost {
     sent: Vec<String>,
     restarts: u32,
     frames: u32,
+    /// Copy each frame, and keep what was on screen when a line last went out.
+    capture: bool,
+    frame: Vec<u16>,
+    at_last_send: Option<Vec<u16>>,
 }
 
 impl Host for FakeHost {
@@ -48,6 +55,9 @@ impl Host for FakeHost {
     fn present(&mut self, fb: &mut Framebuffer) {
         self.frames += 1;
         fb.send_changes(|_, _, _| {});
+        if self.capture {
+            self.frame = pixels(fb);
+        }
     }
 
     fn set_light(&mut self, light: Light) {
@@ -56,6 +66,9 @@ impl Host for FakeHost {
 
     fn send(&mut self, line: &str) {
         self.sent.push(line.to_string());
+        if self.capture {
+            self.at_last_send = Some(self.frame.clone());
+        }
     }
 
     fn pause(&mut self, ms: u32) {
@@ -65,6 +78,19 @@ impl Host for FakeHost {
     fn restart(&mut self) {
         self.restarts += 1;
     }
+}
+
+/// Taken by tests that compare pixels, or change the theme all tests share.
+fn theme_lock() -> MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn pixels(frame: &Framebuffer) -> Vec<u16> {
+    (0..240)
+        .flat_map(|y| (0..320).map(move |x| (x, y)))
+        .map(|(x, y)| frame.pixel(x, y))
+        .collect()
 }
 
 type TestApp = App<SimFlash, FlashCounter<SimFlash>, TestRng>;
@@ -646,6 +672,402 @@ fn an_xmss_transfer_is_the_wrong_scheme_in_ml_dsa_mode() {
     assert_eq!(rig.counter(), 0);
 }
 
+// Switching scheme
+
+/// Goes to the Signing setting and presses Change.
+fn start_switch(rig: &mut Rig) {
+    rig.press(0);
+    open_device(rig);
+    rig.press(2);
+    rig.press(2);
+    rig.press(2);
+    rig.press(3);
+    assert_eq!(rig.screen(), "scheme");
+}
+
+fn saved_scheme(rig: &Rig) -> Scheme {
+    Settings::new(rig.flash.clone())
+        .scheme()
+        .expect("the flash is healthy")
+}
+
+/// A provisioned device switched to ML-DSA through its own menu.
+fn switched_rig() -> Rig {
+    let mut rig = rig();
+    start_switch(&mut rig);
+    rig.approve(CODE);
+    rig.wait(2600);
+    assert_eq!(rig.screen(), "wallet");
+    rig
+}
+
+fn ml_raw(value: u128) -> Vec<u8> {
+    MlFrameTx::transfer(SENDER, 1, TO, value).encode(&[])
+}
+
+fn device_ml_key(rig: &mut Rig) -> Vec<u8> {
+    rig.request(&Request::MlPubKey);
+    let Response::MlPubKey(key) = rig.last_response() else {
+        panic!("the key must be reported");
+    };
+    key
+}
+
+#[test]
+fn a_switch_needs_the_keys_and_the_passcode() {
+    let mut rig = rig();
+    start_switch(&mut rig);
+    assert_eq!(saved_scheme(&rig), Scheme::Xmss);
+    rig.wait(520);
+    rig.press(3);
+    assert_eq!(rig.screen(), "passcode");
+    assert_eq!(saved_scheme(&rig), Scheme::Xmss);
+    rig.enter(CODE);
+    assert_eq!(rig.screen(), "result");
+    assert_eq!(saved_scheme(&rig), Scheme::MlDsa44);
+    assert_eq!(rig.app.wallet().scheme(), Scheme::MlDsa44);
+}
+
+#[test]
+fn k1_turns_a_switch_down() {
+    let mut rig = rig();
+    start_switch(&mut rig);
+    assert_eq!(rig.host.light, Some(Light::Amber));
+    rig.wait(520);
+    rig.press(0);
+    assert_eq!(rig.screen(), "device-opened");
+    assert_eq!(rig.host.light, Some(Light::Off));
+    assert_eq!(saved_scheme(&rig), Scheme::Xmss);
+}
+
+#[test]
+fn a_switch_with_no_decision_times_out() {
+    let mut rig = rig();
+    start_switch(&mut rig);
+    rig.wait(30_100);
+    assert_eq!(rig.screen(), "device-opened");
+    assert_eq!(saved_scheme(&rig), Scheme::Xmss);
+}
+
+#[test]
+fn cancelling_the_passcode_keeps_the_scheme() {
+    let mut rig = rig();
+    start_switch(&mut rig);
+    rig.wait(520);
+    rig.press(3);
+    rig.press(0);
+    assert_eq!(rig.screen(), "device-opened");
+    assert_eq!(saved_scheme(&rig), Scheme::Xmss);
+}
+
+#[test]
+fn a_wrong_passcode_keeps_the_scheme() {
+    let mut rig = rig();
+    start_switch(&mut rig);
+    rig.approve(WRONG);
+    assert_eq!(rig.screen(), "passcode");
+    assert_eq!(saved_scheme(&rig), Scheme::Xmss);
+}
+
+#[test]
+fn a_request_during_a_switch_is_refused_and_the_switch_stands() {
+    let mut rig = rig();
+    start_switch(&mut rig);
+    rig.sign_request(0);
+    assert_eq!(rig.last_response(), Response::Err(WalletError::BadRequest));
+    assert_eq!(rig.screen(), "scheme");
+}
+
+#[test]
+fn a_locked_device_refuses_a_switch() {
+    let mut rig = rig();
+    rig.sign_request(0);
+    rig.approve(WRONG);
+    rig.enter(WRONG);
+    rig.enter(WRONG);
+    rig.press(0);
+    start_switch(&mut rig);
+    rig.wait(520);
+    rig.press(3);
+    assert_eq!(rig.screen(), "locked");
+    assert_eq!(saved_scheme(&rig), Scheme::Xmss);
+}
+
+#[test]
+fn the_switch_survives_a_restart() {
+    let rig = switched_rig();
+    let (_, mut app) = boot(&rig.flash, 12, false);
+    assert_eq!(app.wallet().scheme(), Scheme::MlDsa44);
+}
+
+#[test]
+fn switching_back_returns_to_the_same_xmss_key() {
+    let mut rig = rig();
+    rig.press(3);
+    rig.press(0);
+    let root = *rig.app.shown_key();
+    start_switch(&mut rig);
+    rig.approve(CODE);
+    rig.wait(2600);
+    assert_ne!(*rig.app.shown_key(), root);
+    start_switch(&mut rig);
+    rig.approve(CODE);
+    rig.wait(2600);
+    assert_eq!(saved_scheme(&rig), Scheme::Xmss);
+    assert_eq!(*rig.app.shown_key(), root);
+
+    rig.sign_request(0);
+    rig.approve(CODE);
+    assert!(matches!(rig.last_response(), Response::Sig { .. }));
+    assert_eq!(rig.counter(), 1);
+}
+
+#[test]
+fn the_wallet_shows_the_ml_dsa_fingerprint() {
+    let mut rig = switched_rig();
+    let key = device_ml_key(&mut rig);
+    assert_eq!(*rig.app.shown_key(), keccak256(&[&key]));
+}
+
+#[test]
+fn the_fingerprint_is_shown_after_a_restart() {
+    let mut rig = switched_rig();
+    let key = device_ml_key(&mut rig);
+    let (_, app) = boot(&rig.flash, 12, false);
+    assert_eq!(*app.shown_key(), keccak256(&[&key]));
+}
+
+// ML-DSA signing
+
+#[test]
+fn an_approved_ml_dsa_transfer_gives_a_valid_signature() {
+    let mut rig = switched_rig();
+    let key = device_ml_key(&mut rig);
+    rig.request(&Request::SignFrame(ml_raw(1000)));
+    assert_eq!(rig.screen(), "review");
+    rig.approve(CODE);
+    assert_eq!(rig.screen(), "result");
+    let Response::Sig { signature, next } = rig.last_response() else {
+        panic!("it must sign");
+    };
+    assert_eq!(next, None);
+    let key: [u8; 1312] = key.try_into().expect("the key is whole");
+    let signature: [u8; 2420] = signature.try_into().expect("the signature is whole");
+    let hash = MlFrameTx::transfer(SENDER, 1, TO, 1000).sig_hash();
+    assert!(qday_mldsa::verify(&key, &hash, &signature));
+}
+
+#[test]
+fn ml_dsa_signing_leaves_the_counter_alone() {
+    let mut rig = switched_rig();
+    rig.request(&Request::SignFrame(ml_raw(1000)));
+    rig.approve(CODE);
+    assert!(matches!(rig.last_response(), Response::Sig { .. }));
+    assert_eq!(rig.counter(), 0);
+}
+
+#[test]
+fn signing_is_on_screen_before_the_signature_goes_out() {
+    let _theme = theme_lock();
+    let mut rig = switched_rig();
+    rig.request(&Request::SignFrame(ml_raw(1000)));
+    rig.wait(520);
+    rig.press(3);
+    rig.host.capture = true;
+    rig.enter(CODE);
+    let mut want = Framebuffer::new();
+    screens::notice(&mut want.canvas(), "Signing...", "ML-DSA-44");
+    assert!(rig.host.at_last_send.as_ref() == Some(&pixels(&want)));
+}
+
+#[test]
+fn the_ml_dsa_review_shows_a_signature_row_and_the_real_fee() {
+    let _theme = theme_lock();
+    let mut rig = switched_rig();
+    rig.request(&Request::SignFrame(ml_raw(1_500_000_000_000_000_000)));
+    let tx = MlFrameTx::transfer(SENDER, 1, TO, 1_500_000_000_000_000_000);
+    let shown = Shown::from_ml_tx(&tx).expect("this fits");
+    let mut want = Framebuffer::new();
+    let info = screens::ReviewInfo {
+        review: shown.review(),
+        fee: "0.0035 ETH",
+        chain_id: CHAIN_ID,
+        scheme: Scheme::MlDsa44,
+        index: 0,
+        rotation: false,
+        seconds_left: 30,
+        timeout: 30,
+    };
+    screens::review(&mut want.canvas(), &info, None);
+    assert!(pixels(rig.app.frame()) == pixels(&want));
+}
+
+#[test]
+fn the_keys_tab_has_no_map_in_ml_dsa_mode() {
+    let _theme = theme_lock();
+    let mut rig = switched_rig();
+    rig.press(1);
+    assert_eq!(rig.screen(), "keys");
+    let status = screens::Status {
+        tree: 0,
+        next_index: 0,
+        connected: false,
+        scheme: Scheme::MlDsa44,
+    };
+    let mut want = Framebuffer::new();
+    screens::keys_ml(&mut want.canvas(), &status, rig.app.shown_key(), None);
+    assert!(pixels(rig.app.frame()) == pixels(&want));
+}
+
+#[test]
+fn signing_shows_as_a_setting_with_the_active_scheme() {
+    let _theme = theme_lock();
+    let mut rig = switched_rig();
+    rig.press(3);
+    let mut want = Framebuffer::new();
+    let status = screens::Status {
+        tree: 0,
+        next_index: 0,
+        connected: false,
+        scheme: Scheme::MlDsa44,
+    };
+    let info = screens::DeviceInfo {
+        firmware: concat!("qday ", env!("CARGO_PKG_VERSION")),
+        root: rig.app.shown_key(),
+        counter: 0,
+    };
+    screens::device(
+        &mut want.canvas(),
+        &status,
+        &info,
+        Setting::Theme,
+        false,
+        None,
+    );
+    assert!(pixels(rig.app.frame()) == pixels(&want));
+}
+
+#[test]
+fn k1_rejects_an_ml_dsa_transfer() {
+    let mut rig = switched_rig();
+    rig.request(&Request::SignFrame(ml_raw(1000)));
+    rig.wait(520);
+    rig.press(0);
+    assert_eq!(rig.last_response(), Response::Err(WalletError::Rejected));
+    assert_eq!(rig.screen(), "result");
+}
+
+#[test]
+fn k3_does_nothing_on_an_ml_dsa_review() {
+    let mut rig = switched_rig();
+    rig.request(&Request::SignFrame(ml_raw(1000)));
+    rig.wait(520);
+    rig.press(2);
+    assert_eq!(rig.screen(), "review");
+}
+
+#[test]
+fn an_ml_dsa_review_with_no_decision_times_out() {
+    let mut rig = switched_rig();
+    rig.request(&Request::SignFrame(ml_raw(1000)));
+    rig.wait(30_100);
+    assert_eq!(rig.last_response(), Response::Err(WalletError::Rejected));
+}
+
+#[test]
+fn cancelling_the_passcode_rejects_an_ml_dsa_transfer() {
+    let mut rig = switched_rig();
+    rig.request(&Request::SignFrame(ml_raw(1000)));
+    rig.wait(520);
+    rig.press(3);
+    rig.press(0);
+    assert_eq!(rig.last_response(), Response::Err(WalletError::Rejected));
+}
+
+#[test]
+fn a_second_request_during_an_ml_dsa_review_is_refused() {
+    let mut rig = switched_rig();
+    rig.request(&Request::SignFrame(ml_raw(1000)));
+    rig.request(&Request::SignFrame(ml_raw(2000)));
+    assert_eq!(rig.last_response(), Response::Err(WalletError::BadRequest));
+    rig.host.sent.clear();
+    rig.approve(CODE);
+    let Response::Sig { signature, .. } = rig.last_response() else {
+        panic!("the first transfer must sign");
+    };
+    let key: [u8; 1312] = device_ml_key(&mut rig).try_into().expect("whole");
+    let signature: [u8; 2420] = signature.try_into().expect("whole");
+    let hash = MlFrameTx::transfer(SENDER, 1, TO, 1000).sig_hash();
+    assert!(qday_mldsa::verify(&key, &hash, &signature));
+}
+
+#[test]
+fn an_ml_dsa_amount_too_long_to_show_is_refused() {
+    let mut rig = switched_rig();
+    rig.request(&Request::SignFrame(ml_raw(
+        123_456_789_123_456_789_123_456_789,
+    )));
+    assert_eq!(rig.last_response(), Response::Err(WalletError::BadRequest));
+    assert_eq!(rig.screen(), "notice");
+}
+
+#[test]
+fn an_ml_dsa_fee_too_long_to_show_is_refused() {
+    let mut tx = MlFrameTx::transfer(SENDER, 1, TO, 1000);
+    tx.max_fee = 2_000_000_001;
+    assert!(Shown::from_ml_tx(&tx).is_none());
+}
+
+#[test]
+fn the_ml_dsa_review_shows_the_true_recipient_and_amount() {
+    let tx = MlFrameTx::transfer(SENDER, 1, TO, 1_500_000_000_000_000_000);
+    let shown = Shown::from_ml_tx(&tx).expect("this fits");
+    let Review::Send { amount, unit, to } = shown.review() else {
+        panic!("a transfer is a send");
+    };
+    assert_eq!((amount, unit), ("1.5", "ETH"));
+    assert_eq!(to, checksum_address(&TO));
+}
+
+#[test]
+fn the_activity_log_records_ml_dsa_signatures_without_a_key_number() {
+    let mut rig = switched_rig();
+    rig.request(&Request::SignFrame(ml_raw(1_000_000_000_000_000_000)));
+    rig.approve(CODE);
+    let activity = rig.app.activity();
+    let latest = activity.first().expect("it was recorded");
+    assert!(latest.approved);
+    assert_eq!(latest.title, "Sent 1 ETH");
+    assert_eq!(latest.index, None);
+}
+
+#[test]
+fn a_rejected_ml_dsa_transfer_is_recorded() {
+    let mut rig = switched_rig();
+    rig.request(&Request::SignFrame(ml_raw(1000)));
+    rig.wait(520);
+    rig.press(1);
+    let activity = rig.app.activity();
+    let latest = activity.first().expect("it was recorded");
+    assert!(!latest.approved);
+    assert_eq!(latest.title, "Rejected");
+}
+
+#[test]
+fn signing_while_locked_refuses_an_ml_dsa_transfer() {
+    let mut rig = switched_rig();
+    rig.request(&Request::SignFrame(ml_raw(1000)));
+    rig.approve(WRONG);
+    rig.enter(WRONG);
+    rig.enter(WRONG);
+    rig.press(0);
+    rig.request(&Request::SignFrame(ml_raw(1000)));
+    rig.wait(520);
+    rig.press(3);
+    assert_eq!(rig.screen(), "locked");
+    assert_eq!(rig.last_response(), Response::Err(WalletError::Rejected));
+}
+
 // Other requests
 
 #[test]
@@ -891,12 +1313,14 @@ fn open_device(rig: &mut Rig) {
 
 #[test]
 fn the_theme_changes_and_is_saved() {
+    let _theme = theme_lock();
     let mut rig = rig();
     open_device(&mut rig);
     rig.press(3);
     let saved = Settings::new(rig.flash.clone()).theme();
     assert_eq!(saved, Ok(1));
     assert_eq!(rig.screen(), "device-opened");
+    theme::set(Theme::StandardLight);
 }
 
 #[test]

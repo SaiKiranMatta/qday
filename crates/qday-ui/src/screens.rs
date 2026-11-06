@@ -3,12 +3,32 @@
 //! the soft keys are the same in every theme. The firmware calls these into
 //! its framebuffer; `examples/preview.rs` renders them to PNG on the laptop.
 
+use qday_wallet::settings::Scheme;
+
 use crate::canvas::Canvas;
 use crate::nav::Setting;
 use crate::text::Text;
 use crate::theme::{self, Family};
 use crate::ui;
 pub use crate::widgets::Status;
+
+/// A scheme's name on screen.
+#[must_use]
+pub fn scheme_label(scheme: Scheme) -> &'static str {
+    match scheme {
+        Scheme::Xmss => "XMSS",
+        Scheme::MlDsa44 => "ML-DSA-44",
+    }
+}
+
+/// The scheme to switch to.
+#[must_use]
+pub fn other_scheme(scheme: Scheme) -> Scheme {
+    match scheme {
+        Scheme::Xmss => Scheme::MlDsa44,
+        Scheme::MlDsa44 => Scheme::Xmss,
+    }
+}
 
 pub const LEAVES: u32 = 1024;
 pub const ROTATE_AT: u32 = 900;
@@ -124,6 +144,7 @@ pub struct ReviewInfo<'a> {
     pub review: Review<'a>,
     pub fee: &'a str,
     pub chain_id: u64,
+    pub scheme: Scheme,
     pub index: u32,
     pub rotation: bool,
     /// Seconds left to decide, and the full timeout.
@@ -166,6 +187,11 @@ pub fn home(
     pressed: Option<usize>,
 ) {
     dispatch!(home(c, s, root, pending, latest, pressed))
+}
+
+/// The Keys tab in ML-DSA mode: one key with no limit, so there's no map.
+pub fn keys_ml(c: &mut Canvas, s: &Status, fingerprint: &[u8; 32], pressed: Option<usize>) {
+    dispatch!(keys_ml(c, s, fingerprint, pressed))
 }
 
 /// The key tree: next key, usage and the map of all 1,024 keys.
@@ -257,6 +283,17 @@ pub fn restore_confirm(
         timeout,
         pressed
     ))
+}
+
+/// Asks before switching scheme, saying that the account changes.
+pub fn scheme_confirm(
+    c: &mut Canvas,
+    target: Scheme,
+    seconds_left: u32,
+    timeout: u32,
+    pressed: Option<usize>,
+) {
+    dispatch!(scheme_confirm(c, target, seconds_left, timeout, pressed))
 }
 
 /// A short message with no choices, e.g. "Tree switched".

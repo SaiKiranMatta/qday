@@ -526,6 +526,7 @@ dependencies = [
  "embedded-graphics",
  "libm",
  "png",
+ "qday-mldsa",
  "qday-wallet",
  "qday-xmss",
 ]
