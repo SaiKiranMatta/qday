@@ -393,7 +393,7 @@ fn a_wrong_tag_or_key_hash_is_not_found() {
     let view = view_seed_for(&seed, 0);
     let meta = meta_address_for(&seed, 0);
     let paid = pay_to(&meta, &RANDOM).expect("the address is good");
-    let mut wrong_tag = paid.clone();
+    let mut wrong_tag = paid;
     wrong_tag.view_tag ^= 1;
     assert_eq!(finds(&view, &meta, &wrong_tag), Some(false));
     let mut wrong_hash = paid;
