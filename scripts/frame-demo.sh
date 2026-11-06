@@ -121,28 +121,31 @@ for i, frame in enumerate(r.get("frameReceipts", [])):
 
 send() {
   [ $# -eq 2 ] || die "usage: send <to> <value_wei>"
-  local to=$1 value=$2 account nonce index tree hash signature
+  local to=$1 value=$2 account nonce index tree hash signature json
   account=$(state account)
   nonce=$(cast nonce --rpc-url "$RPC" "$account")
 
   if [ -n "$PORT" ]; then
-    submit "$(qday device-send "$PORT" "$account" "$nonce" "$to" "$value")"
+    json=$(qday device-send "$PORT" "$account" "$nonce" "$to" "$value")
+    submit "$json"
     return
   fi
   index=$(next_index "$account")
   tree=$(tree_number "$account")
   hash=$(qday frame-hash "$account" "$nonce" "$index" "$to" "$value")
   signature=$(qday sign "$(seed)" "$index" "$hash" --tree "$tree")
-  submit "$(qday frame-json "$account" "$nonce" "$index" "$to" "$value" "$signature")"
+  json=$(qday frame-json "$account" "$nonce" "$index" "$to" "$value" "$signature")
+  submit "$json"
 }
 
 rotate() {
-  local account nonce index tree next_root next_pub_seed message signature
+  local account nonce index tree next_root next_pub_seed message signature json
   account=$(state account)
   nonce=$(cast nonce --rpc-url "$RPC" "$account")
 
   if [ -n "$PORT" ]; then
-    submit "$(qday device-rotate "$PORT" "$account" "$nonce")"
+    json=$(qday device-rotate "$PORT" "$account" "$nonce")
+    submit "$json"
     return
   fi
   index=$(next_index "$account")
@@ -150,8 +153,9 @@ rotate() {
   read -r next_root next_pub_seed < <(qday pubkey "$(seed)" --tree "$((tree + 1))")
   message=$(qday frame-rotate-message "$account" "$nonce" "$index" "$next_root" "$next_pub_seed")
   signature=$(qday sign "$(seed)" "$index" "$message" --tree "$tree")
-  submit "$(qday frame-rotate-json "$account" "$nonce" "$index" "$next_root" "$next_pub_seed" \
-    "$signature")"
+  json=$(qday frame-rotate-json "$account" "$nonce" "$index" "$next_root" "$next_pub_seed" \
+    "$signature")
+  submit "$json"
 }
 
 status() {

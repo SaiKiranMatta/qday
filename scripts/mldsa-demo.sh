@@ -169,17 +169,19 @@ for i, frame in enumerate(r.get("frameReceipts", [])):
 
 send() {
   [ $# -eq 2 ] || die "usage: send <to> <value_wei>"
-  local to=$1 value=$2 account nonce hash signature
+  local to=$1 value=$2 account nonce hash signature json
   account=$(state account)
   nonce=$(cast nonce --rpc-url "$RPC" "$account")
 
   if [ -n "$PORT" ]; then
-    submit "$(qday device-ml-send "$PORT" "$account" "$nonce" "$to" "$value")"
+    json=$(qday device-ml-send "$PORT" "$account" "$nonce" "$to" "$value")
+    submit "$json"
     return
   fi
   hash=$(qday ml-frame-hash "$account" "$nonce" "$to" "$value")
   signature=$(qday mldsa-sign "$(seed)" "$hash" "0x$(openssl rand -hex 32)")
-  submit "$(qday ml-frame-json "$account" "$nonce" "$to" "$value" "$signature")"
+  json=$(qday ml-frame-json "$account" "$nonce" "$to" "$value" "$signature")
+  submit "$json"
 }
 
 status() {
