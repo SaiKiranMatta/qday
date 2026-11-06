@@ -15,6 +15,15 @@ pub enum Summary {
         /// The amount in wei.
         value: u128,
     },
+    /// A token transfer.
+    TokenTransfer {
+        /// The token contract.
+        token: Address,
+        /// The recipient.
+        to: Address,
+        /// The amount in the token's smallest unit.
+        amount: u128,
+    },
     /// A rotation.
     Rotation,
     /// The account's creation.
@@ -31,6 +40,11 @@ impl Summary {
             Action::Transfer { to, value } => Self::Transfer {
                 to: *to,
                 value: *value,
+            },
+            Action::TokenTransfer { token, to, amount } => Self::TokenTransfer {
+                token: *token,
+                to: *to,
+                amount: *amount,
             },
             Action::Rotate { .. } => Self::Rotation,
             Action::Create { .. } => Self::Creation,

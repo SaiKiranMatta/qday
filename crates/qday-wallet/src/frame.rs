@@ -26,6 +26,9 @@ const NONCE_KEY: u64 = 0;
 const VALIDATE_SELECTOR: [u8; 4] = [0x69, 0x01, 0xf6, 0x68];
 const SPEND_SELECTOR: [u8; 4] = [0x92, 0xf5, 0x9d, 0x73];
 const ROTATE_SELECTOR: [u8; 4] = [0xed, 0x29, 0x6e, 0x9c];
+/// ERC-20 `transfer(address,uint256)`.
+const TOKEN_TRANSFER_SELECTOR: [u8; 4] = [0xa9, 0x05, 0x9c, 0xbb];
+const TOKEN_TRANSFER_DATA_BYTES: usize = 68;
 /// `createAccount(bytes32,bytes32)` on the account factory.
 const CREATE_SELECTOR: [u8; 4] = [0x18, 0x38, 0x15, 0xc8];
 const CREATE_DATA_BYTES: usize = 68;
@@ -36,6 +39,8 @@ const ROTATE_DATA_BYTES: usize = 68;
 const VERIFY_LIMITS: (u64, u64) = (300_000, 0);
 const SPEND_LIMITS: (u64, u64) = (50_000, 100_000);
 const TRANSFER_LIMITS: (u64, u64) = (50_000, 200_000);
+/// A token transfer to a new holder uses about 120,000 gas, most of it the new balance slot.
+const TOKEN_TRANSFER_LIMITS: (u64, u64) = (80_000, 200_000);
 const ROTATE_LIMITS: (u64, u64) = (80_000, 200_000);
 /// A deploy frame runs in the validation prefix, so it must stay under the alt mempool's
 /// 500,000 state-gas budget. Creating a proxy account uses about 390,000 gas in all.
@@ -53,6 +58,15 @@ pub enum Action {
         to: Address,
         /// The amount in wei.
         value: u128,
+    },
+    /// Sends `amount` of the ERC-20 token at `token` to `to`.
+    TokenTransfer {
+        /// The token contract.
+        token: Address,
+        /// The recipient.
+        to: Address,
+        /// The amount in the token's smallest unit.
+        amount: u128,
     },
     /// Moves the account to a new tree.
     Rotate {
@@ -114,9 +128,33 @@ impl FrameTx {
         Self::new(sender, nonce, index, Action::Transfer { to, value })
     }
 
+    /// An ERC-20 transfer with the default fees.
+    #[must_use]
+    pub fn token_transfer(
+        sender: Address,
+        nonce: u64,
+        index: u32,
+        token: Address,
+        to: Address,
+        amount: u128,
+    ) -> Self {
+        Self::new(
+            sender,
+            nonce,
+            index,
+            Action::TokenTransfer { token, to, amount },
+        )
+    }
+
     /// The account's first transaction, which deploys it, with the default fees.
     #[must_use]
-    pub fn create(sender: Address, index: u32, factory: Address, root: Hash, pub_seed: Hash) -> Self {
+    pub fn create(
+        sender: Address,
+        index: u32,
+        factory: Address,
+        root: Hash,
+        pub_seed: Hash,
+    ) -> Self {
         Self::new(
             sender,
             0,
@@ -215,7 +253,10 @@ impl FrameTx {
                 next_root,
                 next_pub_seed,
             } => rotation_message(&sig_hash, next_root, next_pub_seed),
-            Action::Transfer { .. } | Action::Create { .. } | Action::Other { .. } => sig_hash,
+            Action::Transfer { .. }
+            | Action::TokenTransfer { .. }
+            | Action::Create { .. }
+            | Action::Other { .. } => sig_hash,
         }
     }
 
@@ -339,6 +380,14 @@ impl FrameTx {
                 value: *value,
                 data: Vec::new(),
             },
+            Action::TokenTransfer { token, to, amount } => Frame {
+                mode: MODE_SENDER,
+                flags: 0,
+                target: Some(*token),
+                limits: TOKEN_TRANSFER_LIMITS,
+                value: 0,
+                data: token_transfer_call(to, *amount),
+            },
             Action::Rotate {
                 next_root,
                 next_pub_seed,
@@ -374,13 +423,13 @@ impl FrameTx {
         self.frames()
             .into_iter()
             .map(|frame| FrameView {
-            mode: frame.mode,
-            flags: frame.flags,
-            target: frame.target,
-            execution: frame.limits.0,
-            state: frame.limits.1,
-            value: frame.value,
-            data: frame.data,
+                mode: frame.mode,
+                flags: frame.flags,
+                target: frame.target,
+                execution: frame.limits.0,
+                state: frame.limits.1,
+                value: frame.value,
+                data: frame.data,
             })
             .collect()
     }
@@ -477,6 +526,9 @@ impl<'a> ParsedFrame<'a> {
                 value: self.value,
             };
         }
+        if let Some((token, to, amount)) = self.token_transfer() {
+            return Action::TokenTransfer { token, to, amount };
+        }
         if let Some((next_root, next_pub_seed)) = self.rotate_key() {
             return Action::Rotate {
                 next_root,
@@ -504,6 +556,24 @@ impl<'a> ParsedFrame<'a> {
         let root = Hash::try_from(&self.data[4..36]).ok()?;
         let pub_seed = Hash::try_from(&self.data[36..]).ok()?;
         Some((factory, root, pub_seed))
+    }
+
+    /// Reads `transfer(to, amount)` on a token. Amounts past 128 bits are left as an unknown call.
+    fn token_transfer(&self) -> Option<(Address, Address, u128)> {
+        let token = self.target?;
+        let data = self.data;
+        let is_transfer = self.value == 0
+            && self.limits == TOKEN_TRANSFER_LIMITS
+            && data.len() == TOKEN_TRANSFER_DATA_BYTES
+            && data.starts_with(&TOKEN_TRANSFER_SELECTOR)
+            && data[4..16].iter().all(|&byte| byte == 0)
+            && data[36..52].iter().all(|&byte| byte == 0);
+        if !is_transfer {
+            return None;
+        }
+        let to = Address::try_from(&data[16..36]).ok()?;
+        let amount = u128::from_be_bytes(data[52..].try_into().ok()?);
+        Some((token, to, amount))
     }
 
     fn rotate_key(&self) -> Option<(Hash, Hash)> {
@@ -546,6 +616,16 @@ fn create_call(root: &Hash, pub_seed: &Hash) -> Vec<u8> {
     data.extend_from_slice(&CREATE_SELECTOR);
     data.extend_from_slice(root);
     data.extend_from_slice(pub_seed);
+    data
+}
+
+fn token_transfer_call(to: &Address, amount: u128) -> Vec<u8> {
+    let mut data = Vec::with_capacity(TOKEN_TRANSFER_DATA_BYTES);
+    data.extend_from_slice(&TOKEN_TRANSFER_SELECTOR);
+    data.extend_from_slice(&[0; 12]);
+    data.extend_from_slice(to);
+    data.extend_from_slice(&[0; 16]);
+    data.extend_from_slice(&amount.to_be_bytes());
     data
 }
 

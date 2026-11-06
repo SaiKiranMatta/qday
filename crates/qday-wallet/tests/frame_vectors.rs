@@ -135,6 +135,60 @@ fn an_unknown_call_decodes_as_other() {
     assert_eq!(FrameTx::decode_unsigned(&tx.encode(&[])), Ok(tx));
 }
 
+const TOKEN: [u8; 20] = [0x33; 20];
+
+fn token_transfer_call(to: [u8; 20], high: [u8; 16], low: u128) -> Vec<u8> {
+    let mut data = vec![0xa9, 0x05, 0x9c, 0xbb];
+    data.extend_from_slice(&[0; 12]);
+    data.extend_from_slice(&to);
+    data.extend_from_slice(&high);
+    data.extend_from_slice(&low.to_be_bytes());
+    data
+}
+
+#[test]
+fn a_token_transfer_round_trips() {
+    let tx = FrameTx::token_transfer(SENDER, NONCE, 5, TOKEN, TO, 125_500_000);
+    assert_eq!(FrameTx::decode_unsigned(&tx.encode(&[])), Ok(tx));
+}
+
+#[test]
+fn a_token_transfer_calls_transfer_on_the_token() {
+    let tx = FrameTx::token_transfer(SENDER, NONCE, 5, TOKEN, TO, 125_500_000);
+    let third = &tx.frame_views()[2];
+    assert_eq!(third.target, Some(TOKEN));
+    assert_eq!(third.value, 0);
+    assert_eq!(third.data, token_transfer_call(TO, [0; 16], 125_500_000));
+}
+
+#[test]
+fn a_token_transfer_of_more_than_128_bits_decodes_as_other() {
+    let mut tx = transfer();
+    tx.action = Action::Other {
+        target: Some(TOKEN),
+        value: 0,
+        data: token_transfer_call(TO, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], 0),
+        execution: 80_000,
+        state: 200_000,
+    };
+    assert_eq!(FrameTx::decode_unsigned(&tx.encode(&[])), Ok(tx));
+}
+
+#[test]
+fn a_token_transfer_with_other_limits_or_value_decodes_as_other() {
+    for (value, execution) in [(0, 90_000), (1, 80_000)] {
+        let mut tx = transfer();
+        tx.action = Action::Other {
+            target: Some(TOKEN),
+            value,
+            data: token_transfer_call(TO, [0; 16], 1),
+            execution,
+            state: 200_000,
+        };
+        assert_eq!(FrameTx::decode_unsigned(&tx.encode(&[])), Ok(tx));
+    }
+}
+
 #[test]
 fn a_call_back_into_the_account_decodes_as_other() {
     let mut tx = transfer();
@@ -607,7 +661,11 @@ fn a_create_round_trips_and_puts_the_deploy_frame_first() {
     assert_eq!(frames.len(), 3, "deploy, verify, spend");
     assert_eq!(frames[0].mode, 0, "deploy frame is DEFAULT");
     assert_eq!(frames[0].target, Some(FACTORY));
-    assert_eq!(&frames[0].data[..4], &[0x18, 0x38, 0x15, 0xc8], "createAccount selector");
+    assert_eq!(
+        &frames[0].data[..4],
+        &[0x18, 0x38, 0x15, 0xc8],
+        "createAccount selector"
+    );
     assert_eq!(frames[1].mode, 1, "then the account's VERIFY frame");
     assert_eq!(frames[2].mode, 2, "then the spend frame");
     assert_eq!(tx.signing_message(), tx.sig_hash());
@@ -616,13 +674,19 @@ fn a_create_round_trips_and_puts_the_deploy_frame_first() {
 #[test]
 fn a_create_keeps_the_deploy_frame_inside_the_state_gas_budget() {
     let frames = create().frame_views();
-    assert!(frames[0].state + frames[1].state <= 500_000, "validation prefix state gas");
+    assert!(
+        frames[0].state + frames[1].state <= 500_000,
+        "validation prefix state gas"
+    );
 }
 
 #[test]
 fn a_deploy_frame_calling_something_else_is_refused() {
     let mut raw = create().encode(&[]);
-    let selector = raw.windows(4).position(|w| w == [0x18, 0x38, 0x15, 0xc8]).expect("selector present");
+    let selector = raw
+        .windows(4)
+        .position(|w| w == [0x18, 0x38, 0x15, 0xc8])
+        .expect("selector present");
     raw[selector] ^= 1;
     assert_eq!(FrameTx::decode_unsigned(&raw), Err(DecodeError));
 }
