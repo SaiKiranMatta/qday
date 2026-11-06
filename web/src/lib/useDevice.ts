@@ -55,6 +55,8 @@ export function useDevice() {
     next.onLog((line) => setLog((lines) => [...lines.slice(-(LOG_LIMIT - 1)), line]));
     next.onClose(() => {
       if (device.current === next) {
+        // Everything on screen that needs the device goes with it, open dialogs included.
+        console.warn("[qday] the device connection closed");
         device.current = null;
         setState({ kind: "idle" });
       }
