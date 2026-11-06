@@ -17,7 +17,7 @@ use qday_wallet::passcode::{Attempt, Code, Passcode, Proof};
 use qday_wallet::settings::{Scheme, Settings};
 use qday_wallet::stealth::{
     Announcement, CIPHERTEXT_BYTES, META_ADDRESS_BYTES, MetaAddress, StealthSpend, key_for,
-    open as open_payment, pay_to, view_seed_for,
+    meta_address_for, open as open_payment, pay_to, view_seed_for,
 };
 use qday_wallet::wallet::{MAIN_ACCOUNT, Wallet, WalletError};
 use qday_xmss::{Hash, keccak256};
@@ -252,6 +252,46 @@ fn a_zero_recipient_or_pool_is_refused() {
     let mut zero = spend(&announcement);
     zero.pool = [0; 20];
     assert_eq!(sign(&mut wallet, &zero), Err(WalletError::BadRequest));
+}
+
+#[test]
+fn signing_uses_fresh_randomness() {
+    let flash = fresh();
+    let mut wallet = open(&flash);
+    let meta = address(&mut wallet);
+    let announcement = pay(&meta, &RANDOM);
+    let spend = spend(&announcement);
+    let first_proof = proof(&mut wallet);
+    let first = wallet.sign_stealth(&spend, MAIN_ACCOUNT, first_proof, &mut TestRng(1));
+    let second_proof = proof(&mut wallet);
+    let second = wallet.sign_stealth(&spend, MAIN_ACCOUNT, second_proof, &mut TestRng(2));
+    assert_ne!(first.expect("it signs"), second.expect("it signs"));
+}
+
+/// Pinned, so a change to any tag or to what's bound can't pass unnoticed.
+#[test]
+fn the_derivation_is_pinned() {
+    let seed = [0x42; 32];
+    let meta = meta_address_for(&seed, 0);
+    let announcement = pay(&meta, &RANDOM);
+    let hex = |bytes: &[u8]| {
+        bytes
+            .iter()
+            .fold(String::new(), |out, byte| format!("{out}{byte:02x}"))
+    };
+    assert_eq!(
+        hex(&keccak256(&[&meta])),
+        "a0b66f6381d976d4fed69390b2af6e331ed6062f73a38d54155e929089d58a8d"
+    );
+    assert_eq!(
+        hex(&view_seed_for(&seed, 0)),
+        "40ac6871ae3f65be259acd1d2885a5b98afca7685da2769a409beb557806677f"
+    );
+    assert_eq!(
+        hex(&announcement.key_hash),
+        "edbdc47b4446abdc6d3277bbef91ccea335b8d81f1cb4c6c273694b91ac173bb"
+    );
+    assert_eq!(announcement.view_tag, 253);
 }
 
 #[test]

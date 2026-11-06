@@ -77,6 +77,28 @@ fn many_signatures_all_verify() {
     }
 }
 
+/// The doubled bound is what stops a signature leaking a wider secret, and the verifier can't see
+/// it: a signature from a signer with the normal bound would still verify. So check it directly.
+#[test]
+fn signatures_stay_inside_the_doubled_bound() {
+    const GAMMA1: i64 = 1 << 17;
+    const WIDE_BETA: i64 = 156;
+    let master = Master::from_seed(&SEED);
+    for n in 0..24 {
+        let signer = master.one_time(&secret(n));
+        let signature = signer.sign_unchecked(&[n; 32], &[n; 32]).expect("it signs");
+        for index in 0..1024 {
+            let bit = 32 * 8 + index * 18;
+            let mut packed = 0_i64;
+            for offset in 0..18 {
+                let at = bit + offset;
+                packed |= i64::from(signature[at / 8] >> (at % 8) & 1) << offset;
+            }
+            assert!((GAMMA1 - packed).abs() < GAMMA1 - WIDE_BETA, "{n} {index}");
+        }
+    }
+}
+
 #[test]
 fn another_message_is_refused() {
     let signer = Master::from_seed(&SEED).one_time(&secret(1));
