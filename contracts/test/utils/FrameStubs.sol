@@ -127,7 +127,7 @@ contract SigDataCopyStub {
     fallback(bytes calldata input) external returns (bytes memory) {
         require(input.length == 96, "sigdatacopy input");
         (uint256 entry, uint256 length, uint256 offset) = abi.decode(input, (uint256, uint256, uint256));
-        require(entry == 0 && length == 2500 && offset == 0, "sigdatacopy args");
+        require(entry == 0 && (length == 2500 || length == 2420) && offset == 0, "sigdatacopy args");
         bytes memory out = new bytes(length);
         bytes memory sig = state.signature();
         for (uint256 i = 0; i < length && i < sig.length; i++) {

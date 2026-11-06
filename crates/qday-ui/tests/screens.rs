@@ -1,7 +1,10 @@
+use std::sync::{Mutex, MutexGuard, PoisonError};
+
 use qday_ui::canvas::{Canvas, HEIGHT, WIDTH};
 use qday_ui::nav::Setting;
 use qday_ui::screens::*;
 use qday_ui::theme::{self, Family, Theme};
+use qday_wallet::settings::Scheme;
 
 const ROOT: [u8; 32] = [
     0x9e, 0x83, 0xa9, 0x01, 0xb7, 0x57, 0xcb, 0xa3, 0x39, 0xa4, 0xd2, 0x22, 0x89, 0xdc, 0x64, 0x3b,
@@ -10,6 +13,18 @@ const ROOT: [u8; 32] = [
 const TO: &str = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed";
 const DIGITS: [u8; 10] = [7, 2, 9, 4, 0, 6, 1, 8, 3, 5];
 const WORDS: [&str; 24] = ["abandon"; 24];
+
+#[test]
+fn schemes_have_their_names_on_screen() {
+    assert_eq!(scheme_label(Scheme::Xmss), "XMSS");
+    assert_eq!(scheme_label(Scheme::MlDsa44), "ML-DSA-44");
+}
+
+#[test]
+fn the_other_scheme_is_the_one_a_switch_goes_to() {
+    assert_eq!(other_scheme(Scheme::Xmss), Scheme::MlDsa44);
+    assert_eq!(other_scheme(Scheme::MlDsa44), Scheme::Xmss);
+}
 
 #[test]
 fn key_numbers_split_into_greyed_zeros_and_the_number() {
@@ -44,6 +59,7 @@ fn every_screen() -> Vec<(&'static str, Draw)> {
         tree: 0,
         next_index: 67,
         connected: true,
+        scheme: Scheme::Xmss,
     };
     let send = || ReviewInfo {
         review: Review::Send {
@@ -53,6 +69,8 @@ fn every_screen() -> Vec<(&'static str, Draw)> {
         },
         fee: "0.0026 ETH",
         chain_id: 31337,
+        scheme: Scheme::Xmss,
+        signature: None,
         index: 67,
         rotation: false,
         seconds_left: 24,
@@ -100,6 +118,17 @@ fn every_screen() -> Vec<(&'static str, Draw)> {
         title: "Send 0.5 ETH",
         detail: "",
         index: Some(66),
+        coin: Coin::Eth,
+    };
+    let ml = Status {
+        scheme: Scheme::MlDsa44,
+        ..status
+    };
+    let ml_latest = Activity {
+        approved: true,
+        title: "Sent 0.5 ETH",
+        detail: "to 0x5aAe...eAed",
+        index: None,
         coin: Coin::Eth,
     };
     vec![
@@ -244,6 +273,143 @@ fn every_screen() -> Vec<(&'static str, Draw)> {
             }),
         ),
         (
+            "home ml-dsa",
+            Box::new(move |c: &mut Canvas| home(c, &ml, &ROOT, Some(&ml_latest), None)),
+        ),
+        (
+            "home ml-dsa offline",
+            Box::new(move |c: &mut Canvas| {
+                home(
+                    c,
+                    &Status {
+                        connected: false,
+                        ..ml
+                    },
+                    &ROOT,
+                    None,
+                    Some(0),
+                )
+            }),
+        ),
+        (
+            "keys ml-dsa",
+            Box::new(move |c: &mut Canvas| keys_ml(c, &ml, &ROOT, Some(1))),
+        ),
+        (
+            "device ml-dsa",
+            Box::new(move |c: &mut Canvas| {
+                let info = DeviceInfo {
+                    firmware: "qday 0.8",
+                    root: &ROOT,
+                    counter: 67,
+                };
+                device(c, &ml, &info, Setting::Signing, true, None)
+            }),
+        ),
+        (
+            "device closed",
+            Box::new(move |c: &mut Canvas| {
+                let info = DeviceInfo {
+                    firmware: "qday 0.8",
+                    root: &ROOT,
+                    counter: 67,
+                };
+                device(c, &status, &info, Setting::Theme, false, Some(3))
+            }),
+        ),
+        (
+            "review ml-dsa",
+            Box::new(move |c: &mut Canvas| {
+                review(
+                    c,
+                    &ReviewInfo {
+                        scheme: Scheme::MlDsa44,
+                        ..send()
+                    },
+                    Some(3),
+                )
+            }),
+        ),
+        (
+            "review ml-dsa long amount",
+            Box::new(move |c: &mut Canvas| {
+                review(
+                    c,
+                    &ReviewInfo {
+                        review: Review::Send {
+                            amount: "1234567.123456789012",
+                            unit: "ETH",
+                            to: TO,
+                        },
+                        fee: "0.0035 ETH",
+                        scheme: Scheme::MlDsa44,
+                        ..send()
+                    },
+                    None,
+                )
+            }),
+        ),
+        (
+            "switch to ml-dsa",
+            Box::new(|c: &mut Canvas| scheme_confirm(c, Scheme::MlDsa44, 20, 30, Some(3))),
+        ),
+        (
+            "switch to xmss",
+            Box::new(|c: &mut Canvas| scheme_confirm(c, Scheme::Xmss, 20, 30, None)),
+        ),
+        (
+            "share the view key",
+            Box::new(|c: &mut Canvas| {
+                share_confirm(
+                    c,
+                    &ShareInfo {
+                        title: "View key",
+                        detail: "Lets the laptop find your payments",
+                        gives: "your view key",
+                        passcode: true,
+                        seconds_left: 20,
+                        timeout: 30,
+                    },
+                    None,
+                )
+            }),
+        ),
+        (
+            "review stealth",
+            Box::new(move |c: &mut Canvas| {
+                review(
+                    c,
+                    &ReviewInfo {
+                        review: Review::Send {
+                            amount: "Whole note",
+                            unit: "",
+                            to: TO,
+                        },
+                        fee: "0.0003 ETH",
+                        signature: Some("One-time ML-DSA"),
+                        ..send()
+                    },
+                    None,
+                )
+            }),
+        ),
+        (
+            "signing",
+            Box::new(|c: &mut Canvas| notice(c, "Signing...", "ML-DSA-44")),
+        ),
+        (
+            "signed ml-dsa",
+            Box::new(|c: &mut Canvas| result(c, true, "Signed", "ML-DSA-44 signature sent")),
+        ),
+        (
+            "rejected ml-dsa",
+            Box::new(|c: &mut Canvas| result(c, false, "Rejected", "No signature was made.")),
+        ),
+        (
+            "switched",
+            Box::new(|c: &mut Canvas| result(c, true, "Switched", "Now signing with ML-DSA-44")),
+        ),
+        (
             "passcode",
             Box::new(move |c: &mut Canvas| {
                 passcode(
@@ -360,11 +526,90 @@ fn every_screen() -> Vec<(&'static str, Draw)> {
     ]
 }
 
+/// Taken by tests that change the theme.
+fn theme_lock() -> MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn drawn(draw: impl FnOnce(&mut Canvas)) -> Vec<u16> {
+    let mut buf = vec![0u16; (WIDTH * HEIGHT) as usize];
+    draw(&mut Canvas::new(&mut buf));
+    buf
+}
+
+/// The scheme has to show on these screens in every theme.
+#[test]
+fn the_scheme_changes_what_every_theme_shows() {
+    let _theme = theme_lock();
+    let info = DeviceInfo {
+        firmware: "qday 0.8",
+        root: &ROOT,
+        counter: 67,
+    };
+    let review_info = |scheme| ReviewInfo {
+        review: Review::Send {
+            amount: "0.5",
+            unit: "ETH",
+            to: TO,
+        },
+        fee: "0.0035 ETH",
+        chain_id: 31337,
+        scheme,
+        signature: None,
+        index: 0,
+        rotation: false,
+        seconds_left: 24,
+        timeout: 30,
+    };
+    for t in Theme::ALL {
+        theme::set(t);
+        for scheme in [Scheme::Xmss, Scheme::MlDsa44] {
+            let status = Status {
+                tree: 0,
+                next_index: 0,
+                connected: true,
+                scheme,
+            };
+            let other = Status {
+                scheme: other_scheme(scheme),
+                ..status
+            };
+            assert!(
+                drawn(|c| home(c, &status, &ROOT, None, None))
+                    != drawn(|c| home(c, &other, &ROOT, None, None)),
+                "{t:?} home"
+            );
+            assert!(
+                drawn(|c| device(c, &status, &info, Setting::Theme, false, None))
+                    != drawn(|c| device(c, &other, &info, Setting::Theme, false, None)),
+                "{t:?} device"
+            );
+            let one_time = ReviewInfo {
+                signature: Some("One-time ML-DSA"),
+                ..review_info(scheme)
+            };
+            assert!(
+                drawn(|c| review(c, &one_time, None))
+                    != drawn(|c| review(c, &review_info(scheme), None)),
+                "{t:?} one-time review"
+            );
+            assert!(
+                drawn(|c| review(c, &review_info(scheme), None))
+                    != drawn(|c| review(c, &review_info(other_scheme(scheme)), None)),
+                "{t:?} review"
+            );
+        }
+    }
+    theme::set(Theme::StandardLight);
+}
+
 /// Every screen in every theme renders, and (outside the terminal family,
 /// whose title bar is full-bleed) leaves the outer frame empty: the margin
 /// rule.
 #[test]
 fn every_screen_renders_in_every_theme_inside_the_margins() {
+    let _theme = theme_lock();
     let mut buf = vec![0u16; (WIDTH * HEIGHT) as usize];
     for t in Theme::ALL {
         theme::set(t);

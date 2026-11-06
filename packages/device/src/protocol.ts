@@ -4,9 +4,15 @@
 /** Every protocol line starts with this. Anything else is log output. */
 export const PREFIX = "QDAY1 ";
 /** The longest line, including the newline. */
-export const MAX_LINE = 8192;
+export const MAX_LINE = 9216;
 /** Length of an encoded XMSS signature. */
 export const XMSS_SIG_BYTES = 2500;
+/** Length of an ML-DSA-44 signature. */
+export const ML_SIG_BYTES = 2420;
+/** Length of an ML-DSA-44 public key. */
+export const ML_PUBLIC_KEY_BYTES = 1312;
+/** Length of a stealth address. */
+export const STEALTH_ADDRESS_BYTES = 4160;
 
 export type Hex = `0x${string}`;
 
@@ -17,7 +23,9 @@ export type ErrorCode =
   | "counter-failure"
   | "rotation-needed"
   | "nothing-pending"
-  | "storage-failure";
+  | "storage-failure"
+  | "wrong-scheme"
+  | "signing-failed";
 
 const ERROR_CODES: readonly ErrorCode[] = [
   "bad-request",
@@ -27,7 +35,23 @@ const ERROR_CODES: readonly ErrorCode[] = [
   "rotation-needed",
   "nothing-pending",
   "storage-failure",
+  "wrong-scheme",
+  "signing-failed",
 ];
+
+/** The signature schemes a device can be set to. */
+export type SchemeId = "xmss-keccak" | "ml-dsa-44";
+
+const SCHEME_NAMES: Record<string, SchemeId> = { xmss: "xmss-keccak", "ml-dsa-44": "ml-dsa-44" };
+
+/** A spend of a stealth note, which sends the whole note to `to` and pays `fee` to whoever submits it. */
+export interface StealthSpend {
+  ciphertext: Hex;
+  keyHash: Hex;
+  pool: Hex;
+  to: Hex;
+  fee: bigint;
+}
 
 /** A prepared next key, as (root, public seed). */
 export interface NextKey {
@@ -37,6 +61,11 @@ export interface NextKey {
 
 export type Request =
   | { kind: "pubkey" }
+  | { kind: "scheme" }
+  | { kind: "mlPubkey" }
+  | { kind: "stealthAddress" }
+  | { kind: "viewKey" }
+  | ({ kind: "spendStealth" } & StealthSpend)
   | { kind: "prepare" }
   | { kind: "signFrame"; raw: Uint8Array }
   | { kind: "activate"; tree: number }
@@ -44,6 +73,10 @@ export type Request =
 
 export type Response =
   | { kind: "pubkey"; root: Hex; pubSeed: Hex; nextIndex: number; tree: number; next: NextKey | null }
+  | { kind: "scheme"; scheme: SchemeId }
+  | { kind: "mlPubkey"; publicKey: Hex }
+  | { kind: "stealthAddress"; address: Hex }
+  | { kind: "viewKey"; view: Hex }
   | { kind: "sig"; signature: Hex; next: NextKey | null }
   | { kind: "ok" }
   | { kind: "err"; code: ErrorCode };
@@ -82,6 +115,16 @@ export function requestLine(request: Request): string {
   switch (request.kind) {
     case "pubkey":
       return `${PREFIX}PUBKEY\n`;
+    case "scheme":
+      return `${PREFIX}SCHEME\n`;
+    case "mlPubkey":
+      return `${PREFIX}MLPUBKEY\n`;
+    case "stealthAddress":
+      return `${PREFIX}STEALTHADDRESS\n`;
+    case "viewKey":
+      return `${PREFIX}VIEWKEY\n`;
+    case "spendStealth":
+      return `${PREFIX}SPENDSTEALTH ${request.ciphertext} ${request.keyHash} ${request.pool} ${request.to} ${request.fee}\n`;
     case "prepare":
       return `${PREFIX}PREPARE\n`;
     case "signFrame":
@@ -109,10 +152,27 @@ export function parseResponse(line: string): Response | null {
       return { kind: "pubkey", root, pubSeed, nextIndex, tree, next };
     }
     case "SIG": {
-      const signature = readHex(rest[0], XMSS_SIG_BYTES);
       const next = readNext(rest.slice(1));
-      if (!signature || next === undefined) return null;
-      return { kind: "sig", signature, next };
+      if (next === undefined) return null;
+      // Only XMSS has a next key to report.
+      const signature = readHex(rest[0], XMSS_SIG_BYTES) ?? (next === null ? readHex(rest[0], ML_SIG_BYTES) : null);
+      return signature ? { kind: "sig", signature, next } : null;
+    }
+    case "SCHEME": {
+      const scheme = rest.length === 1 ? SCHEME_NAMES[rest[0] ?? ""] : undefined;
+      return scheme ? { kind: "scheme", scheme } : null;
+    }
+    case "MLPUBKEY": {
+      const publicKey = rest.length === 1 ? readHex(rest[0], ML_PUBLIC_KEY_BYTES) : null;
+      return publicKey ? { kind: "mlPubkey", publicKey } : null;
+    }
+    case "STEALTHADDRESS": {
+      const address = rest.length === 1 ? readHex(rest[0], STEALTH_ADDRESS_BYTES) : null;
+      return address ? { kind: "stealthAddress", address } : null;
+    }
+    case "VIEWKEY": {
+      const view = rest.length === 1 ? readHex(rest[0], 32) : null;
+      return view ? { kind: "viewKey", view } : null;
     }
     case "OK":
       return rest.length === 0 ? { kind: "ok" } : null;

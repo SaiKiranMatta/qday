@@ -2,6 +2,8 @@
 //! light grey with cards a step darker, black pills, green only for success,
 //! greyed secondary digits, text tabs and a dot-matrix key map.
 
+use qday_wallet::settings::Scheme;
+
 use crate::canvas::{Canvas, Color, Rect, TextStyle};
 use crate::fonts::{BODY, BODY_STRONG, CAPTION, DISPLAY, Font, HEADLINE, TITLE};
 use crate::nav::{self, Keys, Kind, Setting};
@@ -286,6 +288,7 @@ pub fn home(
     c.clear(p.bg);
     header(c, s);
     c.text(16, 54, "Account key", &ts(&CAPTION, p.muted));
+    c.text_right(306, 54, scheme_label(s.scheme), &ts(&CAPTION, p.muted));
     let (head, tail) = hex_parts(root);
     runs(
         c,
@@ -490,23 +493,24 @@ pub fn device(
         c.text(26, y, k, &ts(&BODY, p.muted));
         c.text_right(294, y, v, &ts(&BODY_STRONG, p.text));
     }
-    c.text(16, 98, "Settings", &ts(&CAPTION, p.muted));
-    c.text_right(306, 98, info.firmware, &ts(&CAPTION, p.muted));
-    c.round_rect(Rect::new(12.0, 104.0, 296.0, 78.0), 12.0, p.card, 255);
+    c.text(16, 94, "Settings", &ts(&CAPTION, p.muted));
+    c.text_right(306, 94, info.firmware, &ts(&CAPTION, p.muted));
+    c.round_rect(Rect::new(12.0, 98.0, 296.0, 88.0), 12.0, p.card, 255);
     let settings = [
         (Setting::Theme, "Theme", theme::current().name()),
         (Setting::Passcode, "Passcode", "6 digits"),
         (Setting::Backup, "Back up seed", "24 words"),
+        (Setting::Signing, "Signing", scheme_label(s.scheme)),
     ];
     for (i, (which, k, v)) in settings.iter().enumerate() {
-        let r = Rect::new(16.0, 107.0 + i as f32 * 24.0, 288.0, 24.0);
+        let r = Rect::new(16.0, 100.0 + i as f32 * 21.0, 288.0, 21.0);
         if opened && *which == setting {
             c.round_rect(r, 9.0, p.fill, 255);
         }
-        let y = r.y as i32 + 17;
+        let y = r.y as i32 + 15;
         c.text(26, y, k, &ts(&BODY_STRONG, p.text));
         c.text_right(280, y, v, &ts(&BODY, p.muted));
-        chevron(c, 292.0, r.y + 12.0, 3.5, p.muted, false);
+        chevron(c, 292.0, r.y + 10.5, 3.5, p.muted, false);
     }
     controls(c, &nav::tab_keys(Tab::Device, opened, setting), pressed);
 }
@@ -538,7 +542,11 @@ pub fn review(c: &mut Canvas, info: &ReviewInfo, pressed: Option<usize>) {
         text!(24, "#{:04}", info.index)
     };
     let fee = Row::Pair("Fee", info.fee);
-    let key_row = Row::Pair("Key", key.as_str());
+    let key_row = match info.scheme {
+        _ if info.signature.is_some() => Row::Pair("Signature", info.signature.unwrap_or("")),
+        Scheme::Xmss => Row::Pair("Key", key.as_str()),
+        Scheme::MlDsa44 => Row::Pair("Signature", scheme_label(info.scheme)),
+    };
     let hero = |c: &mut Canvas, text: &str, color: Color, width: i32| {
         let style = fit(text, width, &[&DISPLAY, &HEADLINE, &TITLE], color);
         c.text(14, 58, text, &style);
@@ -853,4 +861,86 @@ pub fn notice(c: &mut Canvas, title: &str, detail: &str) {
     c.clear(p.bg);
     c.text_centered(160, 112, title, &ts(&HEADLINE, p.text));
     c.text_centered(160, 136, detail, &ts(&BODY, p.muted));
+}
+
+pub fn keys_ml(c: &mut Canvas, s: &Status, fingerprint: &[u8; 32], pressed: Option<usize>) {
+    let p = p();
+    c.clear(p.bg);
+    header(c, s);
+    c.text(16, 48, "Signing key", &ts(&CAPTION, p.muted));
+    c.text_right(306, 48, scheme_label(s.scheme), &ts(&CAPTION, p.muted));
+    let (head, tail) = hex_parts(fingerprint);
+    runs(
+        c,
+        14,
+        84,
+        &[
+            (head.as_str(), ts(&DISPLAY, p.text)),
+            ("...", ts(&DISPLAY, p.muted)),
+            (tail.as_str(), ts(&DISPLAY, p.text)),
+        ],
+    );
+    c.round_rect(Rect::new(12.0, 96.0, 296.0, 110.0), 12.0, p.card, 255);
+    c.text_centered(160, 142, "No key limit", &ts(&HEADLINE, p.text));
+    c.text_centered(
+        160,
+        166,
+        "One key signs every transfer",
+        &ts(&BODY, p.muted),
+    );
+    controls(c, &nav::tab_keys(Tab::Keys, false, Setting::Theme), pressed);
+}
+
+pub fn scheme_confirm(
+    c: &mut Canvas,
+    target: Scheme,
+    seconds_left: u32,
+    timeout: u32,
+    pressed: Option<usize>,
+) {
+    let p = p();
+    c.clear(p.bg);
+    c.text(16, 22, "Check carefully", &ts(&BODY_STRONG, p.warning));
+    let title = text!(32, "Switch to {}?", scheme_label(target));
+    let style = fit(title.as_str(), 290, &[&HEADLINE, &TITLE], p.text);
+    c.text(14, 58, title.as_str(), &style);
+    c.text(16, 77, "Your account changes", &ts(&BODY, p.muted));
+    card_rows(
+        c,
+        88.0,
+        &[
+            Row::Pair("Signing now", scheme_label(other_scheme(target))),
+            Row::Pair("Signing next", scheme_label(target)),
+            Row::Pair("Funds", "don't move"),
+        ],
+    );
+    controls(c, &nav::review_keys(), pressed);
+    countdown(c, seconds_left, timeout);
+}
+
+pub fn share_confirm(c: &mut Canvas, info: &ShareInfo, pressed: Option<usize>) {
+    let p = p();
+    c.clear(p.bg);
+    c.text(16, 22, "Share with the laptop", &ts(&BODY_STRONG, p.text));
+    let style = fit(info.title, 290, &[&HEADLINE, &TITLE], p.text);
+    c.text(14, 58, info.title, &style);
+    c.text(16, 77, info.detail, &ts(&BODY, p.muted));
+    card_rows(
+        c,
+        88.0,
+        &[
+            Row::Pair("Gives the laptop", info.gives),
+            Row::Pair("Funds", "don't move"),
+            Row::Pair(
+                "Passcode",
+                if info.passcode {
+                    "needed"
+                } else {
+                    "not needed"
+                },
+            ),
+        ],
+    );
+    controls(c, &nav::review_keys(), pressed);
+    countdown(c, info.seconds_left, info.timeout);
 }

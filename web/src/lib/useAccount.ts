@@ -2,6 +2,7 @@ import type { DeviceStatus } from "@qday/device";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityScanner } from "./activity";
 import { type OnChainAccount, RPC_URL, accountAddress, readAccount } from "./chain";
+import { planMlAccount } from "./mlAccount";
 import { NATIVE_ID, type Token } from "./tokens";
 import { type AccountView, type ActivityItem, EMPTY_ACCOUNT } from "./wallet";
 
@@ -18,25 +19,21 @@ export function useAccount(status: DeviceStatus | null, tokens: Token[]) {
   const [activityReady, setActivityReady] = useState(false);
   const scanner = useRef<{ key: string; scan: ActivityScanner } | null>(null);
 
-  const root = status?.root ?? null;
-  const pubSeed = status?.pubSeed ?? null;
+  // Stands for the device's keys, so the account is looked up again only when they change.
+  const keyId = status ? (status.scheme === "ml-dsa-44" ? status.publicKey : `${status.root}|${status.pubSeed}`) : null;
   const tokenKey = tokens.map((t) => t.id).join(",");
 
   useEffect(() => {
-    if (status) {
-      console.info("[qday] device", {
-        publicKey: status.root,
-        publicSeed: status.pubSeed,
-        nextSignature: status.nextIndex,
-        keySet: status.tree,
-      });
-    }
+    if (status) console.info("[qday] device", status);
   }, [status]);
 
   const refresh = useCallback(async () => {
-    if (!root || !pubSeed) return;
+    if (!status) return;
     try {
-      const address = await accountAddress(root, pubSeed);
+      const address =
+        status.scheme === "ml-dsa-44"
+          ? (await planMlAccount(status.publicKey)).address
+          : await accountAddress(status.root, status.pubSeed);
       const next = await readAccount(address, tokens);
       console.info("[qday] account", { rpc: RPC_URL, ...next, balanceWei: next.balanceWei.toString() });
       setOnChain(next);
@@ -60,10 +57,10 @@ export function useAccount(status: DeviceStatus | null, tokens: Token[]) {
     }
     // tokenKey stands in for tokens, which is a new array each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [root, pubSeed, tokenKey]);
+  }, [keyId, tokenKey]);
 
   useEffect(() => {
-    if (!root) {
+    if (!keyId) {
       setOnChain(null);
       setChain("loading");
       return;
@@ -71,7 +68,7 @@ export function useAccount(status: DeviceStatus | null, tokens: Token[]) {
     void refresh();
     const timer = setInterval(() => void refresh(), POLL_MS);
     return () => clearInterval(timer);
-  }, [root, refresh]);
+  }, [keyId, refresh]);
 
   const account: AccountView = onChain
     ? {

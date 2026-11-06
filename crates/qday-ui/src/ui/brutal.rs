@@ -1,6 +1,8 @@
 //! Neo-brutal: pastel tiles on cream,
 //! black outlines and hard shadows, Bricolage Grotesque, and the mascot.
 
+use qday_wallet::settings::Scheme;
+
 use crate::canvas::{Canvas, Color, Rect, TextStyle};
 use crate::fonts::Font;
 use crate::fonts::bricolage::{BIG, BODY, CAP, HERO, TITLE};
@@ -235,10 +237,16 @@ pub fn home(
     pressed: Option<usize>,
 ) {
     c.clear(BG);
+    let scheme = lower(scheme_label(s.scheme));
     header(c, "qday", if s.connected { "usb" } else { "no usb" });
     let big = Rect::new(LEFT, TOP, 146.0, BOTTOM - TOP);
     tile(c, big, MINT, 18.0, false);
-    c.text(24, 66, "account key", &ts(&BODY, INK));
+    c.text(
+        24,
+        66,
+        text!(24, "{} key", scheme.as_str()).as_str(),
+        &ts(&BODY, INK),
+    );
     let (head, tail) = hex_parts(root);
     c.text(22, 102, head.as_str(), &ts(&BIG, INK));
     c.text(
@@ -432,7 +440,7 @@ pub fn activity(
 
 pub fn device(
     c: &mut Canvas,
-    _s: &Status,
+    s: &Status,
     info: &DeviceInfo,
     setting: Setting,
     opened: bool,
@@ -440,7 +448,7 @@ pub fn device(
 ) {
     c.clear(BG);
     header(c, "device", info.firmware);
-    let facts = Rect::new(LEFT, TOP, RIGHT - LEFT, 66.0);
+    let facts = Rect::new(LEFT, TOP, RIGHT - LEFT, 52.0);
     tile(c, facts, CARD, 18.0, false);
     let root = short_hex(info.root);
     let counter = text!(12, "{}", info.counter);
@@ -451,25 +459,29 @@ pub fn device(
     .iter()
     .enumerate()
     {
-        let y = TOP as i32 + 26 + 24 * i as i32;
+        let y = TOP as i32 + 21 + 20 * i as i32;
         c.text(24, y, k, &ts(&BODY, MUTED));
         c.text_right(293, y, v, &ts(&BODY, INK));
     }
-    let y = TOP + 66.0 + GAP;
-    let w = (RIGHT - LEFT - 2.0 * GAP) / 3.0;
+    let y = TOP + 52.0 + 8.0;
+    let w = (RIGHT - LEFT - 8.0) / 2.0;
+    let h = (BOTTOM - y - 6.0) / 2.0;
     let theme_name = lower(theme::current().name());
+    let scheme = lower(scheme_label(s.scheme));
     let settings = [
         (Setting::Theme, "theme", theme_name.as_str(), LIME),
         (Setting::Passcode, "passcode", "6 digits", SKY),
         (Setting::Backup, "back up seed", "24 words", PINK),
+        (Setting::Signing, "signing", scheme.as_str(), MINT),
     ];
     for (i, (which, k, v, col)) in settings.iter().enumerate() {
-        let r = Rect::new(LEFT + i as f32 * (w + GAP), y, w, BOTTOM - y);
+        let (column, row) = ((i % 2) as f32, (i / 2) as f32);
+        let r = Rect::new(LEFT + column * (w + 8.0), y + row * (h + 6.0), w, h);
         let selected = opened && *which == setting;
-        tile(c, r, if selected { PURPLE } else { *col }, 16.0, false);
+        tile(c, r, if selected { PURPLE } else { *col }, 12.0, false);
         let ink = if selected { WHITE } else { INK };
-        c.text(r.x as i32 + 12, r.y as i32 + 24, k, &ts(&CAP, ink));
-        c.text(r.x as i32 + 12, r.y as i32 + 48, v, &ts(&BODY, ink));
+        c.text(r.x as i32 + 10, r.y as i32 + 14, k, &ts(&CAP, ink));
+        c.text(r.x as i32 + 10, r.y as i32 + 30, v, &ts(&BODY, ink));
     }
     controls(c, &nav::tab_keys(Tab::Device, opened, setting), pressed);
 }
@@ -529,7 +541,12 @@ pub fn review(c: &mut Canvas, info: &ReviewInfo, pressed: Option<usize>) {
         Review::Unknown { .. } => ("can't decode this", text!(40, "unknown"), ""),
         Review::Blind { .. } => ("not checked by the device", text!(40, "blind sign"), ""),
     };
-    let key = if info.rotation {
+    let key = if let Some(signature) = info.signature {
+        text!(40, "fee {} - {}", info.fee, lower(signature).as_str())
+    } else if info.scheme == Scheme::MlDsa44 {
+        let scheme = lower(scheme_label(info.scheme));
+        text!(40, "fee {} - signature {}", info.fee, scheme.as_str())
+    } else if info.rotation {
         text!(40, "fee {} - key #{:04} + next tree", info.fee, info.index)
     } else {
         text!(40, "fee {} - key #{:04}", info.fee, info.index)
@@ -886,4 +903,109 @@ pub fn notice(c: &mut Canvas, title: &str, detail: &str) {
     tile(c, r, CARD, 18.0, false);
     c.text_centered(158, 108, &lower(title), &ts(&TITLE, INK));
     c.text_centered(158, 134, detail, &ts(&BODY, MUTED));
+}
+
+pub fn keys_ml(c: &mut Canvas, s: &Status, fingerprint: &[u8; 32], pressed: Option<usize>) {
+    c.clear(BG);
+    let scheme = lower(scheme_label(s.scheme));
+    header(c, "keys", scheme.as_str());
+    let hero = Rect::new(LEFT, TOP, RIGHT - LEFT, 70.0);
+    tile(c, hero, SKY, 18.0, false);
+    c.text(24, 62, "signing key", &ts(&BODY, INK));
+    let (head, tail) = hex_parts(fingerprint);
+    c.text(
+        22,
+        100,
+        text!(20, "{}...{}", head.as_str(), tail.as_str()).as_str(),
+        &ts(&BIG, INK),
+    );
+    let top = TOP + 70.0 + GAP;
+    let card = Rect::new(LEFT, top, RIGHT - LEFT, BOTTOM - top);
+    tile(c, card, CARD, 18.0, false);
+    let y = top as i32;
+    c.text(24, y + 26, "no key limit", &ts(&TITLE, INK));
+    c.text(
+        24,
+        y + 46,
+        "one key signs every transfer",
+        &ts(&BODY, MUTED),
+    );
+    controls(c, &nav::tab_keys(Tab::Keys, false, Setting::Theme), pressed);
+}
+
+pub fn scheme_confirm(
+    c: &mut Canvas,
+    target: Scheme,
+    seconds_left: u32,
+    _timeout: u32,
+    pressed: Option<usize>,
+) {
+    c.clear(BG);
+    header(c, "check carefully", "");
+    let hero = Rect::new(LEFT, TOP, RIGHT - LEFT, 70.0);
+    tile(c, hero, ORANGE, 18.0, false);
+    c.text(24, 62, "your account changes", &ts(&BODY, INK));
+    let to = lower(scheme_label(target));
+    let title = text!(32, "switch to {}?", to.as_str());
+    let style = if ts(&BIG, INK).width(title.as_str()) <= 270 {
+        ts(&BIG, INK)
+    } else {
+        ts(&TITLE, INK)
+    };
+    c.text(22, 100, title.as_str(), &style);
+    let top = TOP + 70.0 + GAP;
+    tile(
+        c,
+        Rect::new(LEFT, top, RIGHT - LEFT, BOTTOM - top),
+        CARD,
+        18.0,
+        false,
+    );
+    let y = top as i32;
+    let from = lower(scheme_label(other_scheme(target)));
+    c.text(24, y + 24, "signing now", &ts(&BODY, MUTED));
+    c.text_right(293, y + 24, from.as_str(), &ts(&BODY, INK));
+    c.text(24, y + 46, "funds", &ts(&BODY, MUTED));
+    c.text_right(293, y + 46, "don't move", &ts(&BODY, INK));
+    controls(c, &nav::review_keys(), pressed);
+    countdown(c, seconds_left);
+}
+
+pub fn share_confirm(c: &mut Canvas, info: &ShareInfo, pressed: Option<usize>) {
+    c.clear(BG);
+    header(c, "share with laptop", "");
+    let hero = Rect::new(LEFT, TOP, RIGHT - LEFT, 70.0);
+    tile(c, hero, MINT, 18.0, false);
+    c.text(24, 62, lower(info.detail).as_str(), &ts(&BODY, INK));
+    let title = lower(info.title);
+    let style = if ts(&BIG, INK).width(title.as_str()) <= 270 {
+        ts(&BIG, INK)
+    } else {
+        ts(&TITLE, INK)
+    };
+    c.text(22, 100, title.as_str(), &style);
+    let top = TOP + 70.0 + GAP;
+    tile(
+        c,
+        Rect::new(LEFT, top, RIGHT - LEFT, BOTTOM - top),
+        CARD,
+        18.0,
+        false,
+    );
+    let y = top as i32;
+    c.text(24, y + 24, "gives the laptop", &ts(&BODY, MUTED));
+    c.text_right(293, y + 24, info.gives, &ts(&BODY, INK));
+    c.text(24, y + 46, "passcode", &ts(&BODY, MUTED));
+    c.text_right(
+        293,
+        y + 46,
+        if info.passcode {
+            "needed"
+        } else {
+            "not needed"
+        },
+        &ts(&BODY, INK),
+    );
+    controls(c, &nav::review_keys(), pressed);
+    countdown(c, info.seconds_left);
 }

@@ -1,3 +1,4 @@
+import type { SchemeId } from "@qday/device";
 import { useState } from "react";
 import { formatAmount } from "../lib/chain";
 import type { Address } from "../lib/tokens";
@@ -12,18 +13,21 @@ export function SetupCard({
   address,
   balanceWei,
   step,
+  scheme,
   onFund,
   onCreate,
 }: {
   address: Address | null;
   balanceWei: bigint;
   step: SetupStep;
+  scheme: SchemeId;
   onFund: () => void;
   onCreate: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const funded = balanceWei > 0n;
-  const busy = step.kind === "funding" || step.kind === "approve" || step.kind === "submitting";
+  const busy = step.kind === "funding" || step.kind === "approve" || step.kind === "submitting" || step.kind === "deploying";
+  const ml = scheme === "ml-dsa-44";
 
   const copy = async () => {
     if (!address) return;
@@ -40,8 +44,9 @@ export function SetupCard({
     <div className="relative z-10 w-full">
       <h1 className="text-2xl font-semibold tracking-tight">Create your account</h1>
       <p className="mt-2 max-w-xl text-sm leading-relaxed text-alabaster/75">
-        Your QDay already has an address. Add test ETH to it, then approve one transaction on the device to create the
-        account. The account pays its own creation fee.
+        {ml
+          ? "Your QDay already has an address. Add test ETH to it, then create the account. An ML-DSA key is too large for the account to deploy itself, so this devnet's dev key pays for it."
+          : "Your QDay already has an address. Add test ETH to it, then approve one transaction on the device to create the account. The account pays its own creation fee."}
       </p>
 
       <div className="mt-5 grid gap-3 lg:grid-cols-2">
@@ -70,12 +75,20 @@ export function SetupCard({
               ? "Check the address on your QDay, then approve “Create account”."
               : step.kind === "submitting"
                 ? "Creating your account. This takes about one block."
-                : funded
-                  ? "One transaction, approved on your QDay."
-                  : "Add funds first, so the account can pay for its creation."}
+                : step.kind === "deploying"
+                  ? "Deploying your key and account. This takes two blocks."
+                  : !funded
+                    ? "Add funds first, so the account can pay for its transfers."
+                    : ml
+                      ? "Two transactions from the dev key. Your QDay isn't needed."
+                      : "One transaction, approved on your QDay."}
           </p>
           <Button className="mt-3 h-9 w-full" disabled={!funded || busy || !address} onClick={onCreate}>
-            {step.kind === "approve" ? "Waiting for your QDay…" : step.kind === "submitting" ? "Creating…" : "Create account"}
+            {step.kind === "approve"
+              ? "Waiting for your QDay…"
+              : step.kind === "submitting" || step.kind === "deploying"
+                ? "Creating…"
+                : "Create account"}
           </Button>
         </div>
       </div>

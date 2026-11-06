@@ -30,11 +30,11 @@ export function Gallery() {
     void loadFrame().then((frame) => {
       const raw = frame.transferTx(ACCOUNT, 3n, 2, TO, 10_000_000_000_000_000n);
       const tx = frame.describe(raw);
-      setDraft({ raw, tx, token: ETH });
+      setDraft({ raw, tx, token: ETH, stealth: false });
       const tokenRaw = frame.tokenTransferTx(ACCOUNT, 3n, 2, USDC.address!, TO, 125_500_000n);
       const tokenTx = frame.describe(tokenRaw);
-      setTokenDraft({ raw: tokenRaw, tx: tokenTx, token: USDC });
-      setFees({ eth: BigInt(tx.maxFeeWei), token: BigInt(tokenTx.maxFeeWei) });
+      setTokenDraft({ raw: tokenRaw, tx: tokenTx, token: USDC, stealth: false });
+      setFees({ eth: BigInt(tx.maxFeeWei), token: BigInt(tokenTx.maxFeeWei), stealth: BigInt(tx.maxFeeWei) });
     });
   }, []);
 

@@ -2,6 +2,9 @@
 
 use std::process::{Command, Output};
 
+use qday_mldsa::blob::prepare;
+use qday_mldsa::{KeySeed, Signer, StandardSigner};
+use qday_wallet::frame::MlFrameTx;
 use qday_wallet::hex;
 use qday_xmss::keccak256;
 
@@ -210,6 +213,111 @@ fn frame_rotate_json_targets_the_sender_with_the_rotate_call() {
             .expect("data is text")
             .starts_with("0xed296e9c")
     );
+}
+
+fn mldsa_key() -> String {
+    let seed = hex::decode_array(SEED).expect("the seed is hex");
+    let signer = StandardSigner::from_key_seed(&KeySeed::derive(&seed, 0));
+    hex::encode(&signer.public_key())
+}
+
+#[test]
+fn mldsa_blob_prints_the_prepared_blob() {
+    let blob = stdout(&["mldsa-blob", &mldsa_key()]);
+    let bytes = hex::decode(&blob).expect("the output is hex");
+    assert_eq!(bytes.len(), 20_545);
+    assert_eq!(bytes[0], 0);
+    let public: [u8; 1312] = hex::decode_array(&mldsa_key()).expect("the key is hex");
+    assert_eq!(bytes, prepare(&public));
+}
+
+#[test]
+fn mldsa_blob_refuses_a_key_of_the_wrong_length() {
+    let longer = format!("{}00", mldsa_key());
+    let output = run(&["mldsa-blob", &longer]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("1,312"));
+}
+
+#[test]
+fn mldsa_blob_refuses_a_degenerate_key() {
+    let degenerate = format!("0x{}", "ff".repeat(1312));
+    let output = run(&["mldsa-blob", &degenerate]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("degenerate"));
+}
+
+const ML_MESSAGE: &str = "0x988d78a1953235fde7cc1bcfda1b7c100d57527e1bb78ce4f94983bb8fb72804";
+const ML_RND: &str = "0x2222222222222222222222222222222222222222222222222222222222222222";
+
+fn keccak_of(text: &str) -> String {
+    let bytes = hex::decode(text).expect("the output is hex");
+    hex::encode(&keccak256(&[&bytes]))
+}
+
+#[test]
+fn mldsa_pubkey_matches_the_vectors() {
+    assert_eq!(
+        keccak_of(&stdout(&["mldsa-pubkey", SEED])),
+        "0xedf67db9472cefc65f57450fba3765b9cd7fbc125897415248ac1ddb006cfdca"
+    );
+    assert_eq!(
+        keccak_of(&stdout(&["mldsa-pubkey", SEED, "--account", "1"])),
+        "0x2b28b612b6d2a21ffae7723845de3a5ee110adf955d54e0e8e647e91db89d74a"
+    );
+}
+
+#[test]
+fn mldsa_sign_matches_the_vectors() {
+    assert_eq!(
+        keccak_of(&stdout(&["mldsa-sign", SEED, ML_MESSAGE, ML_RND])),
+        "0x080e42ae14d538444424db1f130bdd98a8b1fbe7f9d49bf9148e8167be447756"
+    );
+    assert_eq!(
+        keccak_of(&stdout(&[
+            "mldsa-sign",
+            SEED,
+            ML_MESSAGE,
+            ML_RND,
+            "--account",
+            "1"
+        ])),
+        "0x37db9f9afcce24958233408333e86b744318cb8515952eb93643274294bee732"
+    );
+}
+
+#[test]
+fn ml_frame_hash_is_the_hash_of_the_unsigned_transaction() {
+    let sender = hex::decode_array(SENDER).expect("the sender is hex");
+    let to = hex::decode_array(TO).expect("the recipient is hex");
+    let tx = MlFrameTx::transfer(sender, 7, to, 1_000_000_000_000_000);
+    assert_eq!(
+        stdout(&["ml-frame-hash", SENDER, "7", TO, VALUE]),
+        hex::encode(&tx.sig_hash())
+    );
+}
+
+#[test]
+fn ml_frame_raw_carries_the_signature() {
+    let signature = format!("0x{}", "cd".repeat(2420));
+    let raw = stdout(&["ml-frame-raw", SENDER, "7", TO, VALUE, &signature]);
+    assert!(raw.starts_with("0x06"));
+    assert!(raw.contains(&"cd".repeat(2420)));
+}
+
+#[test]
+fn ml_frame_json_has_two_frames() {
+    let signature = format!("0x{}", "cd".repeat(2420));
+    let text = stdout(&["ml-frame-json", SENDER, "7", TO, VALUE, &signature]);
+    let json: serde_json::Value = serde_json::from_str(&text).expect("the output is JSON");
+    let frames = json["frames"].as_array().expect("frames is a list");
+    assert_eq!(frames.len(), 2);
+    assert_eq!(frames[0]["limits"]["execution"], "0x16e360");
+    assert_eq!(frames[0]["data"], "0x6901f668");
+    assert_eq!(frames[1]["target"], TO);
+    assert_eq!(frames[1]["value"], "0x38d7ea4c68000");
+    assert_eq!(json["signatures"][0]["signature"], signature);
+    assert_eq!(json["chainId"], "0x539");
 }
 
 #[test]

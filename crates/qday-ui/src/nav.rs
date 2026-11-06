@@ -68,10 +68,16 @@ pub enum Setting {
     Theme,
     Passcode,
     Backup,
+    Signing,
 }
 
 impl Setting {
-    pub const ALL: [Setting; 3] = [Setting::Theme, Setting::Passcode, Setting::Backup];
+    pub const ALL: [Setting; 4] = [
+        Setting::Theme,
+        Setting::Passcode,
+        Setting::Backup,
+        Setting::Signing,
+    ];
 
     pub fn next(self) -> Setting {
         Self::ALL[(self as usize + 1) % Self::ALL.len()]
@@ -84,7 +90,7 @@ impl Setting {
     /// What acting on it does.
     pub fn verb(self) -> &'static str {
         match self {
-            Setting::Theme | Setting::Passcode => "Change",
+            Setting::Theme | Setting::Passcode | Setting::Signing => "Change",
             Setting::Backup => "Open",
         }
     }

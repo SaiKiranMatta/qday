@@ -46,7 +46,7 @@ export function createTx(sender, index, factory, root, pub_seed) {
  *
  * # Errors
  *
- * Fails unless `raw` is an unsigned QDay transaction.
+ * Fails unless `raw` is an unsigned `QDay` transaction.
  * @param {Uint8Array | number[]} raw
  * @returns {string}
  */
@@ -72,11 +72,125 @@ export function describe(raw) {
 }
 
 /**
+ * The key blob an ML-DSA account reads, as 0x hex.
+ *
+ * # Errors
+ *
+ * Fails on a key of the wrong length, or a degenerate key.
+ * @param {string} public_key
+ * @returns {string}
+ */
+export function mlBlob(public_key) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(public_key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.mlBlob(ptr0, len0);
+        var ptr2 = ret[0];
+        var len2 = ret[1];
+        if (ret[3]) {
+            ptr2 = 0; len2 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
+ * A stealth payment from an ML-DSA account. Returns the unsigned bytes.
+ *
+ * # Errors
+ *
+ * Fails on malformed addresses, amounts or note fields.
+ * @param {string} sender
+ * @param {bigint} nonce
+ * @param {string} pool
+ * @param {string} value_wei
+ * @param {string} key_hash
+ * @param {number} view_tag
+ * @param {string} sealed
+ * @returns {Uint8Array}
+ */
+export function mlStealthPayTx(sender, nonce, pool, value_wei, key_hash, view_tag, sealed) {
+    const val6 = BigInt.asIntN(64, nonce);
+    const val7 = +view_tag;
+    let ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4;
+    try {
+        ptr0 = passStringToWasm0(sender, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len0 = WASM_VECTOR_LEN;
+        ptr1 = passStringToWasm0(pool, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len1 = WASM_VECTOR_LEN;
+        ptr2 = passStringToWasm0(value_wei, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len2 = WASM_VECTOR_LEN;
+        ptr3 = passStringToWasm0(key_hash, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len3 = WASM_VECTOR_LEN;
+        ptr4 = passStringToWasm0(sealed, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len4 = WASM_VECTOR_LEN;
+    } catch (e) {
+        if (ptr4) { wasm.__wbindgen_free(ptr4, len4 * 1, 1); }
+        if (ptr3) { wasm.__wbindgen_free(ptr3, len3 * 1, 1); }
+        if (ptr2) { wasm.__wbindgen_free(ptr2, len2 * 1, 1); }
+        if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+        if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 1, 1); }
+        throw e;
+    }
+    const ret = wasm.mlStealthPayTx(ptr0, len0, val6, ptr1, len1, ptr2, len2, ptr3, len3, val7, ptr4, len4);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v8 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v8;
+}
+
+/**
+ * An ETH transfer from an ML-DSA account. `value_wei` is a decimal string. Returns the unsigned bytes.
+ *
+ * # Errors
+ *
+ * Fails on malformed addresses or amounts.
+ * @param {string} sender
+ * @param {bigint} nonce
+ * @param {string} to
+ * @param {string} value_wei
+ * @returns {Uint8Array}
+ */
+export function mlTransferTx(sender, nonce, to, value_wei) {
+    const val4 = BigInt.asIntN(64, nonce);
+    let ptr0, len0, ptr1, len1, ptr2, len2;
+    try {
+        ptr0 = passStringToWasm0(sender, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len0 = WASM_VECTOR_LEN;
+        ptr1 = passStringToWasm0(to, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len1 = WASM_VECTOR_LEN;
+        ptr2 = passStringToWasm0(value_wei, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len2 = WASM_VECTOR_LEN;
+    } catch (e) {
+        if (ptr2) { wasm.__wbindgen_free(ptr2, len2 * 1, 1); }
+        if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+        if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 1, 1); }
+        throw e;
+    }
+    const ret = wasm.mlTransferTx(ptr0, len0, val4, ptr1, len1, ptr2, len2);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v5 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v5;
+}
+
+/**
  * The hash the device signs for an unsigned transaction, as 0x hex.
  *
  * # Errors
  *
- * Fails unless `raw` is an unsigned QDay transaction.
+ * Fails unless `raw` is an unsigned `QDay` transaction.
  * @param {Uint8Array | number[]} raw
  * @returns {string}
  */
@@ -102,11 +216,183 @@ export function signingMessage(raw) {
 }
 
 /**
+ * True if an announcement is a payment to the owner of this view seed and address.
+ *
+ * # Errors
+ *
+ * Fails on malformed input.
+ * @param {string} view
+ * @param {string} address
+ * @param {string} key_hash
+ * @param {number} view_tag
+ * @param {string} sealed
+ * @returns {boolean}
+ */
+export function stealthFinds(view, address, key_hash, view_tag, sealed) {
+    const val5 = +view_tag;
+    let ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3;
+    try {
+        ptr0 = passStringToWasm0(view, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len0 = WASM_VECTOR_LEN;
+        ptr1 = passStringToWasm0(address, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len1 = WASM_VECTOR_LEN;
+        ptr2 = passStringToWasm0(key_hash, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len2 = WASM_VECTOR_LEN;
+        ptr3 = passStringToWasm0(sealed, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len3 = WASM_VECTOR_LEN;
+    } catch (e) {
+        if (ptr3) { wasm.__wbindgen_free(ptr3, len3 * 1, 1); }
+        if (ptr2) { wasm.__wbindgen_free(ptr2, len2 * 1, 1); }
+        if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+        if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 1, 1); }
+        throw e;
+    }
+    const ret = wasm.stealthFinds(ptr0, len0, ptr1, len1, ptr2, len2, val5, ptr3, len3);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] !== 0;
+}
+
+/**
+ * The key a spend gives the pool, as 0x hex.
+ *
+ * # Errors
+ *
+ * Fails on malformed input.
+ * @param {string} view
+ * @param {string} address
+ * @param {string} sealed
+ * @returns {string}
+ */
+export function stealthKey(view, address, sealed) {
+    let deferred5_0;
+    let deferred5_1;
+    try {
+        let ptr0, len0, ptr1, len1, ptr2, len2;
+        try {
+            ptr0 = passStringToWasm0(view, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len0 = WASM_VECTOR_LEN;
+            ptr1 = passStringToWasm0(address, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len1 = WASM_VECTOR_LEN;
+            ptr2 = passStringToWasm0(sealed, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len2 = WASM_VECTOR_LEN;
+        } catch (e) {
+            if (ptr2) { wasm.__wbindgen_free(ptr2, len2 * 1, 1); }
+            if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+            if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 1, 1); }
+            throw e;
+        }
+        const ret = wasm.stealthKey(ptr0, len0, ptr1, len1, ptr2, len2);
+        var ptr4 = ret[0];
+        var len4 = ret[1];
+        if (ret[3]) {
+            ptr4 = 0; len4 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred5_0 = ptr4;
+        deferred5_1 = len4;
+        return getStringFromWasm0(ptr4, len4);
+    } finally {
+        wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+    }
+}
+
+/**
+ * Makes a payment to a stealth address with 64 random bytes. Returns the note as JSON.
+ *
+ * # Errors
+ *
+ * Fails on a malformed address.
+ * @param {string} address
+ * @param {Uint8Array | number[]} random
+ * @returns {string}
+ */
+export function stealthPay(address, random) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        let ptr0, len0, ptr1, len1;
+        try {
+            ptr0 = passStringToWasm0(address, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            len0 = WASM_VECTOR_LEN;
+            ptr1 = passArray8ToWasm0(random, wasm.__wbindgen_malloc);
+            len1 = WASM_VECTOR_LEN;
+        } catch (e) {
+            if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+            if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 1, 1); }
+            throw e;
+        }
+        const ret = wasm.stealthPay(ptr0, len0, ptr1, len1);
+        var ptr3 = ret[0];
+        var len3 = ret[1];
+        if (ret[3]) {
+            ptr3 = 0; len3 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred4_0 = ptr3;
+        deferred4_1 = len3;
+        return getStringFromWasm0(ptr3, len3);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+
+/**
+ * A stealth payment from an XMSS account. Returns the unsigned bytes.
+ *
+ * # Errors
+ *
+ * Fails on malformed addresses, amounts or note fields.
+ * @param {string} sender
+ * @param {bigint} nonce
+ * @param {number} index
+ * @param {string} pool
+ * @param {string} value_wei
+ * @param {string} key_hash
+ * @param {number} view_tag
+ * @param {string} sealed
+ * @returns {Uint8Array}
+ */
+export function stealthPayTx(sender, nonce, index, pool, value_wei, key_hash, view_tag, sealed) {
+    const val6 = BigInt.asIntN(64, nonce);
+    const val7 = +index;
+    const val8 = +view_tag;
+    let ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4;
+    try {
+        ptr0 = passStringToWasm0(sender, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len0 = WASM_VECTOR_LEN;
+        ptr1 = passStringToWasm0(pool, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len1 = WASM_VECTOR_LEN;
+        ptr2 = passStringToWasm0(value_wei, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len2 = WASM_VECTOR_LEN;
+        ptr3 = passStringToWasm0(key_hash, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len3 = WASM_VECTOR_LEN;
+        ptr4 = passStringToWasm0(sealed, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        len4 = WASM_VECTOR_LEN;
+    } catch (e) {
+        if (ptr4) { wasm.__wbindgen_free(ptr4, len4 * 1, 1); }
+        if (ptr3) { wasm.__wbindgen_free(ptr3, len3 * 1, 1); }
+        if (ptr2) { wasm.__wbindgen_free(ptr2, len2 * 1, 1); }
+        if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+        if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 1, 1); }
+        throw e;
+    }
+    const ret = wasm.stealthPayTx(ptr0, len0, val6, val7, ptr1, len1, ptr2, len2, ptr3, len3, val8, ptr4, len4);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v9 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v9;
+}
+
+/**
  * The `eth_sendFrameTransaction` object for an unsigned transaction and the device's signature, as JSON.
  *
  * # Errors
  *
- * Fails unless `raw` is an unsigned QDay transaction.
+ * Fails unless `raw` is an unsigned `QDay` transaction.
  * @param {Uint8Array | number[]} raw
  * @param {Uint8Array | number[]} signature
  * @returns {string}

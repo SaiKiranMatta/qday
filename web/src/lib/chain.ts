@@ -25,7 +25,11 @@ const NETWORKS: Record<string, Network> = {
     rpc: "http://127.0.0.1:8545",
     gateway: "http://127.0.0.1:14337/rpc",
     // The local devnet's premine key. Throwaway by design: it's published with the devnet setup.
-    faucet: { kind: "key", key: "0x06f911c1ecb2053bb443ba0a0e28d630c583c3c0c2f334a9ecdc8c7c6ad4ea15" },
+    // VITE_QDAY_DEV_KEY replaces it on a devnet started some other way.
+    faucet: {
+      kind: "key",
+      key: import.meta.env.VITE_QDAY_DEV_KEY ?? "0x06f911c1ecb2053bb443ba0a0e28d630c583c3c0c2f334a9ecdc8c7c6ad4ea15",
+    },
     blockSeconds: 6,
   },
   hosted: {
@@ -55,6 +59,14 @@ export const GATEWAY_URL = NETWORK.gateway;
 
 /** Same address on every devnet: tools/devnet/deploy-qday.sh deploys it through CREATE2. */
 export const FACTORY: Address = "0xbCebAd3eCE45625983409B429406a5Dc8d38f876";
+/** The same again, from tools/devnet/deploy-stealth.sh. */
+export const ML_FACTORY: Address = "0x6aD8F805f02509bdf646406b9108dd3070E4174d";
+export const ML_VERIFIER: Address = "0x20a8128F20FAF48A9A26Bb83c332582520100954";
+export const POOL: Address = "0x4eBfa044FA7a52CfDE7Fc1B6d8Fb3b4b0669f354";
+/** Where ML-DSA accounts stake. It differs per devnet, so it comes from VITE_QDAY_STAKING_REGISTRY. */
+export const STAKING_REGISTRY: Address | undefined = import.meta.env.VITE_QDAY_STAKING_REGISTRY;
+/** The price plain transactions use: the gateway can't estimate fees. */
+export const GAS_PRICE = 2_000_000_000n;
 
 export const devnet = defineChain({
   id: 1337,
@@ -104,7 +116,7 @@ export function formatAmount(value: bigint, decimals: number): string {
   return `${BigInt(whole).toLocaleString("en-US")}${trimmed ? `.${trimmed}` : ""}`;
 }
 
-/** The account for a device key: deployed or not, its address follows from the key. */
+/** The account for an XMSS key: deployed or not, its address follows from the key. */
 export async function accountAddress(root: Hex, pubSeed: Hex): Promise<Address> {
   return client.readContract({ address: FACTORY, abi: factoryAbi, functionName: "accountOf", args: [root, pubSeed] });
 }
@@ -156,18 +168,23 @@ export async function requestTestEth(to: Address): Promise<void> {
     await rpc(GATEWAY_URL, "skandha_explorer_faucet", [to]);
     return;
   }
-  const wallet = createWalletClient({
+  const hash = await devWallet().sendTransaction({ to, value: 10n ** 18n, type: "legacy", gasPrice: GAS_PRICE });
+  await client.waitForTransactionReceipt({ hash, timeout: MINE_TIMEOUT_MS });
+}
+
+/** True where the app has a funded dev key: a private devnet. */
+export const HAS_DEV_KEY = NETWORK.faucet.kind === "key";
+export const CAN_MINT_TEST_TOKENS = HAS_DEV_KEY;
+
+/** The funded dev key as a wallet. It pays for what a QDay account can't send itself. */
+export function devWallet() {
+  if (NETWORK.faucet.kind !== "key") throw new Error("This needs a dev key, which only the local devnet has.");
+  return createWalletClient({
     account: privateKeyToAccount(NETWORK.faucet.key),
     chain: devnet,
     transport: http(RPC_URL, { timeout: REQUEST_TIMEOUT_MS }),
   });
-  // The gateway can't estimate fees, so plain transactions use a fixed legacy price.
-  const hash = await wallet.sendTransaction({ to, value: 10n ** 18n, type: "legacy", gasPrice: 2_000_000_000n });
-  await client.waitForTransactionReceipt({ hash, timeout: MINE_TIMEOUT_MS });
 }
-
-/** True where the app can mint test tokens itself: a private devnet with a funded dev key. */
-export const CAN_MINT_TEST_TOKENS = NETWORK.faucet.kind === "key";
 
 const mintAbi = [
   { type: "function", name: "mint", stateMutability: "nonpayable", inputs: [{ type: "address" }, { type: "uint256" }], outputs: [] },
@@ -175,12 +192,7 @@ const mintAbi = [
 
 /** Mints a round amount of each test token (anyone can mint the devnet's TestERC20) to an address. */
 export async function requestTestTokens(to: Address, tokens: Token[]): Promise<void> {
-  if (NETWORK.faucet.kind !== "key") throw new Error("Test tokens are only minted on the local devnet.");
-  const wallet = createWalletClient({
-    account: privateKeyToAccount(NETWORK.faucet.key),
-    chain: devnet,
-    transport: http(RPC_URL, { timeout: REQUEST_TIMEOUT_MS }),
-  });
+  const wallet = devWallet();
   for (const token of tokens) {
     if (!token.address || token.custom) continue;
     // 1,000 of a dollar-style token, 1 of anything finer (1 WBTC, 1 of an 18-decimal token).
@@ -191,7 +203,7 @@ export async function requestTestTokens(to: Address, tokens: Token[]): Promise<v
       functionName: "mint",
       args: [to, amount],
       type: "legacy",
-      gasPrice: 2_000_000_000n,
+      gasPrice: GAS_PRICE,
     });
     await client.waitForTransactionReceipt({ hash, timeout: MINE_TIMEOUT_MS });
   }

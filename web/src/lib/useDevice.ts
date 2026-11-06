@@ -1,4 +1,4 @@
-import { DeviceError, type DeviceStatus, QDayDevice } from "@qday/device";
+import { DeviceError, type DeviceStatus, QDayDevice, type StealthSpend } from "@qday/device";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MOCK } from "./wallet";
 
@@ -133,5 +133,13 @@ export function useDevice() {
     return signature;
   }, []);
 
-  return { state, log, connect, refresh, disconnect, signFrame };
+  const connected = useCallback(() => {
+    if (!device.current) throw new DeviceError("Connect your QDay first");
+    return device.current;
+  }, []);
+  const stealthAddress = useCallback(() => connected().stealthAddress(), [connected]);
+  const viewKey = useCallback(() => connected().viewKey(), [connected]);
+  const spendStealth = useCallback((spend: StealthSpend) => connected().spendStealth(spend), [connected]);
+
+  return { state, log, connect, refresh, disconnect, signFrame, stealthAddress, viewKey, spendStealth };
 }
