@@ -47,12 +47,12 @@ fn main() -> ! {
         .with_mode(Mode::_0);
     let spi = Spi::new(peripherals.SPI2, spi_config)
         .expect("the SPI config is valid")
-        .with_sck(peripherals.GPIO12)
-        .with_mosi(peripherals.GPIO11);
+        .with_sck(peripherals.GPIO9)
+        .with_mosi(peripherals.GPIO10);
 
-    let cs = Output::new(peripherals.GPIO10, Level::High, OutputConfig::default());
-    let dc = Output::new(peripherals.GPIO9, Level::Low, OutputConfig::default());
-    let reset = Output::new(peripherals.GPIO14, Level::High, OutputConfig::default());
+    let cs = Output::new(peripherals.GPIO13, Level::High, OutputConfig::default());
+    let dc = Output::new(peripherals.GPIO11, Level::Low, OutputConfig::default());
+    let reset = Output::new(peripherals.GPIO12, Level::High, OutputConfig::default());
 
     let spi_device = ExclusiveDevice::new_no_delay(spi, cs).expect("the CS pin cannot fail");
     let mut buffer = [0_u8; 512];
@@ -64,6 +64,8 @@ fn main() -> ! {
         .orientation(Orientation::new().rotate(Rotation::Deg90))
         .init(&mut delay)
         .expect("the display starts");
+
+    let _backlight = Output::new(peripherals.GPIO46, Level::High, OutputConfig::default());
 
     let text_style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
 
