@@ -22,11 +22,10 @@ and skips ahead 64 keys. Keys 1008-1023 are reserved for rotating to a new tree 
 
 ## Status
 
-Steps 1 to 6 of 8 are built and tested on the laptop, and the firmware compiles.
+Steps 1 to 6 of 8 are done. A laptop key has deployed an account, sent transfers and rotated on a local
+EIP-8141 chain, with the results in [docs/devnet.md](docs/devnet.md).
 
-Nothing has run on the device yet, and the contracts have only run in Foundry and a plain EVM. Still to
-do: a laptop-key transfer and rotation on a local EIP-8141 chain, then the on-device runs in steps 7
-and 8.
+The firmware compiles but has not run on the device yet. Steps 7 and 8 are the on-device runs.
 
 ## Repository layout
 

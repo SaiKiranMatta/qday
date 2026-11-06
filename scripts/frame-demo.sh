@@ -27,6 +27,8 @@ UNSTAKE_DELAY=${QDAY_UNSTAKE_DELAY:-86400}
 FUNDING_WEI=${QDAY_FUNDING_WEI:-1000000000000000000}
 PORT=${QDAY_DEVICE_PORT:-}
 RECEIPT_TRIES=120
+# The mempool gateway can't estimate fees, so plain transactions use a fixed legacy price.
+GAS_PRICE=2000000000
 
 die() {
   echo "error: $*" >&2
@@ -63,7 +65,7 @@ active_key() {
 # Creates a contract and prints its address.
 create() {
   forge create --root "$ROOT/contracts" --rpc-url "$RPC" --private-key "$QDAY_FUNDING_KEY" \
-    --broadcast "$@" | awk '/Deployed to:/ {print $3}'
+    --legacy --gas-price "$GAS_PRICE" --broadcast "$@" | awk '/Deployed to:/ {print $3}'
 }
 
 deploy() {
@@ -77,8 +79,8 @@ deploy() {
     "$verifier" "$root" "$pub_seed" "$QDAY_STAKING_REGISTRY" "$STAKE" "$UNSTAKE_DELAY")
   [ -n "$account" ] || die "the account did not deploy"
 
-  cast send --rpc-url "$RPC" --private-key "$QDAY_FUNDING_KEY" --value "$FUNDING_WEI" "$account" \
-    >/dev/null
+  cast send --rpc-url "$RPC" --private-key "$QDAY_FUNDING_KEY" --legacy --gas-price "$GAS_PRICE" \
+    --value "$FUNDING_WEI" "$account" >/dev/null
   echo "$verifier" >"$STATE/verifier"
   echo "$account" >"$STATE/account"
   echo "verifier $verifier"
