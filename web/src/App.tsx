@@ -7,6 +7,7 @@ import { useCreateAccount } from "./lib/useCreateAccount";
 import { useSend } from "./lib/useSend";
 import { type PrivateNote, useStealth } from "./lib/useStealth";
 import { ClaimModal } from "./components/ClaimModal";
+import { DemoApproval } from "./components/DemoApproval";
 import { ReceiveModal } from "./components/ReceiveModal";
 import { SendModal } from "./components/SendModal";
 import { useDevice } from "./lib/useDevice";
@@ -16,19 +17,37 @@ import { MOCK, MOCK_ACCOUNT } from "./lib/wallet";
 import { ActivityPage, DevicePage, WalletPage } from "./pages";
 
 export function App() {
-  const { state, log, connect, refresh, disconnect, signFrame, stealthAddress, viewKey, spendStealth } = useDevice();
+  const {
+    state,
+    log,
+    connect,
+    startDemo,
+    approval,
+    exportDemoSeed,
+    forgetDemo,
+    refresh,
+    disconnect,
+    signFrame,
+    stealthAddress,
+    viewKey,
+    spendStealth,
+  } = useDevice();
   const stealthDevice = useMemo(() => ({ stealthAddress, viewKey, spendStealth }), [stealthAddress, viewKey, spendStealth]);
 
   if (state.kind === "connected") {
     return (
-      <ConnectedApp
-        status={state.status}
-        log={log}
-        onRefresh={refresh}
-        onDisconnect={disconnect}
-        signFrame={signFrame}
-        stealthDevice={stealthDevice}
-      />
+      <>
+        <ConnectedApp
+          status={state.status}
+          log={log}
+          demo={state.demo ? { onExportSeed: exportDemoSeed, onForget: forgetDemo } : null}
+          onRefresh={refresh}
+          onDisconnect={disconnect}
+          signFrame={signFrame}
+          stealthDevice={stealthDevice}
+        />
+        {approval && <DemoApproval request={approval.request} onDecide={approval.decide} />}
+      </>
     );
   }
 
@@ -39,7 +58,7 @@ export function App() {
       onNavigate={() => {}}
       device={{ connected: false, connecting: state.kind === "connecting" }}
     >
-      <ConnectPanel state={state} onConnect={connect} />
+      <ConnectPanel state={state} onConnect={connect} onTryDemo={(seed) => void startDemo(seed)} />
     </Shell>
   );
 }
@@ -48,6 +67,7 @@ export function App() {
 function ConnectedApp({
   status,
   log,
+  demo,
   onRefresh,
   onDisconnect,
   signFrame,
@@ -55,6 +75,7 @@ function ConnectedApp({
 }: {
   status: DeviceStatus;
   log: string[];
+  demo: { onExportSeed: () => string | null; onForget: () => void } | null;
   onRefresh: () => void;
   onDisconnect: () => void;
   signFrame: (raw: Uint8Array) => Promise<`0x${string}`>;
@@ -86,7 +107,7 @@ function ConnectedApp({
   const sendable = status.scheme === "ml-dsa-44" ? tokens.selected.filter((token) => token.address === null) : tokens.selected;
 
   return (
-    <Shell page={page} onNavigate={setPage} device={{ connected: true, onDisconnect }}>
+    <Shell page={page} onNavigate={setPage} device={{ connected: true, demo: demo !== null, onDisconnect }}>
       {/* Keyed by page, so each page enters on arrival. */}
       <div key={page} className="animate-enter">
         {page === "wallet" && (
@@ -102,6 +123,7 @@ function ConnectedApp({
                     balanceWei: live.onChain?.balanceWei ?? 0n,
                     step: setup.step,
                     scheme: status.scheme,
+                    demo: demo !== null,
                     onFund: () => void setup.fund(),
                     onCreate: () => void setup.create(),
                   }
@@ -124,6 +146,7 @@ function ConnectedApp({
                     setup: stealth.setup,
                     notes: stealth.notes,
                     scanned: stealth.scanned,
+                    demo: demo !== null,
                     onEnable: () => void stealth.enable(),
                     onClaim: setClaiming,
                   }
@@ -132,7 +155,7 @@ function ConnectedApp({
           />
         )}
         {page === "activity" && <ActivityPage account={account} tokens={tokens} />}
-        {page === "device" && <DevicePage status={status} log={log} onRefresh={onRefresh} onDisconnect={onDisconnect} />}
+        {page === "device" && <DevicePage status={status} log={log} demo={demo} onRefresh={onRefresh} onDisconnect={onDisconnect} />}
       </div>
       {dialog === "send" && (
         <SendModal
@@ -152,6 +175,7 @@ function ConnectedApp({
           address={account.address}
           privateAddress={stealth.address}
           privateSetup={stealth.setup}
+          demo={demo !== null}
           onEnablePrivate={live.onChain?.deployed ? () => void stealth.enable() : null}
           onClose={closeDialog}
         />

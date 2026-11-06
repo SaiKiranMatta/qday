@@ -14,6 +14,7 @@ export function SetupCard({
   balanceWei,
   step,
   scheme,
+  demo,
   onFund,
   onCreate,
 }: {
@@ -21,6 +22,7 @@ export function SetupCard({
   balanceWei: bigint;
   step: SetupStep;
   scheme: SchemeId;
+  demo: boolean;
   onFund: () => void;
   onCreate: () => void;
 }) {
@@ -44,7 +46,9 @@ export function SetupCard({
     <div className="relative z-10 w-full">
       <h1 className="text-2xl font-semibold tracking-tight">Create your account</h1>
       <p className="mt-2 max-w-xl text-sm leading-relaxed text-alabaster/75">
-        {ml
+        {demo
+          ? "This wallet already has an address. Add test ETH to it, then approve one transaction to create the account. The account pays its own creation fee."
+          : ml
           ? "Your QDay already has an address. Add test ETH to it, then create the account. An ML-DSA key is too large for the account to deploy itself, so this devnet's dev key pays for it."
           : "Your QDay already has an address. Add test ETH to it, then approve one transaction on the device to create the account. The account pays its own creation fee."}
       </p>
@@ -72,7 +76,9 @@ export function SetupCard({
           <div className="text-xs text-alabaster/60">Step 2 · Create account</div>
           <p className="mt-2 text-xs text-alabaster/80">
             {step.kind === "approve"
-              ? "Check the address on your QDay, then approve “Create account”."
+              ? demo
+                ? "Check the screen, then approve “Create account”."
+                : "Check the address on your QDay, then approve “Create account”."
               : step.kind === "submitting"
                 ? "Creating your account. This takes about one block."
                 : step.kind === "deploying"
@@ -81,11 +87,15 @@ export function SetupCard({
                     ? "Add funds first, so the account can pay for its transfers."
                     : ml
                       ? "Two transactions from the dev key. Your QDay isn't needed."
-                      : "One transaction, approved on your QDay."}
+                      : demo
+                        ? "One transaction, approved on this page."
+                        : "One transaction, approved on your QDay."}
           </p>
           <Button className="mt-3 h-9 w-full" disabled={!funded || busy || !address} onClick={onCreate}>
             {step.kind === "approve"
-              ? "Waiting for your QDay…"
+              ? demo
+                ? "Waiting for approval…"
+                : "Waiting for your QDay…"
               : step.kind === "submitting" || step.kind === "deploying"
                 ? "Creating…"
                 : "Create account"}

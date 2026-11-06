@@ -130,6 +130,37 @@ The last two rows ran in Chrome over real Web Serial, with the board sharing its
 key. The new address received 0.0466 ETH: the note less the 0.0034 ETH fee. A private payment from an
 ML-DSA account has only run on simulated flash.
 
+## Demo wallet
+
+**Try without a device** on the connect screen opens a wallet with its keys in the browser, so people can try
+QDay without a board. It's XMSS only, for test ETH.
+
+Tested on 2026-11-07 in a browser against the chain's own gateway, with no device connected: create, ETH
+transfer, a rejection, private payment, claim, reload, seed export, delete and restore. A wallet opens in about
+half a second.
+
+What stands in for the device:
+
+- **One-time keys:** before each signature it reads the next key from the chain and from browser storage, and
+  uses the later one. It saves the new counter, and reads it back, before it signs. With the local counter
+  deleted, it picked up the right key from the chain.
+- **Several tabs:** signing takes a Web Lock, so tabs take turns.
+- **Networks:** it refuses to open or sign unless the chain ID is 1337.
+- **Approval:** a page dialog copies the device's review screen, and says what real hardware adds.
+
+Its limits:
+
+- **Keys aren't protected.** The seed sits unencrypted in browser storage, so anything that reaches the page can
+  take it. The approval dialog is on the same page, so it proves nothing against a bad page.
+- **Clearing browser data deletes the wallet.** Only the exported seed brings it back.
+- **The counter has a gap.** With the seed open in two browsers, or a transaction signed but not yet mined when
+  storage is cleared, a one-time key could be used twice, which weakens that key. That's acceptable for test ETH
+  and nothing else.
+- **It can't rotate.** After 1,008 signatures, start a new wallet.
+- **A public deployment needs a faucet and relayer service.** Test ETH and claims use a dev key that ships in the
+  page, and anyone could drain it.
+- The screen for browsers with no Web Serial wasn't exercised, and Safari and phones haven't been tried.
+
 ## Public reference network (not our target)
 
 ethrex hegota-testnet: chain id 8141, RPC `https://rpc1.privacy.ethrex.xyz`, explorer

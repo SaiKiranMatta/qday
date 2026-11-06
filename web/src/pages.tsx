@@ -41,6 +41,7 @@ export function WalletPage({
     balanceWei: bigint;
     step: SetupStep;
     scheme: SchemeId;
+    demo: boolean;
     onFund: () => void;
     onCreate: () => void;
   } | null;
@@ -55,6 +56,7 @@ export function WalletPage({
     setup: SetupState;
     notes: PrivateNote[];
     scanned: boolean;
+    demo: boolean;
     onEnable: () => void;
     onClaim: (note: PrivateNote) => void;
   } | null;
@@ -168,12 +170,14 @@ function PrivatePayments({
   setup,
   notes,
   scanned,
+  demo,
   onEnable,
   onClaim,
 }: {
   setup: SetupState;
   notes: PrivateNote[];
   scanned: boolean;
+  demo: boolean;
   onEnable: () => void;
   onClaim: (note: PrivateNote) => void;
 }) {
@@ -183,8 +187,10 @@ function PrivatePayments({
       {setup.kind !== "on" ? (
         <div className="py-3">
           <p className="max-w-xl text-sm leading-relaxed text-muted">
-            A private address lets anyone pay you without the payment pointing to this account. Your QDay asks you to share the
-            address, then the key that finds payments, which can't spend them. This page forgets that key when you leave.
+            A private address lets anyone pay you without the payment pointing to this account.{" "}
+            {demo
+              ? "In this demo wallet, setting it up takes one click."
+              : "Your QDay asks you to share the address, then the key that finds payments, which can't spend them. This page forgets that key when you leave."}
           </p>
           {setup.kind === "error" && (
             <p role="alert" className="mt-3 text-xs text-bad">
@@ -192,7 +198,7 @@ function PrivatePayments({
             </p>
           )}
           <Button variant="secondary" className="mt-4" disabled={setup.kind === "sharing"} onClick={onEnable}>
-            {setup.kind === "sharing" ? "Waiting for your QDay…" : "Set up on your QDay"}
+            {setup.kind === "sharing" ? "Setting up…" : demo ? "Set up" : "Set up on your QDay"}
           </Button>
         </div>
       ) : !scanned ? (
@@ -351,11 +357,14 @@ export function ActivityPage({ account, tokens }: { account: AccountView; tokens
 export function DevicePage({
   status,
   log,
+  demo,
   onRefresh,
   onDisconnect,
 }: {
   status: DeviceStatus;
   log: string[];
+  /** Present for the demo wallet, which has no device behind it. */
+  demo: { onExportSeed: () => string | null; onForget: () => void } | null;
   onRefresh: () => void;
   onDisconnect: () => void;
 }) {
@@ -376,15 +385,15 @@ export function DevicePage({
 
   return (
     <div>
-      <PageTitle title="Device" subtitle="The QDay connected to this browser." />
+      <PageTitle title="Device" subtitle={demo ? "The demo wallet in this browser." : "The QDay connected to this browser."} />
 
       <section className="flex flex-col gap-6 rounded-3xl bg-surface px-6 py-6 sm:flex-row sm:items-center sm:gap-8 sm:px-8 sm:py-7">
-        <DeviceArt size="large" light="ok" caption="Ready to sign" />
+        <DeviceArt size="large" light="ok" caption={demo ? "Demo" : "Ready to sign"} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5 text-sm font-medium text-ok">
-            <span className="size-2 animate-breathe rounded-full bg-ok" /> Connected and ready to sign
+            <span className="size-2 animate-breathe rounded-full bg-ok" /> {demo ? "Ready to sign in this browser" : "Connected and ready to sign"}
           </div>
-          <h2 className="mt-2 text-2xl font-semibold tracking-tight">QDay</h2>
+          <h2 className="mt-2 text-2xl font-semibold tracking-tight">{demo ? "Demo wallet" : "QDay"}</h2>
           <div className="mt-1 flex items-center gap-2 text-sm text-muted">
             Device ID <span className="font-mono text-xs text-alabaster/80">{shortHex(deviceId, 8, 6)}</span>
             <CopyIconButton text={deviceId} label="Copy device ID" />
@@ -426,10 +435,11 @@ export function DevicePage({
               />
             </div>
             <p className="mt-4 text-xs leading-relaxed text-muted">
-              Each approval uses one signature. When they run low, refresh the keys on your QDay. Your address stays the
-              same.
+              {demo
+                ? "Each approval uses one signature. The demo wallet can't refresh its keys, so start a new one when they run out."
+                : "Each approval uses one signature. When they run low, refresh the keys on your QDay. Your address stays the same."}
             </p>
-            {cap.low && (
+            {cap.low && !demo && (
               <div className="mt-4 rounded-xl bg-warn/10 px-4 py-3 text-xs leading-relaxed text-warn">
                 {cap.empty
                   ? "No signatures left on these keys. Refresh the keys on your QDay to keep signing."
@@ -442,7 +452,7 @@ export function DevicePage({
         <section className="rounded-3xl bg-surface px-6 pt-5 pb-2 sm:px-8 sm:pt-6">
           <h2 className="text-base font-semibold">Details</h2>
           <dl className="mt-2 divide-y divide-line/60">
-            <Row label="Connection" value="USB" />
+            <Row label="Connection" value={demo ? "This browser" : "USB"} />
             <Row label="Signing" value={SCHEMES[status.scheme].name} />
             {!ml && <Row label="Key set" value={`#${status.tree + 1}`} />}
             {!ml && <Row label="Next signature" value={`#${String(status.nextIndex).padStart(4, "0")}`} />}
@@ -471,7 +481,49 @@ export function DevicePage({
           </div>
         </section>
       </div>
+
+      {demo && <DemoControls {...demo} />}
     </div>
+  );
+}
+
+/** The demo wallet's seed, shown only on request, and a way to delete the wallet. */
+function DemoControls({ onExportSeed, onForget }: { onExportSeed: () => string | null; onForget: () => void }) {
+  const [seed, setSeed] = useState<string | null>(null);
+  const [forgetting, setForgetting] = useState(false);
+  return (
+    <section className="mt-6 rounded-3xl bg-surface px-6 py-5 sm:px-8 sm:py-6">
+      <h2 className="text-base font-semibold">Demo wallet</h2>
+      <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted">
+        Clearing your browser data deletes this wallet. Its seed is the only way to get it back, and anyone with the seed
+        has the wallet.
+      </p>
+      {seed && (
+        <div className="mt-4 flex items-center gap-2 rounded-2xl bg-surface-2 px-4 py-3">
+          <code className="min-w-0 flex-1 font-mono text-xs break-all">{seed}</code>
+          <CopyIconButton text={seed} label="Copy seed" />
+        </div>
+      )}
+      <div className="mt-4 flex flex-wrap gap-3">
+        <Button variant="secondary" onClick={() => setSeed(seed ? null : onExportSeed())}>
+          {seed ? "Hide seed" : "Show seed"}
+        </Button>
+        {forgetting ? (
+          <>
+            <Button variant="secondary" className="text-bad" onClick={onForget}>
+              Delete it for good
+            </Button>
+            <Button variant="ghost" onClick={() => setForgetting(false)}>
+              Keep it
+            </Button>
+          </>
+        ) : (
+          <Button variant="ghost" onClick={() => setForgetting(true)}>
+            Delete this wallet
+          </Button>
+        )}
+      </div>
+    </section>
   );
 }
 
