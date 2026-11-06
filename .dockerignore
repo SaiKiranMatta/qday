@@ -1,0 +1,12 @@
+# Keep builds from the repository root small, and secrets out of them.
+.git
+.env
+.claude
+**/node_modules
+**/target
+**/dist
+contracts/out
+contracts/cache
+firmware
+docs
+*.png
