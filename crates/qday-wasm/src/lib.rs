@@ -150,6 +150,11 @@ pub fn describe(raw: &[u8]) -> Result<String, JsError> {
                 hex::encode(to)
             )
         }
+        Action::StealthPay { pool, value, note } => format!(
+            "{{\"kind\":\"stealthPay\",\"pool\":\"{}\",\"valueWei\":\"{value}\",\"keyHash\":\"{}\"}}",
+            hex::encode(pool),
+            hex::encode(&note.key_hash)
+        ),
         Action::Rotate { next_root, .. } => format!(
             "{{\"kind\":\"rotate\",\"nextRoot\":\"{}\"}}",
             hex::encode(next_root)

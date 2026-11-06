@@ -15,14 +15,14 @@ use qday_ui::theme::{self, Theme};
 use qday_ui::widgets::{digit_in_slot, key_rect};
 use qday_wallet::counter::{FlashCounter, OneWayCounter};
 use qday_wallet::flash::layout;
-use qday_wallet::frame::{Action, CHAIN_ID, FrameTx, MlFrameTx};
+use qday_wallet::frame::{Action, CHAIN_ID, FrameTx, MlFrameTx, StealthNote};
 use qday_wallet::hex;
 use qday_wallet::keystore::KeyStore;
 use qday_wallet::mlkey::MlKeyStore;
 use qday_wallet::passcode::{Attempt, Code, Passcode};
 use qday_wallet::protocol::{Line, Request, Response, parse_response, request_line};
 use qday_wallet::settings::{CROSSES, Calibration, Scheme, Settings};
-use qday_wallet::stealth::{StealthSpend, pay_to, view_seed_for};
+use qday_wallet::stealth::{CIPHERTEXT_BYTES, StealthSpend, pay_to, view_seed_for};
 use qday_wallet::tokens;
 use qday_wallet::wallet::{MAIN_ACCOUNT, Wallet, WalletError};
 use qday_xmss::{PublicKey, keccak256, verify};
@@ -673,6 +673,80 @@ fn an_xmss_transfer_is_the_wrong_scheme_in_ml_dsa_mode() {
     assert_eq!(rig.last_response(), Response::Err(WalletError::WrongScheme));
     assert_eq!(rig.screen(), "wallet");
     assert_eq!(rig.counter(), 0);
+}
+
+// Paying a stealth note
+
+fn stealth_note() -> StealthNote {
+    StealthNote {
+        key_hash: [0xAB; 32],
+        view_tag: 7,
+        ciphertext: vec![0xC1; CIPHERTEXT_BYTES],
+    }
+}
+
+const NOTE_VALUE: u128 = 1_500_000_000_000_000_000;
+
+#[test]
+fn a_stealth_payment_shows_its_amount_and_the_pool() {
+    let tx = FrameTx::stealth_pay(SENDER, 0, 0, TO, NOTE_VALUE, stealth_note());
+    let shown = Shown::from_tx(&tx).expect("this fits");
+    let Review::Send { amount, unit, to } = shown.review() else {
+        panic!("a payment reads like a send");
+    };
+    assert_eq!((amount, unit), ("1.5", "ETH"));
+    assert_eq!(to, checksum_address(&TO));
+}
+
+#[test]
+fn an_approved_stealth_payment_gives_a_signature() {
+    let mut rig = rig();
+    let tx = FrameTx::stealth_pay(SENDER, 0, 0, TO, NOTE_VALUE, stealth_note());
+    let key: PublicKey = rig.app.wallet().active().expect("a key is active").key;
+    rig.request(&Request::SignFrame(tx.encode(&[])));
+    assert_eq!(rig.screen(), "review");
+    rig.approve(CODE);
+    let Response::Sig { signature, .. } = rig.last_response() else {
+        panic!("expected a signature, got {:?}", rig.host.sent);
+    };
+    assert!(verify(&key, &tx.sig_hash(), &signature));
+    assert_eq!(rig.counter(), 1);
+}
+
+#[test]
+fn a_stealth_payment_can_be_signed_in_ml_dsa_mode() {
+    let mut rig = switched_rig();
+    let tx = MlFrameTx::stealth_pay(SENDER, 1, TO, NOTE_VALUE, stealth_note());
+    rig.request(&Request::SignFrame(tx.encode(&[])));
+    assert_eq!(rig.screen(), "review");
+    rig.approve(CODE);
+    let Response::Sig { signature, .. } = rig.last_response() else {
+        panic!("expected a signature, got {:?}", rig.host.sent);
+    };
+    let key: [u8; 1312] = device_ml_key(&mut rig).try_into().expect("whole");
+    let signature: [u8; 2420] = signature.try_into().expect("whole");
+    assert!(qday_mldsa::verify(&key, &tx.sig_hash(), &signature));
+}
+
+#[test]
+fn a_stealth_payment_too_long_to_show_is_refused() {
+    let tx = MlFrameTx::stealth_pay(
+        SENDER,
+        1,
+        TO,
+        123_456_789_123_456_789_123_456_789,
+        stealth_note(),
+    );
+    assert!(Shown::from_ml_tx(&tx).is_none());
+    let tx = FrameTx::stealth_pay(
+        SENDER,
+        1,
+        0,
+        TO,
+        123_456_789_123_456_789_123_456_789,
+        stealth_note(),
+    );
+    assert!(Shown::from_tx(&tx).is_none());
 }
 
 // Switching scheme

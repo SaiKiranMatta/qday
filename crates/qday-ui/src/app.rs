@@ -158,7 +158,11 @@ impl Shown {
         }
         Some(Self {
             kind: ShownKind::Send,
-            summary: format!("Sent {amount}"),
+            summary: if tx.note.is_some() {
+                format!("Paid stealth note {amount}")
+            } else {
+                format!("Sent {amount}")
+            },
             detail: format!("to {}", short_address(&tx.to)),
             a: amount.trim_end_matches(" ETH").to_string(),
             b: checksum_address(&tx.to),
@@ -208,6 +212,23 @@ impl Shown {
                     detail: format!("to {}", short_address(to)),
                     a: amount.trim_end_matches(" ETH").to_string(),
                     b: checksum_address(to),
+                    c: String::new(),
+                    fee,
+                    unit: "ETH",
+                    rotation: false,
+                })
+            }
+            TxAction::StealthPay { pool, value, .. } => {
+                let amount = eth(*value);
+                if amount.len() > LONGEST_AMOUNT {
+                    return None;
+                }
+                Some(Self {
+                    kind: ShownKind::Send,
+                    summary: format!("Paid stealth note {amount}"),
+                    detail: format!("to {}", short_address(pool)),
+                    a: amount.trim_end_matches(" ETH").to_string(),
+                    b: checksum_address(pool),
                     c: String::new(),
                     fee,
                     unit: "ETH",

@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use qday_xmss::{Hash, keccak256};
 
 use crate::rlp::{Reader, put_bytes, put_list, put_uint};
+use crate::stealth::CIPHERTEXT_BYTES;
 
 /// The devnet's chain id.
 pub const CHAIN_ID: u64 = 1337;
@@ -32,6 +33,12 @@ const TOKEN_TRANSFER_DATA_BYTES: usize = 68;
 /// `createAccount(bytes32,bytes32)` on the account factory.
 const CREATE_SELECTOR: [u8; 4] = [0x18, 0x38, 0x15, 0xc8];
 const CREATE_DATA_BYTES: usize = 68;
+/// `pay(bytes32,bytes1,bytes)` on the stealth pool.
+const PAY_SELECTOR: [u8; 4] = [0x2f, 0x96, 0x05, 0x1c];
+/// The call's bytes before the ciphertext: the selector and four words.
+const PAY_HEAD_BYTES: usize = 132;
+/// Where the ciphertext's length sits, counted from after the selector.
+const PAY_TAIL_OFFSET: u64 = 96;
 const SPEND_DATA_BYTES: usize = 36;
 const ROTATE_DATA_BYTES: usize = 68;
 
@@ -44,12 +51,61 @@ const ML_VERIFY_LIMITS: (u64, u64) = (1_500_000, 0);
 /// A token transfer to a new holder uses about 120,000 gas, most of it the new balance slot.
 const TOKEN_TRANSFER_LIMITS: (u64, u64) = (80_000, 200_000);
 const ROTATE_LIMITS: (u64, u64) = (80_000, 200_000);
+/// A payment writes one new slot and logs the ciphertext.
+const STEALTH_PAY_LIMITS: (u64, u64) = (80_000, 200_000);
 /// A deploy frame runs in the validation prefix, so it must stay under the alt mempool's
 /// 500,000 state-gas budget. Creating a proxy account uses about 390,000 gas in all.
 const DEPLOY_LIMITS: (u64, u64) = (300_000, 400_000);
 
 /// "QDAY-ROTATE-V1", right-padded with zeros.
 const ROTATE_TAG: Hash = *b"QDAY-ROTATE-V1\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+
+/// What a stealth pool's `pay` call announces. Only the recipient can tell who it is for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StealthNote {
+    /// The hash of the note's one-time key.
+    pub key_hash: Hash,
+    /// A byte that lets the recipient skip most other people's notes.
+    pub view_tag: u8,
+    /// The X-Wing ciphertext the recipient opens.
+    pub ciphertext: Vec<u8>,
+}
+
+impl StealthNote {
+    /// The pool's `pay(bytes32,bytes1,bytes)` call.
+    fn call(&self) -> Vec<u8> {
+        let mut data = Vec::with_capacity(PAY_HEAD_BYTES + self.ciphertext.len());
+        data.extend_from_slice(&PAY_SELECTOR);
+        data.extend_from_slice(&self.key_hash);
+        data.push(self.view_tag);
+        data.extend_from_slice(&[0; 31]);
+        data.extend_from_slice(&word(PAY_TAIL_OFFSET));
+        data.extend_from_slice(&word(self.ciphertext.len() as u64));
+        data.extend_from_slice(&self.ciphertext);
+        data
+    }
+
+    /// Reads a `pay` call, refusing any other encoding of it.
+    fn parse(data: &[u8]) -> Option<Self> {
+        let ciphertext = data.get(PAY_HEAD_BYTES..)?;
+        if ciphertext.len() != CIPHERTEXT_BYTES {
+            return None;
+        }
+        let note = Self {
+            key_hash: Hash::try_from(&data[4..36]).ok()?,
+            view_tag: data[36],
+            ciphertext: ciphertext.to_vec(),
+        };
+        (note.call() == data).then_some(note)
+    }
+}
+
+/// A number as a 32-byte word.
+fn word(value: u64) -> [u8; 32] {
+    let mut out = [0; 32];
+    out[24..].copy_from_slice(&value.to_be_bytes());
+    out
+}
 
 /// What the third frame does.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,6 +125,15 @@ pub enum Action {
         to: Address,
         /// The amount in the token's smallest unit.
         amount: u128,
+    },
+    /// Pays `value` wei into the stealth pool at `pool`.
+    StealthPay {
+        /// The pool.
+        pool: Address,
+        /// The amount in wei.
+        value: u128,
+        /// What the payment announces.
+        note: StealthNote,
     },
     /// Moves the account to a new tree.
     Rotate {
@@ -145,6 +210,24 @@ impl FrameTx {
             nonce,
             index,
             Action::TokenTransfer { token, to, amount },
+        )
+    }
+
+    /// A stealth payment with the default fees.
+    #[must_use]
+    pub fn stealth_pay(
+        sender: Address,
+        nonce: u64,
+        index: u32,
+        pool: Address,
+        value: u128,
+        note: StealthNote,
+    ) -> Self {
+        Self::new(
+            sender,
+            nonce,
+            index,
+            Action::StealthPay { pool, value, note },
         )
     }
 
@@ -225,6 +308,7 @@ impl FrameTx {
             Action::Transfer { .. }
             | Action::TokenTransfer { .. }
             | Action::Create { .. }
+            | Action::StealthPay { .. }
             | Action::Other { .. } => sig_hash,
         }
     }
@@ -357,6 +441,14 @@ impl FrameTx {
                 value: 0,
                 data: token_transfer_call(to, *amount),
             },
+            Action::StealthPay { pool, value, note } => Frame {
+                mode: MODE_SENDER,
+                flags: 0,
+                target: Some(*pool),
+                limits: STEALTH_PAY_LIMITS,
+                value: *value,
+                data: note.call(),
+            },
             Action::Rotate {
                 next_root,
                 next_pub_seed,
@@ -445,10 +537,12 @@ pub struct MlFrameTx {
     pub sender: Address,
     /// The transaction nonce.
     pub nonce: u64,
-    /// The recipient.
+    /// The recipient, or the pool for a stealth payment.
     pub to: Address,
     /// The amount in wei.
     pub value: u128,
+    /// What a stealth payment announces. `None` for a plain transfer.
+    pub note: Option<StealthNote>,
     /// The priority fee per gas.
     pub max_priority_fee: u128,
     /// The fee cap per gas.
@@ -464,8 +558,24 @@ impl MlFrameTx {
             nonce,
             to,
             value,
+            note: None,
             max_priority_fee: DEFAULT_FEE,
             max_fee: DEFAULT_FEE,
+        }
+    }
+
+    /// A stealth payment with the default fees.
+    #[must_use]
+    pub fn stealth_pay(
+        sender: Address,
+        nonce: u64,
+        pool: Address,
+        value: u128,
+        note: StealthNote,
+    ) -> Self {
+        Self {
+            note: Some(note),
+            ..Self::transfer(sender, nonce, pool, value)
         }
     }
 
@@ -515,6 +625,11 @@ impl MlFrameTx {
         ParsedFrame::read(&mut frames)?;
         let transfer = ParsedFrame::read(&mut frames)?;
         frames.finish().ok()?;
+        let note = if transfer.data.is_empty() {
+            None
+        } else {
+            Some(StealthNote::parse(transfer.data)?)
+        };
 
         payload.list().ok()?;
         let mut fees = payload.list().ok()?;
@@ -526,6 +641,7 @@ impl MlFrameTx {
             nonce,
             to: transfer.target?,
             value: transfer.value,
+            note,
             max_priority_fee,
             max_fee,
         })
@@ -560,9 +676,13 @@ impl MlFrameTx {
                 mode: MODE_SENDER,
                 flags: 0,
                 target: Some(self.to),
-                limits: TRANSFER_LIMITS,
+                limits: if self.note.is_some() {
+                    STEALTH_PAY_LIMITS
+                } else {
+                    TRANSFER_LIMITS
+                },
                 value: self.value,
-                data: Vec::new(),
+                data: self.note.as_ref().map_or_else(Vec::new, StealthNote::call),
             },
         ]
     }
@@ -675,6 +795,15 @@ impl<'a> ParsedFrame<'a> {
             return Action::Transfer {
                 to,
                 value: self.value,
+            };
+        }
+        if let (Some(pool), STEALTH_PAY_LIMITS, Some(note)) =
+            (self.target, self.limits, StealthNote::parse(self.data))
+        {
+            return Action::StealthPay {
+                pool,
+                value: self.value,
+                note,
             };
         }
         if let Some((token, to, amount)) = self.token_transfer() {

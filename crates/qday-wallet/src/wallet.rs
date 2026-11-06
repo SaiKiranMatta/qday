@@ -359,7 +359,10 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
                     return Err(WalletError::RotationNeeded);
                 }
             }
-            Action::Transfer { .. } | Action::TokenTransfer { .. } | Action::Other { .. } => {
+            Action::Transfer { .. }
+            | Action::TokenTransfer { .. }
+            | Action::StealthPay { .. }
+            | Action::Other { .. } => {
                 if next >= RESERVED_FROM {
                     return Err(WalletError::RotationNeeded);
                 }
