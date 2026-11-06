@@ -15,6 +15,7 @@ export function useAccount(status: DeviceStatus | null, tokens: Token[]) {
   const [chain, setChain] = useState<ChainState>("loading");
   const [error, setError] = useState<string | null>(null);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [activityReady, setActivityReady] = useState(false);
   const scanner = useRef<{ key: string; scan: ActivityScanner } | null>(null);
 
   const root = status?.root ?? null;
@@ -42,9 +43,13 @@ export function useAccount(status: DeviceStatus | null, tokens: Token[]) {
       setChain("live");
       setError(null);
       const key = `${address}|${tokens.map((t) => t.id).join(",")}`;
-      if (scanner.current?.key !== key) scanner.current = { key, scan: new ActivityScanner(address, tokens) };
+      if (scanner.current?.key !== key) {
+        scanner.current = { key, scan: new ActivityScanner(address, tokens) };
+        setActivityReady(false);
+      }
       try {
         setActivity(await scanner.current.scan.update());
+        setActivityReady(true);
       } catch (e) {
         console.warn("[qday] activity scan failed; will retry", e);
       }
@@ -75,6 +80,7 @@ export function useAccount(status: DeviceStatus | null, tokens: Token[]) {
         balance: onChain.balances[NATIVE_ID] ?? "0",
         balances: onChain.balances,
         activity,
+        activityReady,
       }
     : EMPTY_ACCOUNT;
 

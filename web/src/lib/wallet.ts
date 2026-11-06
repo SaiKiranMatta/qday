@@ -29,6 +29,8 @@ export interface AccountView {
   /** Balance per token id. Tokens missing here show as 0. */
   balances: Record<string, string>;
   activity: ActivityItem[];
+  /** False until the first scan of the chain finishes, so an empty list isn't mistaken for no activity. */
+  activityReady: boolean;
 }
 
 /** Dev only: `?mock` shows a sample device and account so the layout can be reviewed without hardware. */
@@ -51,6 +53,14 @@ export const MOCK_ACCOUNT: AccountView = {
     { id: "a5", kind: "refresh", at: "2026-11-05T18:05:00Z", status: "confirmed" },
     { id: "a6", kind: "received", amount: { tokenId: "native", value: "1.50" }, counterparty: "0x51B7…3A52", at: "2026-11-05T10:15:00Z", status: "confirmed" },
   ],
+  activityReady: true,
 };
 
-export const EMPTY_ACCOUNT: AccountView = { name: "Account 1", address: "0x", balance: "—", balances: {}, activity: [] };
+export const EMPTY_ACCOUNT: AccountView = {
+  name: "Account 1",
+  address: "0x",
+  balance: "—",
+  balances: {},
+  activity: [],
+  activityReady: false,
+};

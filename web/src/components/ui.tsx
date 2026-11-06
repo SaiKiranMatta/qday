@@ -50,11 +50,3 @@ const DOT: Record<"ok" | "idle" | "busy" | "bad", string> = {
 export function StatusDot({ tone }: { tone: keyof typeof DOT }) {
   return <span className={`inline-block size-2 rounded-full ${DOT[tone]}`} />;
 }
-
-export function Badge({ children }: { children: ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-2 rounded-full border border-line px-3 py-1 text-xs text-muted">
-      {children}
-    </span>
-  );
-}

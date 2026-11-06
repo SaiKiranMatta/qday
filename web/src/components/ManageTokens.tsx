@@ -35,7 +35,7 @@ export function ManageTokens({ tokens, onClose }: { tokens: TokenList; onClose: 
                   <div className="text-sm font-medium">{token.name}</div>
                   <div className="text-xs text-muted">
                     {token.symbol}
-                    {token.custom && " · added by you"}
+                    {token.custom && " · Added by you"}
                   </div>
                 </div>
                 {token.custom && (
@@ -62,29 +62,52 @@ export function ManageTokens({ tokens, onClose }: { tokens: TokenList; onClose: 
         </div>
 
         <div className="mt-5 border-t border-line/60 pt-5">
-          <div className="text-sm font-medium">Add a token</div>
+          <h3 className="text-sm font-medium">Add a token</h3>
+          <p className="mt-1 text-xs text-muted">Any ERC-20 on this devnet. Your QDay shows unknown tokens with a warning.</p>
+          <label htmlFor="token-address" className="mt-4 block text-xs text-muted">
+            Contract address
+          </label>
           <input
+            id="token-address"
             value={address}
             onChange={(e) => setAddress(e.target.value.trim())}
-            placeholder="Contract address (0x…)"
-            className="mt-3 w-full rounded-xl bg-surface-2 px-3 py-2.5 font-mono text-xs outline-none placeholder:text-muted focus:ring-1 focus:ring-alabaster/25"
+            placeholder="0x…"
+            autoComplete="off"
+            spellCheck={false}
+            className="mt-1.5 w-full rounded-xl bg-surface-2 px-3 py-2.5 font-mono text-xs outline-none placeholder:text-muted focus:ring-1 focus:ring-alabaster/25"
           />
-          <div className="mt-2 flex gap-2">
-            <input
-              value={symbol}
-              onChange={(e) => setSymbol(e.target.value)}
-              placeholder="Symbol"
-              className="min-w-0 flex-1 rounded-xl bg-surface-2 px-3 py-2.5 text-sm outline-none placeholder:text-muted focus:ring-1 focus:ring-alabaster/25"
-            />
-            <input
-              value={decimals}
-              onChange={(e) => setDecimals(e.target.value.trim())}
-              placeholder="Decimals"
-              className="w-24 rounded-xl bg-surface-2 px-3 py-2.5 text-sm outline-none placeholder:text-muted focus:ring-1 focus:ring-alabaster/25"
-            />
+          {address && !isAddress(address) && (
+            <div className="mt-1.5 text-xs text-bad">Enter a full 0x address, 42 characters.</div>
+          )}
+          <div className="mt-3 flex gap-2">
+            <div className="min-w-0 flex-1">
+              <label htmlFor="token-symbol" className="block text-xs text-muted">
+                Symbol
+              </label>
+              <input
+                id="token-symbol"
+                value={symbol}
+                onChange={(e) => setSymbol(e.target.value)}
+                placeholder="DAI"
+                autoComplete="off"
+                className="mt-1.5 w-full rounded-xl bg-surface-2 px-3 py-2.5 text-sm outline-none placeholder:text-muted focus:ring-1 focus:ring-alabaster/25"
+              />
+            </div>
+            <div className="w-24">
+              <label htmlFor="token-decimals" className="block text-xs text-muted">
+                Decimals
+              </label>
+              <input
+                id="token-decimals"
+                value={decimals}
+                onChange={(e) => setDecimals(e.target.value.trim())}
+                inputMode="numeric"
+                autoComplete="off"
+                className="mt-1.5 w-full rounded-xl bg-surface-2 px-3 py-2.5 text-sm tabular-nums outline-none placeholder:text-muted focus:ring-1 focus:ring-alabaster/25"
+              />
+            </div>
           </div>
-          {address && !isAddress(address) && <div className="mt-2 text-xs text-bad">That isn't a contract address.</div>}
-          <Button className="mt-3 w-full" variant="secondary" disabled={!valid} onClick={add}>
+          <Button className="mt-4 w-full" variant="secondary" disabled={!valid} onClick={add}>
             Add token
           </Button>
         </div>
