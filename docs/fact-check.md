@@ -30,6 +30,16 @@ Checked 2026-11-05. Verdicts: ✅ holds · ⚠️ partly right / needs rewording
 | 20 | Restore "skip ahead 64 pages" makes reuse impossible | ⚠️ | Safe for pages below the true on-chain `nextIndex`. **Residual risk** if a lost device holds >64 signed-but-unsent txs. See [risks](risks-and-blockers.md#r7) | design spec §8 |
 | 21 | "Accounts carry on forever with the same address" (book rotation) | ✅ | By design (`rotate` on a reserved page) | design spec §5 |
 
+## Beyond the pitch
+
+Claims the README makes that the original pitch didn't. Checked 2026-11-07.
+
+| # | Claim | Verdict | What we found | Source |
+|---|-------|---------|---------------|--------|
+| 22 | "As far as we can find, the first hardware wallet that signs for Ethereum accounts with no ECDSA key at all" | ⚠️ | Holds in this scoped form, against what we found. QRL's Ledger app has signed XMSS on a hardware wallet for years, but for QRL's own chain. ZKNox's Ethereum work uses hybrid ECDSA plus Dilithium or Falcon accounts in software, with hardware wallets a stated goal. Ledger said it was still working on side-channel countermeasures for ML-DSA and Falcon on its secure elements. A search can't prove a negative, so keep "as far as we can find" | [QRL Ledger docs](https://docs.theqrl.org/wallet/ledger-nano-s/), [PQTS breakout #5](https://ethereum-magicians.org/t/post-quantum-transaction-signature-pqts-breakout-5/28049), [Ledger CTO interview](https://cryptobriefing.com/ledger-cto-nist-post-quantum-signatures-blockchain/) |
+| 23 | Post-quantum stealth-address proposals protect finding a payment but not spending it | ✅ / ⚠️ | ERC-8441 (draft) adds ML-KEM-768 to ERC-5564's announcement layer and keeps spending on secp256k1 ECDSA. Hackathon projects such as SPECTER also use ML-KEM-768; we haven't checked how each spends, so the README says "proposals" | [ERC-8441](https://eips.ethereum.org/EIPS/eip-8441), [ethresear.ch](https://ethresear.ch/t/post-quantum-threats-to-ethereum-privacy/24450), [SPECTER](https://ethglobal.com/showcase/specter-oky6k) |
+| 24 | "Proven quantum-secure" | ❌ | Don't say it. XMSS's security reduces to properties of the hash function and ML-DSA-44 is a NIST standard, but QDay's XMSS is its own keccak256 variant, the one-time ML-DSA signer is an unreviewed variant, and nothing here is audited. The vendored ML-DSA verifier's formal checks no longer anchor after QDay's patch (`contracts/mldsa/NOTICE.md`). Say "quantum-safe by construction": every key is post-quantum | `docs/xmss-spec.md`, `contracts/mldsa/NOTICE.md` |
+
 ## Corrections to make in the pitch
 
 1. Item 9: drop "10–15×" and use our measured gas table.

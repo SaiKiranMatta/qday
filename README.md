@@ -6,6 +6,18 @@ nothing else: there is no ECDSA key anywhere. It also takes private payments: an
 published private address, each payment lands somewhere only the owner can find, and only the device
 can spend it.
 
+- **First of its kind.** As far as we can find, the first hardware wallet that signs for Ethereum
+  accounts with no ECDSA key at all. Earlier post-quantum hardware wallets sign for other chains, and
+  Ethereum's post-quantum accounts so far keep ECDSA beside the new key
+  ([fact-check](docs/fact-check.md#beyond-the-pitch), item 22).
+- **Quantum-safe by construction.** Every key QDay uses is post-quantum: XMSS, whose security rests on
+  the hash function alone, and ML-DSA-44, NIST's standard. Nothing a quantum computer is known to break
+  holds any authority over the funds.
+- **Privacy built in, post-quantum end to end.** Private payments hide who was paid with X-Wing
+  (ML-KEM-768 with X25519) and are spent with one-time ML-DSA keys, so neither finding nor spending a
+  payment rests on an elliptic curve. Post-quantum stealth-address proposals so far protect only the
+  finding (item 23).
+
 **[Open the wallet](https://qday.unitlabs.xyz)** · [Roadmap](docs/ROADMAP.md) · [Signature spec](docs/xmss-spec.md) · [Measured on-chain](docs/devnet.md) · [For AI reviewers](AGENTS.md)
 
 ![QDay: the web wallet and the device's review screen](docs/images/hero.png)
