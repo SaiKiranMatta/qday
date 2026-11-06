@@ -246,6 +246,22 @@ fn card_rows(c: &mut Canvas, top: f32, rows: &[Row]) -> f32 {
     top + h
 }
 
+/// The coin for what moved with a signed or refused badge, or just the tick when nothing moved.
+fn activity_icon(c: &mut Canvas, cx: f32, cy: f32, r: f32, item: &Activity, behind: Color) {
+    let p = p();
+    if coin_logo(c, cx, cy, r, item.coin, &CAPTION, (p.fill, p.text)) {
+        status_badge(
+            c,
+            cx + r * 0.75,
+            cy + r * 0.75,
+            item.approved,
+            (p.success, p.muted, behind),
+        );
+    } else {
+        tick_circle(c, cx, cy, r, item.approved);
+    }
+}
+
 fn tick_circle(c: &mut Canvas, cx: f32, cy: f32, r: f32, ok: bool) {
     let p = p();
     if ok {
@@ -263,19 +279,18 @@ pub fn home(
     c: &mut Canvas,
     s: &Status,
     root: &[u8; 32],
-    pending: bool,
     latest: Option<&Activity>,
     pressed: Option<usize>,
 ) {
     let p = p();
     c.clear(p.bg);
     header(c, s);
-    c.text(16, 48, "Account key", &ts(&CAPTION, p.muted));
+    c.text(16, 54, "Account key", &ts(&CAPTION, p.muted));
     let (head, tail) = hex_parts(root);
     runs(
         c,
         14,
-        84,
+        92,
         &[
             (head.as_str(), ts(&DISPLAY, p.text)),
             ("...", ts(&DISPLAY, p.muted)),
@@ -283,68 +298,42 @@ pub fn home(
         ],
     );
     if s.connected {
-        c.circle(22.0, 99.0, 6.0, p.success, 255);
-        icon_check(c, 22.0, 99.0, 5.5, Color::hex(0xFFFFFF));
-        c.text(33, 104, "Ready to sign", &ts(&BODY_STRONG, p.success));
+        c.circle(22.0, 111.0, 6.0, p.success, 255);
+        icon_check(c, 22.0, 111.0, 5.5, Color::hex(0xFFFFFF));
+        c.text(33, 116, "Ready to sign", &ts(&BODY_STRONG, p.success));
     } else {
-        c.circle(22.0, 99.0, 4.0, p.muted, 255);
-        c.text(33, 104, "Plug in USB to sign", &ts(&BODY_STRONG, p.muted));
+        c.circle(22.0, 111.0, 4.0, p.muted, 255);
+        c.text(33, 116, "Plug in USB to sign", &ts(&BODY_STRONG, p.muted));
     }
 
-    let used = text!(8, "{}", s.next_index);
-    let tree = text!(8, "{}", s.tree);
-    let tree_note = if pending {
-        "  next tree ready"
-    } else {
-        "  rotates at 900"
-    };
-    let cards: [(&str, &str, &str); 2] = [
-        ("Signatures", used.as_str(), " / 1,024"),
-        ("Tree", tree.as_str(), tree_note),
-    ];
-    for (i, (title, a, b)) in cards.iter().enumerate() {
-        let r = Rect::new(12.0 + i as f32 * 152.0, 116.0, 144.0, 50.0);
-        c.round_rect(r, 12.0, p.card, 255);
-        c.text(
-            r.x as i32 + 12,
-            r.y as i32 + 18,
-            title,
-            &ts(&CAPTION, p.text),
-        );
-        c.circle(r.x + r.w - 16.0, r.y + 14.0, 7.5, p.text, 255);
-        if i == 0 {
-            key_glyph(c, r.x + r.w - 16.0, r.y + 14.0, p.bg);
-        } else {
-            tree_glyph(c, r.x + r.w - 16.0, r.y + 14.0, p.bg);
-        }
-        runs(
-            c,
-            r.x as i32 + 12,
-            r.y as i32 + 41,
-            &[(a, ts(&TITLE, p.text)), (b, ts(&CAPTION, p.muted))],
-        );
-    }
-
-    let row = Rect::new(12.0, 174.0, 296.0, 28.0);
-    c.round_rect(row, 12.0, p.card, 255);
+    // The latest thing the device signed or refused, with its detail; the Activity tab has the rest.
+    let card = Rect::new(12.0, 132.0, 296.0, 68.0);
+    c.round_rect(card, 12.0, p.card, 255);
+    c.text(26, 150, "Latest", &ts(&CAPTION, p.muted));
     match latest {
         Some(a) => {
-            tick_circle(c, 28.0, 188.0, 7.0, a.approved);
-            c.text(42, 193, a.title, &ts(&BODY_STRONG, p.text));
             if let Some(i) = a.index {
                 c.text_right(
-                    286,
-                    193,
+                    294,
+                    150,
                     text!(8, "#{i:04}").as_str(),
                     &ts(&CAPTION, p.muted),
                 );
             }
+            activity_icon(c, 34.0, 179.0, 11.0, a, p.card);
+            c.text(54, 174, a.title, &ts(&BODY_STRONG, p.text));
+            c.text(54, 190, a.detail, &ts(&CAPTION, p.muted));
         }
         None => {
-            c.text(26, 193, "No activity yet", &ts(&BODY_STRONG, p.muted));
+            c.text(26, 173, "Nothing signed yet", &ts(&BODY_STRONG, p.text));
+            c.text(
+                26,
+                189,
+                "Requests from your laptop show up here",
+                &ts(&CAPTION, p.muted),
+            );
         }
     }
-    chevron(c, 296.0, 188.0, 3.5, p.text, false);
     controls(c, &nav::tab_keys(Tab::Home, false, Setting::Theme), pressed);
 }
 
@@ -450,7 +439,7 @@ pub fn activity(
     }
     for (i, item) in items.iter().skip(offset).take(ACTIVITY_ROWS).enumerate() {
         let y = rows_y + i as f32 * 35.0;
-        tick_circle(c, 32.0, y + 17.0, 11.0, item.approved);
+        activity_icon(c, 32.0, y + 17.0, 11.0, item, p.card);
         c.text(52, y as i32 + 15, item.title, &ts(&BODY_STRONG, p.text));
         c.text(52, y as i32 + 29, item.detail, &ts(&CAPTION, p.muted));
         if let Some(index) = item.index {

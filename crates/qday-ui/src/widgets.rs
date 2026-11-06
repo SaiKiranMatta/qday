@@ -201,6 +201,59 @@ pub fn eth_coin(c: &mut Canvas, cx: f32, cy: f32, r: f32, coin: Color) {
     c.line(cx - w, cy, cx + w, cy, r * 0.09, white, 200);
 }
 
+/// A coin for what an activity row moved: ETH's diamond, a known token's mark, or a lettered coin.
+/// `plain` and `ink` colour the coin for an unknown token. Returns false for `Coin::None`.
+pub fn coin_logo(
+    c: &mut Canvas,
+    cx: f32,
+    cy: f32,
+    r: f32,
+    coin: crate::screens::Coin,
+    font: &'static crate::fonts::Font,
+    (plain, ink): (Color, Color),
+) -> bool {
+    use crate::screens::Coin;
+    let white = Color::hex(0xFFFFFF);
+    let (fill, mark, mark_color) = match coin {
+        Coin::None => return false,
+        Coin::Eth => {
+            eth_coin(c, cx, cy, r, Color::hex(0x627EEA));
+            return true;
+        }
+        Coin::Token("USDC") => (Color::hex(0x2775CA), "$", white),
+        Coin::Token("WBTC") => (Color::hex(0xF7931A), "B", white),
+        Coin::Token(_) | Coin::UnknownToken => (plain, "?", ink),
+    };
+    c.circle(cx, cy, r, fill, 255);
+    let mark = match coin {
+        Coin::Token(symbol) if !matches!(symbol, "USDC" | "WBTC") => symbol.get(..1).unwrap_or("?"),
+        _ => mark,
+    };
+    let style = crate::canvas::TextStyle::new(font, mark_color);
+    c.text_centered(cx as i32, (cy + r * 0.42) as i32, mark, &style);
+    true
+}
+
+/// A small badge on a coin's lower right: a check when it was signed, a cross when it was refused.
+/// `ring` is the colour behind, so the badge stands clear of the coin.
+pub fn status_badge(
+    c: &mut Canvas,
+    cx: f32,
+    cy: f32,
+    signed: bool,
+    (yes, no, ring): (Color, Color, Color),
+) {
+    let r = 5.5;
+    c.circle(cx, cy, r + 1.6, ring, 255);
+    c.circle(cx, cy, r, if signed { yes } else { no }, 255);
+    let white = Color::hex(0xFFFFFF);
+    if signed {
+        icon_check(c, cx, cy, r, white);
+    } else {
+        icon_cross(c, cx, cy, r, white);
+    }
+}
+
 pub fn key_glyph(c: &mut Canvas, cx: f32, cy: f32, color: Color) {
     c.ring(cx - 2.5, cy, 2.6, 1.4, color, 255);
     c.line(cx, cy, cx + 5.0, cy, 1.4, color, 255);

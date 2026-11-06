@@ -64,30 +64,35 @@ fn every_screen() -> Vec<(&'static str, Draw)> {
             title: "Send 0.5 ETH",
             detail: "to 0x5aAe...eAed",
             index: Some(66),
+            coin: Coin::Eth,
         },
         Activity {
             approved: false,
             title: "Rejected",
             detail: "You rejected it",
             index: None,
+            coin: Coin::None,
         },
         Activity {
             approved: true,
             title: "Call transfer",
             detail: "0x1f98...F984",
             index: Some(65),
+            coin: Coin::None,
         },
         Activity {
             approved: true,
             title: "Send 1.2 ETH",
             detail: "to 0xd8dA...6045",
             index: Some(64),
+            coin: Coin::Eth,
         },
         Activity {
             approved: true,
             title: "Send 2 ETH",
             detail: "to 0xd8dA...6045",
             index: Some(63),
+            coin: Coin::Eth,
         },
     ];
     let latest = Activity {
@@ -95,12 +100,12 @@ fn every_screen() -> Vec<(&'static str, Draw)> {
         title: "Send 0.5 ETH",
         detail: "",
         index: Some(66),
+        coin: Coin::Eth,
     };
     vec![
         (
             "home",
-            Box::new(move |c: &mut Canvas| home(c, &status, &ROOT, false, Some(&latest), None))
-                as Draw,
+            Box::new(move |c: &mut Canvas| home(c, &status, &ROOT, Some(&latest), None)) as Draw,
         ),
         (
             "home offline",
@@ -112,7 +117,6 @@ fn every_screen() -> Vec<(&'static str, Draw)> {
                         ..status
                     },
                     &ROOT,
-                    true,
                     None,
                     Some(0),
                 )
