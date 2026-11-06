@@ -102,6 +102,28 @@ The wallet's limits:
   pasted is what decides who gets paid, so a page that swaps it can't be caught on the device.
 - The view key stays in the page's memory, so each visit asks the device for it again.
 
+## Real board
+
+On 2026-11-07 the board ran the firmware with its framebuffer in PSRAM. Everything below went through the
+chain's own gateway, signed on the board with its keys and passcode.
+
+| Measure | Framebuffer in internal RAM | Framebuffer in PSRAM |
+|---|---|---|
+| Stack free, idle | 25,252 bytes | 172,780 bytes |
+| Full redraw, middle timing per screen | 59 to 98 ms | 64 to 104 ms |
+| Worst redraw | 127.6 ms | 133.6 ms |
+| Frame with no changes | 4.2 ms | 5.8 ms |
+
+| Transaction | Scheme | Total gas |
+|---|---|---|
+| Create account | XMSS | 471,406 |
+| 0.001 ETH transfer | XMSS | 193,679 |
+| 0.0125 ETH transfer | ML-DSA | 1,308,782 |
+| 0.002 ETH transfer, after switching back | XMSS | 191,993 |
+
+Switching to ML-DSA and back left the XMSS key and counter unchanged. The board and the chain agreed on the
+next signature throughout. Private payments and the web wallet have not run on the board yet.
+
 ## Public reference network (not our target)
 
 ethrex hegota-testnet: chain id 8141, RPC `https://rpc1.privacy.ethrex.xyz`, explorer
