@@ -75,7 +75,7 @@ fn sign_next(wallet: &mut TestWallet) -> (u32, [u8; 2500], Hash) {
         .expect("the transaction is fine");
     let proof = proof(wallet);
     let signature = wallet.sign(&review, proof).expect("the flash is healthy");
-    (index, signature, review.message)
+    (index, signature, *review.message())
 }
 
 /// Moves the counter so the next key is `index`.
@@ -214,13 +214,13 @@ fn the_device_reports_what_the_transaction_really_does() {
         .review(&transfer(0))
         .expect("the transaction is fine");
     assert_eq!(
-        review.tx.action,
+        review.tx().action,
         Action::Transfer {
             to: TO,
             value: 1000
         }
     );
-    assert_eq!(review.message, review.tx.sig_hash());
+    assert_eq!(*review.message(), review.tx().sig_hash());
 }
 
 #[test]
@@ -453,11 +453,11 @@ fn a_rotation_to_the_prepared_key_signs_the_rotation_message() {
     let next = wallet.prepare(|_| {}).expect("the flash is healthy");
     let raw = rotation(&mut wallet, 1008, &next);
     let review = wallet.review(&raw).expect("the rotation is fine");
-    assert_ne!(review.message, review.tx.sig_hash());
-    assert_eq!(review.message, review.tx.signing_message());
+    assert_ne!(*review.message(), review.tx().sig_hash());
+    assert_eq!(*review.message(), review.tx().signing_message());
     let proof = proof(&mut wallet);
     let signature = wallet.sign(&review, proof).expect("the flash is healthy");
-    assert!(verify(&active, &review.message, &signature));
+    assert!(verify(&active, review.message(), &signature));
 }
 
 #[test]
@@ -499,7 +499,7 @@ fn transfers_keep_signing_the_plain_hash_while_a_tree_is_prepared() {
     let review = wallet
         .review(&transfer(0))
         .expect("the transaction is fine");
-    assert_eq!(review.message, review.tx.sig_hash());
+    assert_eq!(*review.message(), review.tx().sig_hash());
 }
 
 #[test]
