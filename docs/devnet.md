@@ -97,7 +97,7 @@ The wallet's limits:
 
 - Private payments carry ETH only, and ML-DSA accounts can't send tokens.
 - Only a network with a dev key can use private payments or create ML-DSA accounts, because the dev key
-  submits claims and deploys the accounts. That means the local devnet.
+  submits claims and deploys the accounts. That means QDay's own devnets.
 - The device shows the amount and the pool for a private payment, not the recipient. The address the person
   pasted is what decides who gets paid, so a page that swaps it can't be caught on the device.
 - The view key stays in the page's memory, so each visit asks the device for it again.
