@@ -4,7 +4,7 @@ Ranked by how likely each one is to sink the demo. Owner key: **P1** Chain · **
 
 | ID | Risk / blocker | Severity | Mitigation | Owner |
 |----|----------------|----------|------------|-------|
-| <a id="r1"></a>R1 | **XMSS verify gas.** The verifier targets 85-109k gas with keccak256. The public 100,000 `MAX_VERIFY_GAS` limit is not a design target | Medium | Measure it in the Foundry tests. Expected VERIFY frame: about 125-129k gas | P1 |
+| <a id="r1"></a>R1 | **XMSS verify gas.** In Foundry the verifier uses 68,537-87,297 gas, 77,726 on average over 32 signatures. The public 100,000 `MAX_VERIFY_GAS` limit is not a design target | Medium | Measure the whole VERIFY frame on the devnet, where about 125-129k gas is expected | P1 |
 | R2 | **Solidity can't emit EIP-8141 opcodes** (`APPROVE` 0xaa, `TXPARAM` 0xb0, `SIGDATACOPY` 0xb5) | High | The account deploys six tiny helper contracts from fixed runtime code and calls them. The verifier uses no new opcodes, so Foundry can test it | P1 |
 | R3 | **No local EVM supports frame txs** (anvil/hardhat) | High | Foundry tests use `vm.etch` stand-ins for the helpers with real signatures. Real frame behaviour is only tested on the devnet, with `scripts/frame-demo.sh` | P1 |
 | R4 | **Devnet instability**: the frame tx wire format isn't settled (ethrex's chain moved 81410 → 8141 and was "upgraded to current spec"); faucets have broken | High | Pin the client version (`web3_clientVersion`) in `docs/devnet.md`. Cross-check the encoding with `@jaw.id/frametx-kit`. Keep a funded key and a recorded video. If possible, run our own node as a backup | P1 |

@@ -22,7 +22,8 @@ and skips ahead 64 keys. Keys 1008-1023 are reserved for rotating to a new tree 
 
 ## Status
 
-Step 1 of 8: the signature scheme is done, with the test vectors passing.
+Step 2 of 8: the signature scheme and the contracts are done, with their tests passing. The contracts
+have only run in Foundry so far, against stand-ins for the frame opcodes.
 
 ## Repository layout
 
@@ -51,6 +52,17 @@ Step 1 of 8: the signature scheme is done, with the test vectors passing.
 
 ```bash
 cargo test -p qday-xmss
+```
+
+```bash
+cd contracts && forge test
+```
+
+The contract tests check real signatures from `contracts/test/fixtures/signatures.json`. To regenerate
+them, run this from the repository root:
+
+```bash
+cargo run -p qday-xmss --example contract_fixtures > contracts/test/fixtures/signatures.json
 ```
 
 ## Key derivation note

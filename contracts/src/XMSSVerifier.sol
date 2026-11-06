@@ -6,11 +6,7 @@ pragma solidity 0.8.28;
 ///      Chain and node hashes use bytes 0x00-0x7f. The leaf hash input starts at 0x80.
 contract XMSSVerifier {
     /// @notice Returns true if `sig` is a valid signature of `message`. Malformed input is false.
-    function verify(bytes32 root, bytes32 pubSeed, bytes32 message, bytes calldata sig)
-        external
-        pure
-        returns (bool)
-    {
+    function verify(bytes32 root, bytes32 pubSeed, bytes32 message, bytes calldata sig) external pure returns (bool) {
         assembly {
             /// Finishes chain `chain` from step `digit` and stores its end for the leaf hash.
             /// `leafBits` is the one-time key's place in the address.

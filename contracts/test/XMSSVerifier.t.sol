@@ -10,8 +10,7 @@ contract XMSSVerifierTest is TestBase {
     XMSSVerifier private verifier;
     bytes32 private root;
     bytes32 private pubSeed;
-    bytes32 private constant VECTOR_MESSAGE =
-        0x1111111111111111111111111111111111111111111111111111111111111111;
+    bytes32 private constant VECTOR_MESSAGE = 0x1111111111111111111111111111111111111111111111111111111111111111;
 
     function setUp() public {
         _loadFixtures();
@@ -48,15 +47,11 @@ contract XMSSVerifierTest is TestBase {
     }
 
     function test_another_root_is_false() public view {
-        _assertFalse(
-            verifier.verify(_word("root1"), pubSeed, _word("hashA"), _bytes("sig5")), "accepted"
-        );
+        _assertFalse(verifier.verify(_word("root1"), pubSeed, _word("hashA"), _bytes("sig5")), "accepted");
     }
 
     function test_another_pub_seed_is_false() public view {
-        _assertFalse(
-            verifier.verify(root, _word("pubSeed1"), _word("hashA"), _bytes("sig5")), "accepted"
-        );
+        _assertFalse(verifier.verify(root, _word("pubSeed1"), _word("hashA"), _bytes("sig5")), "accepted");
     }
 
     function test_changing_any_byte_is_false() public view {
