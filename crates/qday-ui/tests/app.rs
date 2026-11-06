@@ -10,7 +10,7 @@ use qday_ui::app::{App, Host, Light, Shown};
 use qday_ui::fb::Framebuffer;
 use qday_ui::format::checksum_address;
 use qday_ui::nav::Setting;
-use qday_ui::screens::{self, Review};
+use qday_ui::screens::{self, Coin, Review};
 use qday_ui::theme::{self, Theme};
 use qday_ui::widgets::{digit_in_slot, key_rect};
 use qday_wallet::counter::{FlashCounter, OneWayCounter};
@@ -711,6 +711,32 @@ fn an_approved_stealth_payment_gives_a_signature() {
     };
     assert!(verify(&key, &tx.sig_hash(), &signature));
     assert_eq!(rig.counter(), 1);
+}
+
+#[test]
+fn a_stealth_payment_shows_as_eth_in_the_activity_list() {
+    let mut rig = rig();
+    let tx = FrameTx::stealth_pay(SENDER, 0, 0, TO, NOTE_VALUE, stealth_note());
+    rig.request(&Request::SignFrame(tx.encode(&[])));
+    rig.approve(CODE);
+    assert_eq!(rig.app.activity()[0].coin, Coin::Eth);
+}
+
+#[test]
+fn an_ml_dsa_transfer_shows_as_eth_in_the_activity_list() {
+    let mut rig = switched_rig();
+    rig.request(&Request::SignFrame(ml_raw(1000)));
+    rig.approve(CODE);
+    assert_eq!(rig.app.activity()[0].coin, Coin::Eth);
+}
+
+#[test]
+fn a_rejected_ml_dsa_transfer_shows_as_eth_in_the_activity_list() {
+    let mut rig = switched_rig();
+    rig.request(&Request::SignFrame(ml_raw(1000)));
+    rig.wait(520);
+    rig.press(0);
+    assert_eq!(rig.app.activity()[0].coin, Coin::Eth);
 }
 
 #[test]

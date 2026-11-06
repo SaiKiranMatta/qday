@@ -1,0 +1,187 @@
+# QDay's EIP-8141 devnet as one self-contained stack, for Coolify or any Docker host: ethrex and
+# Lighthouse (chain 1337, 6-second slots), the ERC-8421 gateway for frame transactions, and a one-time
+# deploy of QDay's contracts at their usual addresses.
+#
+#   docker compose -f deploy/coolify/docker-compose.yml up -d --build
+#
+# Only two services take traffic: ethrex's RPC on 8545 and the gateway on 14337. Coolify routes a
+# domain to each. Everything else talks over the stack's own network. Data lives in named volumes, so
+# restarts and redeploys keep the chain; delete the volumes to start a new one.
+#
+# Frame transactions work from about 7 minutes after the first start (Hegota activates at epoch 2).
+# The premine key used below is public by design: this is a test network.
+
+services:
+  # Writes genesis.json, the beacon genesis and the shared JWT once, then idles so it reads as running.
+  genesis:
+    build: ./genesis
+    volumes:
+      - genesis:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /data/metadata/genesis.json"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 120s
+
+  # Derives the 32 genesis validators' keystores once (throwaway devnet mnemonic), then idles.
+  validator-keys:
+    image: protolambda/eth2-val-tools@sha256:7fb4e35dd39845407e1c61b39a992202cd9ceb6203a5928ab1e00151401c4fae
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ ! -d /data/keystores ]; then
+          ./eth2-val-tools keystores --insecure \
+            --source-mnemonic "sleep moment list remain like wall lake industry canvas wonder ecology elite duck salad naive syrup frame brass utility club odor country obey pudding" \
+            --source-min=0 --source-max=32 --out-loc=/data/keystores || exit 1
+        fi
+        exec sleep 2147483647
+    volumes:
+      - validator-keys:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "test -d /data/keystores/keys"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 60s
+
+  ethrex:
+    # Published for x86-64 only.
+    platform: linux/amd64
+    image: ghcr.io/forshtat/ethrex@sha256:920295ae5496669a6f90a44431d4cbcb4703feec0e89207599fe19a251739873
+    depends_on:
+      genesis:
+        condition: service_healthy
+    volumes:
+      - genesis:/genesis:ro
+      - ethrex:/data
+    expose:
+      - "8545"
+    command:
+      - "--network=/genesis/metadata/genesis.json"
+      - "--datadir=/data"
+      - "--http.addr=0.0.0.0"
+      - "--http.port=8545"
+      - "--http.api=eth,net,web3,ethrex,debug,txpool"
+      - "--authrpc.addr=0.0.0.0"
+      - "--authrpc.port=8551"
+      - "--authrpc.jwtsecret=/genesis/jwt/jwtsecret"
+      - "--log.level=info"
+      # A lone node never counts itself synced in snap mode.
+      - "--syncmode=full"
+      - "--p2p.addr=0.0.0.0"
+      - "--p2p.port=30303"
+      - "--discovery.port=30303"
+    restart: unless-stopped
+
+  # The consensus node that drives block production. It advertises its own container address so the
+  # second beacon can dial it, and marks each start so that beacon waits for a fresh record.
+  lighthouse-beacon:
+    image: ethpandaops/lighthouse@sha256:dd7e92e2e9c3127750e9bff5f8a0efec686f296445a44ef5d9c1eb750e8906b0
+    depends_on:
+      genesis:
+        condition: service_healthy
+      ethrex:
+        condition: service_started
+    volumes:
+      - genesis:/genesis:ro
+      - lighthouse-beacon:/data
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        touch /data/qday-started
+        exec lighthouse bn --testnet-dir=/genesis/metadata --datadir=/data \
+          --execution-endpoint=http://ethrex:8551 --execution-jwt=/genesis/jwt/jwtsecret \
+          --debug-level=info --http --http-address=0.0.0.0 --http-port=5052 \
+          --listen-address=0.0.0.0 --port=9000 --supernode \
+          --allow-insecure-genesis-sync --ignore-ws-check \
+          --enr-address="$$(hostname -i | cut -d' ' -f1)"
+    restart: unless-stopped
+
+  # A passive second beacon, peered with the first: Lighthouse won't build blocks with no peers at all.
+  # It reads the first beacon's record from that beacon's own data, once written after its latest start.
+  lighthouse-beacon-2:
+    image: ethpandaops/lighthouse@sha256:dd7e92e2e9c3127750e9bff5f8a0efec686f296445a44ef5d9c1eb750e8906b0
+    depends_on:
+      lighthouse-beacon:
+        condition: service_started
+    volumes:
+      - genesis:/genesis:ro
+      - lighthouse-beacon-2:/data
+      - lighthouse-beacon:/beacon1:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ENR_FILE=/beacon1/beacon/network/enr.dat
+        until [ -s "$$ENR_FILE" ] && [ "$$ENR_FILE" -nt /beacon1/qday-started ]; do
+          echo "waiting for the first beacon's record"; sleep 3
+        done
+        exec lighthouse bn --testnet-dir=/genesis/metadata --datadir=/data \
+          --execution-endpoint=http://ethrex:8551 --execution-jwt=/genesis/jwt/jwtsecret \
+          --debug-level=info --http --http-address=0.0.0.0 --http-port=5052 \
+          --listen-address=0.0.0.0 --port=9000 --supernode \
+          --allow-insecure-genesis-sync --ignore-ws-check \
+          --enr-address="$$(hostname -i | cut -d' ' -f1)" \
+          --boot-nodes="$$(cat "$$ENR_FILE")"
+    restart: unless-stopped
+
+  lighthouse-validator:
+    image: ethpandaops/lighthouse@sha256:dd7e92e2e9c3127750e9bff5f8a0efec686f296445a44ef5d9c1eb750e8906b0
+    depends_on:
+      validator-keys:
+        condition: service_healthy
+      lighthouse-beacon:
+        condition: service_started
+    volumes:
+      - genesis:/genesis:ro
+      - lighthouse-validator:/data
+      - validator-keys:/keys:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mkdir -p /data/validators
+        cp -rn /keys/keystores/keys/. /data/validators/
+        exec lighthouse vc --testnet-dir=/genesis/metadata --datadir=/data \
+          --secrets-dir=/keys/keystores/secrets --beacon-nodes=http://lighthouse-beacon:5052 \
+          --init-slashing-protection --suggested-fee-recipient=0x5544596212F91984C986A919C8026DF0576816f9
+    restart: unless-stopped
+
+  gateway:
+    # Built on an image published for x86-64 only.
+    platform: linux/amd64
+    build: ./gateway
+    depends_on:
+      ethrex:
+        condition: service_started
+    environment:
+      - MAX_VERIFY_GAS=10000000
+    volumes:
+      - gateway:/usr/app/data
+    expose:
+      - "14337"
+    restart: unless-stopped
+
+  # Deploys the verifier, account factory and test tokens once blocks flow, then idles.
+  deployer:
+    build: ./deployer
+    depends_on:
+      ethrex:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/deployed"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 1200s
+
+volumes:
+  genesis:
+  validator-keys:
+  ethrex:
+  lighthouse-beacon:
+  lighthouse-beacon-2:
+  lighthouse-validator:
+  gateway:

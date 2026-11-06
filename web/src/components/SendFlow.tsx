@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { formatAmount } from "../lib/chain";
+import { BLOCK_MS, formatAmount } from "../lib/chain";
 import { txUrl } from "../lib/explorer";
 import { addressLines, exactEth, exactUnits, parseAmount, shortHex } from "../lib/format";
 import { isStealthAddress } from "../lib/stealth";
@@ -353,32 +353,39 @@ function Summary({
 const RING_R = 37;
 const RING_LENGTH = 233;
 
+/** The current time, ticking while `active`, for countdowns and elapsed times. */
+function useNow(active: boolean, everyMs = 250): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), everyMs);
+    return () => clearInterval(timer);
+  }, [active, everyMs]);
+  return now;
+}
+
+const seconds = (ms: number) => `${(Math.max(ms, 0) / 1000).toFixed(1)} s`;
+
 /**
  * Sending, then sent, in one place: the token in a ring that spins while the network confirms and
- * closes into a full circle with a check once it has.
+ * closes into a full circle with a check once it has. Under it, each stage after approval ticks off
+ * as it happens, so the wait reads as progress rather than a pause.
  */
 function Result({ step, onClose }: { step: Extract<SendStep, { kind: "submitting" | "done" }>; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
   const { token } = step.draft;
   const send = sending(step.draft);
-  if (!send) return null;
   const done = step.kind === "done";
+  const now = useNow(!done);
+  if (!send) return null;
   const amount = `${exactUnits(send.value, token.decimals)} ${token.symbol}`;
-
-  const copy = async () => {
-    if (!done) return;
-    try {
-      await navigator.clipboard.writeText(step.hash);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Clipboard blocked; the hash is selectable.
-    }
-  };
+  const { timing } = step;
+  const hash = step.hash;
+  const took = done && timing.confirmedAt ? seconds(timing.confirmedAt - timing.signedAt) : null;
 
   return (
     <div>
-      <div className="flex flex-col items-center pt-3 text-center" role="status" aria-live="polite">
+      <div className="flex flex-col items-center pt-3 text-center">
         <span className="relative grid size-24 place-items-center">
           <svg viewBox="0 0 80 80" className="absolute inset-0 size-full -rotate-90" aria-hidden>
             <circle cx="40" cy="40" r={RING_R} fill="none" strokeWidth="3" className="stroke-line" />
@@ -415,50 +422,99 @@ function Result({ step, onClose }: { step: Extract<SendStep, { kind: "submitting
         </span>
 
         <div className="mt-5 text-2xl font-semibold tracking-tight tabular-nums">{done ? `${amount} sent` : `Sending ${amount}`}</div>
-        <div className="mt-1 text-sm text-muted">
-          {done
-            ? step.draft.stealth
-              ? "to a private address"
-              : `to ${shortHex(send.to, 6, 4)}`
-            : "Confirming on the devnet, usually a few seconds."}
+        <div className="mt-1 text-sm text-muted tabular-nums">
+          {step.draft.stealth ? "to a private address" : `to ${shortHex(send.to, 6, 4)}`}
+          {took && <> · confirmed in {took}</>}
         </div>
       </div>
 
+      <ol className="mt-6 space-y-0.5 rounded-2xl bg-surface-2 px-4 py-2 text-sm" aria-live="polite">
+        <Stage state="done" label="Signed on your QDay" />
+        <Stage
+          state={hash ? "done" : "active"}
+          label={hash ? "Submitted to the network" : "Submitting to the network"}
+          aside={hash ? <TxHash hash={hash} /> : undefined}
+        />
+        <Stage
+          state={done ? "done" : hash ? "active" : "waiting"}
+          label={done ? `Confirmed in block ${step.block.toLocaleString("en-US")}` : "Confirming"}
+          aside={!done && hash ? <NextBlock at={timing.nextBlockAt} now={now} /> : undefined}
+        />
+      </ol>
+
       {done && (
-        <div className="animate-enter [animation-delay:200ms]">
-          <dl className="mt-6 divide-y divide-line/60 rounded-2xl bg-surface-2 px-4 text-sm">
-            <Row label="Status">
-              <span className="text-ok">Confirmed in block {step.block.toLocaleString("en-US")}</span>
-            </Row>
-            <div className="flex items-baseline gap-4 py-3">
-              <dt className="w-20 shrink-0 text-muted">Transaction</dt>
-              <dd className="flex min-w-0 flex-1 items-baseline gap-3">
-                <span className="min-w-0 flex-1 truncate font-mono text-xs" title={step.hash}>
-                  {shortHex(step.hash, 10, 8)}
-                </span>
-                <button onClick={() => void copy()} className="shrink-0 text-xs font-medium text-alabaster/80 hover:text-alabaster">
-                  {copied ? "Copied" : "Copy"}
-                </button>
-              </dd>
-            </div>
-          </dl>
-          <div className="mt-5 flex gap-3">
-            <a
-              href={txUrl(step.hash)}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-full bg-surface-2 px-5 text-sm font-semibold transition-[background-color,transform] duration-150 hover:bg-line active:scale-[0.97]"
-            >
-              View transaction
-              <Icon name="external" className="size-4" />
-            </a>
-            <Button className="flex-1" onClick={onClose}>
-              Done
-            </Button>
-          </div>
+        <div className="mt-5 flex animate-enter gap-3 [animation-delay:200ms]">
+          <a
+            href={txUrl(step.hash)}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-full bg-surface-2 px-5 text-sm font-semibold transition-[background-color,transform] duration-150 hover:bg-line active:scale-[0.97]"
+          >
+            View transaction
+            <Icon name="external" className="size-4" />
+          </a>
+          <Button className="flex-1" onClick={onClose}>
+            Done
+          </Button>
         </div>
       )}
     </div>
+  );
+}
+
+/** One stage of the send: ticked, in progress, or still to come. */
+function Stage({ state, label, aside }: { state: "done" | "active" | "waiting"; label: string; aside?: ReactNode }) {
+  return (
+    <li className="flex min-h-11 items-center gap-3">
+      <span className="grid size-5 shrink-0 place-items-center">
+        {state === "done" ? (
+          <span className="grid size-5 animate-pop place-items-center rounded-full bg-ok/15 text-ok">
+            <Icon name="check" className="size-3" />
+          </span>
+        ) : state === "active" ? (
+          <span className="size-4 animate-spin rounded-full border-2 border-line border-t-alabaster motion-reduce:animate-none" />
+        ) : (
+          <span className="size-2 rounded-full bg-line" />
+        )}
+      </span>
+      <span className={`min-w-0 flex-1 ${state === "waiting" ? "text-muted" : ""}`}>{label}</span>
+      {aside}
+    </li>
+  );
+}
+
+/** The short hash, copyable, as soon as the gateway hands it back. */
+function TxHash({ hash }: { hash: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(hash);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard blocked; View transaction shows the full hash.
+    }
+  };
+  return (
+    <button
+      onClick={() => void copy()}
+      title={copied ? "Copied" : "Copy transaction hash"}
+      className="flex shrink-0 items-center gap-1.5 rounded-lg px-1.5 py-1 font-mono text-xs text-muted transition-colors hover:bg-surface hover:text-alabaster"
+    >
+      {copied ? <span className="font-sans text-ok">Copied</span> : shortHex(hash, 6, 4)}
+      <Icon name={copied ? "check" : "copy"} className="size-3" />
+    </button>
+  );
+}
+
+/** Counts down to the next block slot; past one without a receipt, to the one after. */
+function NextBlock({ at, now }: { at: number | undefined; now: number }) {
+  if (at === undefined) return <span className="shrink-0 text-xs text-muted">Waiting for a block</span>;
+  const left = ((((at - now) % BLOCK_MS) + BLOCK_MS) % BLOCK_MS) / 1000;
+  return (
+    <span className="shrink-0 text-xs text-muted tabular-nums">
+      {left < 0.5 ? "Block due now" : `Next block in ${Math.ceil(left)} s`}
+    </span>
   );
 }
 

@@ -116,12 +116,12 @@ fn screens() -> Vec<(&'static str, Draw)> {
         title: "Send 0.5 ETH",
         detail: "to 0x5aAe...eAed",
         index: Some(66),
+        coin: Coin::Eth,
     };
     vec![
         (
             "01-wallet",
-            Box::new(move |c: &mut Canvas| home(c, &status, &ROOT, false, Some(&latest()), None))
-                as Draw,
+            Box::new(move |c: &mut Canvas| home(c, &status, &ROOT, Some(&latest()), None)) as Draw,
         ),
         (
             "02-keys",
@@ -137,24 +137,28 @@ fn screens() -> Vec<(&'static str, Draw)> {
                         title: "Rejected",
                         detail: "You rejected it",
                         index: None,
+                        coin: Coin::Eth,
                     },
                     Activity {
                         approved: true,
                         title: "Call approve",
                         detail: "0xA0b8...eB48",
                         index: Some(65),
+                        coin: Coin::None,
                     },
                     Activity {
                         approved: true,
-                        title: "Send 1.2 ETH",
+                        title: "Send 125.5 USDC",
                         detail: "to 0xd8dA...6045",
                         index: Some(64),
+                        coin: Coin::Token("USDC"),
                     },
                     Activity {
                         approved: true,
-                        title: "Send 2 ETH",
+                        title: "Send 0.05 WBTC",
                         detail: "to 0xd8dA...6045",
                         index: Some(63),
+                        coin: Coin::Token("WBTC"),
                     },
                 ];
                 activity(c, &status, &items, 0, false, None)
@@ -170,24 +174,28 @@ fn screens() -> Vec<(&'static str, Draw)> {
                         title: "Rejected",
                         detail: "You rejected it",
                         index: None,
+                        coin: Coin::Eth,
                     },
                     Activity {
                         approved: true,
                         title: "Call approve",
                         detail: "0xA0b8...eB48",
                         index: Some(65),
+                        coin: Coin::None,
                     },
                     Activity {
                         approved: true,
-                        title: "Send 1.2 ETH",
+                        title: "Send 125.5 USDC",
                         detail: "to 0xd8dA...6045",
                         index: Some(64),
+                        coin: Coin::Token("USDC"),
                     },
                     Activity {
                         approved: true,
-                        title: "Send 2 ETH",
+                        title: "Send 0.05 WBTC",
                         detail: "to 0xd8dA...6045",
                         index: Some(63),
+                        coin: Coin::Token("WBTC"),
                     },
                 ];
                 activity(c, &status, &items, 1, true, None)
@@ -386,7 +394,7 @@ fn screens() -> Vec<(&'static str, Draw)> {
                     index: None,
                     ..latest()
                 };
-                home(c, &ml, &FINGERPRINT, false, Some(&sent), None)
+                home(c, &ml, &FINGERPRINT, Some(&sent), None)
             }),
         ),
         (

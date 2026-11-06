@@ -25,7 +25,7 @@ use crate::fb::Framebuffer;
 use crate::format::{checksum_address, eth, short_address, token_amount, wait_text};
 use crate::nav::{self, Action, Keys, Scroll, Setting};
 use crate::screens::{
-    self, ACTIVITY_ROWS, Activity, DeviceInfo, Passcode, ReviewInfo, ShareInfo, Status,
+    self, ACTIVITY_ROWS, Activity, Coin, DeviceInfo, Passcode, ReviewInfo, ShareInfo, Status,
     other_scheme, scheme_label,
 };
 use crate::theme::{self, Theme};
@@ -103,6 +103,18 @@ struct LogEntry {
     title: String,
     detail: String,
     index: Option<u32>,
+    coin: Coin,
+}
+
+/// What a transaction moves, for the activity row's logo.
+fn coin_of(tx: &FrameTx) -> Coin {
+    match &tx.action {
+        TxAction::Transfer { .. } | TxAction::StealthPay { .. } => Coin::Eth,
+        TxAction::TokenTransfer { token, .. } => {
+            tokens::known(token).map_or(Coin::UnknownToken, |t| Coin::Token(t.symbol))
+        }
+        _ => Coin::None,
+    }
 }
 
 impl LogEntry {
@@ -112,6 +124,7 @@ impl LogEntry {
             title: &self.title,
             detail: &self.detail,
             index: self.index,
+            coin: self.coin,
         }
     }
 }
@@ -534,14 +547,7 @@ fn draw(
         }
         Mode::Home(Tab::Home) => {
             let latest = view.log.first().map(LogEntry::item);
-            screens::home(
-                c,
-                &status,
-                &view.root,
-                view.next_ready,
-                latest.as_ref(),
-                flash,
-            );
+            screens::home(c, &status, &view.root, latest.as_ref(), flash);
         }
         Mode::Home(Tab::Keys) if status.scheme == Scheme::MlDsa44 => {
             screens::keys_ml(c, &status, &view.root, flash);
@@ -842,7 +848,14 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             .map(|next| (next.key.root, next.key.pub_seed))
     }
 
-    fn remember(&mut self, approved: bool, title: String, detail: String, index: Option<u32>) {
+    fn remember(
+        &mut self,
+        approved: bool,
+        title: String,
+        detail: String,
+        index: Option<u32>,
+        coin: Coin,
+    ) {
         self.view.log.insert(
             0,
             LogEntry {
@@ -850,6 +863,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
                 title,
                 detail,
                 index,
+                coin,
             },
         );
         self.view.log.truncate(ACTIVITY_KEPT);
@@ -885,7 +899,11 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             Pending::MlDsa(_) | Pending::Stealth(_) => "No signature was made.".to_string(),
         };
         self.show_result(host, false, title, detail);
-        self.remember(false, title.to_string(), why.to_string(), None);
+        let coin = match pending {
+            Pending::Xmss(review) => coin_of(review.tx()),
+            Pending::MlDsa(_) | Pending::Stealth(_) => Coin::Eth,
+        };
+        self.remember(false, title.to_string(), why.to_string(), None, coin);
     }
 
     /// Ends a passcode entry without doing what it was for.
@@ -1045,6 +1063,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
                     shown.summary.clone(),
                     shown.detail.clone(),
                     Some(index),
+                    coin_of(review.tx()),
                 );
                 self.show_result(host, true, "Signed", format!("Key #{index:04} used"));
             }
@@ -1070,7 +1089,13 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
                     next: None,
                 };
                 Self::respond(host, &response);
-                self.remember(true, shown.summary.clone(), shown.detail.clone(), None);
+                self.remember(
+                    true,
+                    shown.summary.clone(),
+                    shown.detail.clone(),
+                    None,
+                    Coin::Eth,
+                );
                 let detail = format!("{} signature sent", scheme_label(Scheme::MlDsa44));
                 self.show_result(host, true, "Signed", detail);
             }
@@ -1101,7 +1126,13 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
                     next: None,
                 };
                 Self::respond(host, &response);
-                self.remember(true, shown.summary.clone(), shown.detail.clone(), None);
+                self.remember(
+                    true,
+                    shown.summary.clone(),
+                    shown.detail.clone(),
+                    None,
+                    Coin::Eth,
+                );
                 self.show_result(host, true, "Signed", "Stealth note spent".to_string());
             }
             Err(error) => {

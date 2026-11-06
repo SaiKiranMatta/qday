@@ -77,12 +77,25 @@ pub fn address_groups(addr: &str) -> Option<[&str; 10]> {
     Some(g)
 }
 
+/// What an activity row moved, for its logo.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Coin {
+    /// Nothing moved: a contract call, a key rotation, the account's creation.
+    None,
+    Eth,
+    /// A token on the device's own list, by symbol.
+    Token(&'static str),
+    /// A token the device doesn't know.
+    UnknownToken,
+}
+
 /// One line in the activity list.
 pub struct Activity<'a> {
     pub approved: bool,
     pub title: &'a str,
     pub detail: &'a str,
     pub index: Option<u32>,
+    pub coin: Coin,
 }
 
 pub struct DeviceInfo<'a> {
@@ -178,17 +191,16 @@ macro_rules! dispatch {
 
 // --- tabs ------------------------------------------------------------------
 
-/// Wallet: the account key, whether it can sign, quiet key usage, the latest
-/// activity. `pressed` is the soft key being held (drawn pressed).
+/// Wallet: the account key, whether it can sign, and the latest activity. Key usage and the
+/// tree are on the Keys tab. `pressed` is the soft key being held (drawn pressed).
 pub fn home(
     c: &mut Canvas,
     s: &Status,
     root: &[u8; 32],
-    pending: bool,
     latest: Option<&Activity>,
     pressed: Option<usize>,
 ) {
-    dispatch!(home(c, s, root, pending, latest, pressed))
+    dispatch!(home(c, s, root, latest, pressed))
 }
 
 /// The Keys tab in ML-DSA mode: one key with no limit, so there's no map.
