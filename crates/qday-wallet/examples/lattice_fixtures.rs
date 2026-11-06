@@ -11,8 +11,7 @@ use qday_mldsa::stealth::Master;
 use qday_wallet::invoice::spend_hash;
 use qday_xmss::{Hash, keccak256};
 
-const VERIFIER: &str =
-    "contracts/mldsa/out/MLDSA44InlineVerifier.sol/MLDSA44InlineVerifier.json";
+const VERIFIER: &str = "contracts/mldsa/out/MLDSA44InlineVerifier.sol/MLDSA44InlineVerifier.json";
 const HELPER: &str = "contracts/mldsa/helpers/f1600_170.hex";
 const SEED: Hash = [0x42; 32];
 /// Where the tests put the pool, so these signatures are for it.

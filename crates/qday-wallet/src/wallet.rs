@@ -15,6 +15,7 @@ use crate::mlkey::MlKeyStore;
 use crate::passcode::{Attempt, Code, MAX_FAILURES, Passcode, Proof};
 use crate::rng::Rng;
 use crate::settings::{Scheme, Settings};
+use crate::stealth::{MetaAddress, StealthSpend, meta_address_for, signer_for, view_seed_for};
 
 /// From this key on, the device builds the next tree without being asked.
 pub const PREPARE_FROM: u32 = 900;
@@ -502,6 +503,58 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
             Entry::Used => Err(WalletError::InvoiceUsed),
             Entry::Full => Err(WalletError::SpendLogFull),
         }
+    }
+
+    /// The stealth address to publish. Asking for one writes nothing.
+    ///
+    /// # Errors
+    ///
+    /// Fails if there is no key, or if storage fails.
+    pub fn meta_address(&mut self, account: u32) -> Result<MetaAddress, WalletError> {
+        let mut seed = self.master_seed()?;
+        let meta = meta_address_for(&seed, account);
+        seed.zeroize();
+        Ok(meta)
+    }
+
+    /// The seed that finds stealth payments and can't spend them. Needs a fresh passcode proof.
+    ///
+    /// # Errors
+    ///
+    /// Fails if there is no key, or if storage fails.
+    pub fn view_seed(&mut self, account: u32, _proof: Proof) -> Result<Hash, WalletError> {
+        let mut seed = self.master_seed()?;
+        let view = view_seed_for(&seed, account);
+        seed.zeroize();
+        Ok(view)
+    }
+
+    /// Signs a spend of a stealth note. Needs a fresh passcode proof.
+    ///
+    /// # Errors
+    ///
+    /// Fails, without a signature, if the ciphertext isn't for that key or signing fails.
+    pub fn sign_stealth(
+        &mut self,
+        spend: &StealthSpend,
+        account: u32,
+        _proof: Proof,
+        rng: &mut impl Rng,
+    ) -> Result<MlSignature, WalletError> {
+        if spend.to == [0; 20] || spend.pool == [0; 20] {
+            return Err(WalletError::BadRequest);
+        }
+        let mut seed = self.master_seed()?;
+        let signer = signer_for(&seed, account, &spend.ciphertext, &spend.key_hash);
+        seed.zeroize();
+        let signer = signer.ok_or(WalletError::BadRequest)?;
+
+        let message = spend_hash(&spend.pool, &spend.key_hash, &spend.to, spend.fee);
+        let mut rnd = [0; 32];
+        rng.fill(&mut rnd);
+        let signature = signer.sign(&message, &rnd);
+        rnd.zeroize();
+        signature.map_err(|_| WalletError::SigningFailed)
     }
 
     /// The stored ML-DSA public key, which needs no passcode to show.

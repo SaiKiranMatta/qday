@@ -9,6 +9,7 @@ rust-version.workspace = true
 bip39 = { version = "2.2", default-features = false }
 qday-mldsa = { path = "../qday-mldsa" }
 qday-xmss = { path = "../qday-xmss" }
+x-wing = { version = "0.1.1", default-features = false, features = ["hazmat", "zeroize"] }
 zeroize = { version = "1.8", default-features = false }
 
 [dev-dependencies]

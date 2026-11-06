@@ -18,4 +18,5 @@ pub mod protocol;
 pub mod rlp;
 pub mod rng;
 pub mod settings;
+pub mod stealth;
 pub mod wallet;
