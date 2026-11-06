@@ -4,7 +4,7 @@ mod common;
 
 use common::SimFlash;
 use qday_wallet::flash::layout;
-use qday_wallet::settings::{CROSSES, Calibration, Settings, ThemeChoice};
+use qday_wallet::settings::{CROSSES, Calibration, Settings};
 
 /// Readings from the real panel, whose axes are swapped relative to the screen.
 const RAW: [(i32, i32); 3] = [(523, 567), (523, 3673), (3523, 567)];
@@ -24,14 +24,14 @@ fn each_cross_maps_to_itself() {
 #[test]
 fn the_fourth_corner_lands_where_it_should() {
     let calibration = Calibration::from_points(RAW).expect("the points form a triangle");
-    assert_eq!(calibration.to_screen(3523, 3673), (300, 220));
+    assert_eq!(calibration.to_screen(3523, 3673), (290, 210));
 }
 
 #[test]
 fn a_panel_with_unswapped_axes_also_works() {
     let raw = [(500, 600), (3500, 600), (500, 3400)];
     let calibration = Calibration::from_points(raw).expect("the points form a triangle");
-    assert_eq!(calibration.to_screen(3500, 3400), (300, 220));
+    assert_eq!(calibration.to_screen(3500, 3400), (290, 210));
 }
 
 #[test]
@@ -54,42 +54,34 @@ fn readings_on_a_line_are_refused() {
 }
 
 #[test]
-fn the_theme_defaults_to_light() {
-    assert_eq!(settings(&SimFlash::new()).theme(), Ok(ThemeChoice::Light));
+fn the_theme_defaults_to_the_first() {
+    assert_eq!(settings(&SimFlash::new()).theme(), Ok(0));
 }
 
 #[test]
 fn the_theme_survives_a_restart() {
     let flash = SimFlash::new();
-    settings(&flash)
-        .set_theme(ThemeChoice::Dark)
-        .expect("the flash is healthy");
-    assert_eq!(settings(&flash).theme(), Ok(ThemeChoice::Dark));
-    settings(&flash)
-        .set_theme(ThemeChoice::Light)
-        .expect("the flash is healthy");
-    assert_eq!(settings(&flash).theme(), Ok(ThemeChoice::Light));
+    settings(&flash).set_theme(3).expect("the flash is healthy");
+    assert_eq!(settings(&flash).theme(), Ok(3));
+    settings(&flash).set_theme(0).expect("the flash is healthy");
+    assert_eq!(settings(&flash).theme(), Ok(0));
 }
 
 #[test]
 fn a_damaged_theme_reads_as_the_default() {
     let flash = SimFlash::new();
-    settings(&flash)
-        .set_theme(ThemeChoice::Dark)
-        .expect("the flash is healthy");
+    settings(&flash).set_theme(3).expect("the flash is healthy");
     flash.poke(layout::SETTINGS as usize + 9, &[0x00]);
-    assert_eq!(settings(&flash).theme(), Ok(ThemeChoice::Light));
+    assert_eq!(settings(&flash).theme(), Ok(0));
 }
 
 #[test]
 fn a_cut_while_saving_the_theme_leaves_a_valid_theme() {
     for budget in 0..3 {
         let flash = SimFlash::new();
-        settings(&flash)
-            .set_theme(ThemeChoice::Dark)
-            .expect("the flash is healthy");
+        settings(&flash).set_theme(3).expect("the flash is healthy");
         flash.cut_after(budget);
-        let _ = settings(&flash).set_theme(ThemeChoice::Light);
+        let _ = settings(&flash).set_theme(0);
         flash.power_on();
         assert!(settings(&flash).theme().is_ok());
     }
@@ -128,8 +120,6 @@ fn settings_do_not_touch_each_other() {
     settings(&flash)
         .set_calibration(&calibration)
         .expect("the flash is healthy");
-    settings(&flash)
-        .set_theme(ThemeChoice::Dark)
-        .expect("the flash is healthy");
+    settings(&flash).set_theme(3).expect("the flash is healthy");
     assert_eq!(settings(&flash).calibration(), Ok(Some(calibration)));
 }

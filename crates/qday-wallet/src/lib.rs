@@ -4,7 +4,6 @@
 
 extern crate alloc;
 
-pub mod activity;
 pub mod backup;
 pub mod counter;
 pub mod flash;

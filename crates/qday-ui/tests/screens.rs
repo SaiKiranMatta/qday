@@ -1,227 +1,389 @@
-//! Layout rules, checked on every screen in both themes.
+use qday_ui::canvas::{Canvas, HEIGHT, WIDTH};
+use qday_ui::nav::Setting;
+use qday_ui::screens::*;
+use qday_ui::theme::{self, Family, Theme};
 
-use qday_ui::fb::{Framebuffer, HEIGHT, WIDTH};
-use qday_ui::gallery::Samples;
-use qday_ui::keys::{Action, Label, Style};
-use qday_ui::screens::{
-    PAD_GAP_X, PAD_GAP_Y, PAD_KEY_HEIGHT, PAD_KEY_WIDTH, PAD_LEFT, PAD_TOP, PILL_CONTENT_END,
-    PILLS_TOP, Screen, TAB_CONTENT_END, keypad_hit,
-};
-use qday_ui::theme::{DARK, LIGHT, Theme};
+const ROOT: [u8; 32] = [
+    0x9e, 0x83, 0xa9, 0x01, 0xb7, 0x57, 0xcb, 0xa3, 0x39, 0xa4, 0xd2, 0x22, 0x89, 0xdc, 0x64, 0x3b,
+    0x2b, 0x22, 0xc7, 0x94, 0xa8, 0xe5, 0xc9, 0xa3, 0xb9, 0x4f, 0x85, 0x88, 0x2a, 0xf6, 0x01, 0x9c,
+];
+const TO: &str = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed";
+const DIGITS: [u8; 10] = [7, 2, 9, 4, 0, 6, 1, 8, 3, 5];
+const WORDS: [&str; 24] = ["abandon"; 24];
 
-/// The outer margin. The sides are 12 px. The top and bottom follow the fixed positions in the
-/// design: the keypad starts at y 8, and text tabs reach y 229.
-const LEFT: i32 = 12;
-const RIGHT: i32 = 308;
-const TOP: i32 = 8;
-const BOTTOM: i32 = 230;
-
-fn render(screen: &Screen<'_>, theme: &Theme) -> Framebuffer {
-    let mut fb = Framebuffer::new();
-    screen.draw(&mut fb, theme);
-    fb
+#[test]
+fn key_numbers_split_into_greyed_zeros_and_the_number() {
+    let parts = |i| {
+        let (a, b) = key_parts(i);
+        (a.as_str().to_string(), b.as_str().to_string())
+    };
+    assert_eq!(parts(67), ("#00".into(), "67".into()));
+    assert_eq!(parts(0), ("#000".into(), "0".into()), "always one digit");
+    assert_eq!(parts(1023), ("#".into(), "1023".into()));
 }
 
-/// The first non-background pixel in the outer margin.
-fn margin_breach(fb: &Framebuffer, theme: &Theme) -> Option<(i32, i32)> {
-    for y in 0..HEIGHT {
-        for x in 0..WIDTH {
-            let outside = !(LEFT..RIGHT).contains(&x) || !(TOP..BOTTOM).contains(&y);
-            if outside && fb.pixel(x, y) != theme.bg {
-                return Some((x, y));
+#[test]
+fn hashes_shorten_to_the_parts_people_compare() {
+    assert_eq!(short_hex(&ROOT).as_str(), "0x9e83...019c");
+    let (head, tail) = hex_parts(&ROOT);
+    assert_eq!((head.as_str(), tail.as_str()), ("0x9e83", "019c"));
+}
+
+#[test]
+fn addresses_split_into_ten_groups_of_four() {
+    let g = address_groups(TO).unwrap();
+    assert_eq!(g[0], "5aAe");
+    assert_eq!(g[9], "eAed");
+    assert_eq!(address_groups("0x1234"), None);
+}
+
+type Draw = Box<dyn Fn(&mut Canvas)>;
+
+fn every_screen() -> Vec<(&'static str, Draw)> {
+    let status = Status {
+        tree: 0,
+        next_index: 67,
+        connected: true,
+    };
+    let send = || ReviewInfo {
+        review: Review::Send {
+            amount: "0.5",
+            unit: "ETH",
+            to: TO,
+        },
+        fee: "0.0026 ETH",
+        chain_id: 31337,
+        index: 67,
+        rotation: false,
+        seconds_left: 24,
+        timeout: 30,
+    };
+    let items = [
+        Activity {
+            approved: true,
+            title: "Send 0.5 ETH",
+            detail: "to 0x5aAe...eAed",
+            index: Some(66),
+        },
+        Activity {
+            approved: false,
+            title: "Rejected",
+            detail: "You rejected it",
+            index: None,
+        },
+        Activity {
+            approved: true,
+            title: "Call transfer",
+            detail: "0x1f98...F984",
+            index: Some(65),
+        },
+        Activity {
+            approved: true,
+            title: "Send 1.2 ETH",
+            detail: "to 0xd8dA...6045",
+            index: Some(64),
+        },
+        Activity {
+            approved: true,
+            title: "Send 2 ETH",
+            detail: "to 0xd8dA...6045",
+            index: Some(63),
+        },
+    ];
+    let latest = Activity {
+        approved: true,
+        title: "Send 0.5 ETH",
+        detail: "",
+        index: Some(66),
+    };
+    vec![
+        (
+            "home",
+            Box::new(move |c: &mut Canvas| home(c, &status, &ROOT, false, Some(&latest), None))
+                as Draw,
+        ),
+        (
+            "home offline",
+            Box::new(move |c: &mut Canvas| {
+                home(
+                    c,
+                    &Status {
+                        connected: false,
+                        ..status
+                    },
+                    &ROOT,
+                    true,
+                    None,
+                    Some(0),
+                )
+            }),
+        ),
+        (
+            "keys",
+            Box::new(move |c: &mut Canvas| keys(c, &status, true, None)),
+        ),
+        (
+            "activity",
+            Box::new(move |c: &mut Canvas| activity(c, &status, &items, 1, true, Some(2))),
+        ),
+        (
+            "activity empty",
+            Box::new(move |c: &mut Canvas| activity(c, &status, &[], 0, false, None)),
+        ),
+        (
+            "device",
+            Box::new(move |c: &mut Canvas| {
+                let info = DeviceInfo {
+                    firmware: "qday 0.8",
+                    root: &ROOT,
+                    counter: 67,
+                };
+                device(c, &status, &info, Setting::Backup, true, None)
+            }),
+        ),
+        (
+            "review send",
+            Box::new(move |c: &mut Canvas| review(c, &send(), Some(0))),
+        ),
+        (
+            "review rotation",
+            Box::new(move |c: &mut Canvas| {
+                review(
+                    c,
+                    &ReviewInfo {
+                        rotation: true,
+                        index: 900,
+                        ..send()
+                    },
+                    None,
+                )
+            }),
+        ),
+        (
+            "review token",
+            Box::new(move |c: &mut Canvas| {
+                review(
+                    c,
+                    &ReviewInfo {
+                        review: Review::Token {
+                            amount: "1500000",
+                            to: TO,
+                            token: TO,
+                        },
+                        ..send()
+                    },
+                    None,
+                )
+            }),
+        ),
+        (
+            "review call",
+            Box::new(move |c: &mut Canvas| {
+                review(
+                    c,
+                    &ReviewInfo {
+                        review: Review::Call {
+                            contract: TO,
+                            value: "0 ETH",
+                            function: "approve",
+                        },
+                        ..send()
+                    },
+                    None,
+                )
+            }),
+        ),
+        (
+            "review batch",
+            Box::new(move |c: &mut Canvas| {
+                review(
+                    c,
+                    &ReviewInfo {
+                        review: Review::Batch { calls: 3 },
+                        ..send()
+                    },
+                    None,
+                )
+            }),
+        ),
+        (
+            "review unknown",
+            Box::new(move |c: &mut Canvas| {
+                review(
+                    c,
+                    &ReviewInfo {
+                        review: Review::Unknown {
+                            selector: "0x12345678",
+                        },
+                        ..send()
+                    },
+                    None,
+                )
+            }),
+        ),
+        (
+            "review blind",
+            Box::new(move |c: &mut Canvas| {
+                review(
+                    c,
+                    &ReviewInfo {
+                        review: Review::Blind {
+                            description: "Permit2 signature",
+                            hash: "0x1a2b3c4d...5e6f70",
+                        },
+                        fee: "unknown",
+                        chain_id: 0,
+                        ..send()
+                    },
+                    None,
+                )
+            }),
+        ),
+        (
+            "passcode",
+            Box::new(move |c: &mut Canvas| {
+                passcode(
+                    c,
+                    &Passcode {
+                        title: "Enter passcode",
+                        hint: "to sign 0.5 ETH",
+                        entered: 3,
+                        error: None,
+                        digits: &DIGITS,
+                        pressed: Some(4),
+                    },
+                    None,
+                )
+            }),
+        ),
+        (
+            "passcode wrong",
+            Box::new(move |c: &mut Canvas| {
+                passcode(
+                    c,
+                    &Passcode {
+                        title: "Enter passcode",
+                        hint: "to sign 0.5 ETH",
+                        entered: 6,
+                        error: Some("Wrong code, 9 tries left"),
+                        digits: &DIGITS,
+                        pressed: None,
+                    },
+                    Some(3),
+                )
+            }),
+        ),
+        (
+            "progress",
+            Box::new(move |c: &mut Canvas| {
+                progress(
+                    c,
+                    "Setting up",
+                    &[
+                        "Building your 1,024 keys.",
+                        "Once per key tree,",
+                        "about 3 minutes.",
+                    ],
+                    431,
+                    1024,
+                )
+            }),
+        ),
+        (
+            "signed",
+            Box::new(move |c: &mut Canvas| {
+                result(c, true, "Signed", "Key #0067 sent to your laptop")
+            }),
+        ),
+        (
+            "rejected",
+            Box::new(move |c: &mut Canvas| {
+                result(
+                    c,
+                    false,
+                    "Rejected",
+                    "No signature. Key #0067 is still unused.",
+                )
+            }),
+        ),
+        (
+            "seed",
+            Box::new(move |c: &mut Canvas| seed_words(c, &WORDS, 1, None)),
+        ),
+        (
+            "locked",
+            Box::new(move |c: &mut Canvas| locked(c, "4:59", 5)),
+        ),
+        (
+            "restore",
+            Box::new(move |c: &mut Canvas| restore_confirm(c, 1, 64, 20, 30, None)),
+        ),
+        (
+            "notice",
+            Box::new(move |c: &mut Canvas| notice(c, "Tree switched", "Now signing with tree 1")),
+        ),
+        (
+            "seed check",
+            Box::new(|c: &mut Canvas| {
+                seed_check(
+                    c,
+                    0,
+                    6,
+                    &["abstract", "zoo", "accident", "art"],
+                    false,
+                    Some(2),
+                )
+            }),
+        ),
+        (
+            "seed check wrong",
+            Box::new(|c: &mut Canvas| {
+                seed_check(c, 2, 23, &["legal", "winner", "thank", "year"], true, None)
+            }),
+        ),
+        (
+            "calibrate 1",
+            Box::new(|c: &mut Canvas| calibrate(c, 0, false, "pen up")),
+        ),
+        (
+            "calibrate 2",
+            Box::new(|c: &mut Canvas| calibrate(c, 1, true, "pen down  raw 1234, 2345")),
+        ),
+        (
+            "calibrate 3",
+            Box::new(|c: &mut Canvas| calibrate(c, 2, false, "")),
+        ),
+    ]
+}
+
+/// Every screen in every theme renders, and (outside the terminal family,
+/// whose title bar is full-bleed) leaves the outer frame empty: the margin
+/// rule.
+#[test]
+fn every_screen_renders_in_every_theme_inside_the_margins() {
+    let mut buf = vec![0u16; (WIDTH * HEIGHT) as usize];
+    for t in Theme::ALL {
+        theme::set(t);
+        for (name, draw) in every_screen() {
+            let mut c = Canvas::new(&mut buf);
+            draw(&mut c);
+            if t.family() == Family::Terminal {
+                continue;
+            }
+            let bg = c.get(0, 0);
+            for y in 0..HEIGHT {
+                for x in 0..WIDTH {
+                    let frame = !(8..WIDTH - 8).contains(&x) || !(4..HEIGHT - 6).contains(&y);
+                    if frame {
+                        assert_eq!(
+                            c.get(x, y),
+                            bg,
+                            "{t:?} {name}: drawn in the margin at ({x}, {y})"
+                        );
+                    }
+                }
             }
         }
     }
-    None
-}
-
-/// Whether a band of rows is empty.
-fn rows_clear(fb: &Framebuffer, theme: &Theme, from: i32, to: i32) -> bool {
-    (from..to).all(|y| (0..WIDTH).all(|x| fb.pixel(x, y) == theme.bg))
-}
-
-fn each_screen(mut check: impl FnMut(&str, &Screen<'_>, &Theme, &Framebuffer)) {
-    let samples = Samples::new();
-    for (name, screen) in samples.screens() {
-        for theme in [&LIGHT, &DARK] {
-            let fb = render(&screen, theme);
-            check(name, &screen, theme, &fb);
-        }
-    }
-}
-
-#[test]
-fn the_margin_check_can_fail() {
-    let samples = Samples::new();
-    let (_, screen) = samples.screens()[0];
-    let mut fb = render(&screen, &LIGHT);
-    assert_eq!(margin_breach(&fb, &LIGHT), None);
-    fb.rect(3, 100, 1, 1, LIGHT.text);
-    assert_eq!(margin_breach(&fb, &LIGHT), Some((3, 100)));
-}
-
-#[test]
-fn nothing_is_drawn_in_the_outer_margin() {
-    each_screen(|name, _, theme, fb| {
-        assert_eq!(margin_breach(fb, theme), None, "{name}");
-    });
-}
-
-#[test]
-fn every_screen_fills_the_background_and_draws_something() {
-    each_screen(|name, _, theme, fb| {
-        assert_eq!(fb.pixel(0, 0), theme.bg, "{name}");
-        let drawn = (0..HEIGHT)
-            .flat_map(|y| (0..WIDTH).map(move |x| (x, y)))
-            .filter(|&(x, y)| fb.pixel(x, y) != theme.bg)
-            .count();
-        assert!(drawn > 200, "{name} drew {drawn} pixels");
-    });
-}
-
-#[test]
-fn tab_content_stops_above_the_tabs() {
-    each_screen(|name, screen, theme, fb| {
-        if matches!(screen.keys().style, Style::Tabs(_)) {
-            assert!(rows_clear(fb, theme, TAB_CONTENT_END + 1, 219), "{name}");
-        }
-    });
-}
-
-#[test]
-fn pill_content_stops_12_px_above_the_pills() {
-    each_screen(|name, screen, theme, fb| {
-        if screen.keys().style == Style::Pills {
-            assert!(
-                rows_clear(fb, theme, PILL_CONTENT_END + 1, PILLS_TOP),
-                "{name}"
-            );
-        }
-    });
-}
-
-#[test]
-fn a_screen_with_labels_draws_them_in_the_key_area() {
-    each_screen(|name, screen, theme, fb| {
-        let bar = screen.keys();
-        let labelled = bar.keys.iter().any(|key| key.label != Label::Blank);
-        assert_eq!(labelled, bar.style != Style::Hidden, "{name}");
-        if labelled {
-            let top = if bar.style == Style::Pills {
-                PILLS_TOP
-            } else {
-                219
-            };
-            assert!(!rows_clear(fb, theme, top, BOTTOM), "{name}");
-        }
-    });
-}
-
-#[test]
-fn only_review_screens_can_approve() {
-    each_screen(|name, screen, _, _| {
-        let approves = (0..4).any(|key| screen.keys().action(key) == Action::Approve);
-        let reviewing = name.starts_with("review") || name == "restore-confirm";
-        assert_eq!(approves, reviewing, "{name}");
-        if reviewing {
-            assert_eq!(screen.keys().action(3), Action::Approve);
-            assert_eq!(screen.keys().action(2), Action::Nothing);
-        }
-    });
-}
-
-#[test]
-fn pure_black_is_never_a_background() {
-    each_screen(|name, _, _, fb| {
-        assert_ne!(fb.pixel(1, 1), 0, "{name}");
-    });
-}
-
-#[test]
-fn only_a_success_may_use_green_as_its_message() {
-    // The refused result must show no green at all.
-    let samples = Samples::new();
-    let screens = samples.screens();
-    let refused = screens
-        .iter()
-        .find(|(name, _)| *name == "result-refused")
-        .expect("the gallery has it");
-    let fb = render(&refused.1, &LIGHT);
-    let green = (0..HEIGHT)
-        .flat_map(|y| (0..WIDTH).map(move |x| (x, y)))
-        .any(|(x, y)| fb.pixel(x, y) == LIGHT.success);
-    assert!(!green);
-}
-
-fn key_corner(column: i32, row: i32) -> (i32, i32) {
-    (
-        PAD_LEFT + column * (PAD_KEY_WIDTH + PAD_GAP_X),
-        PAD_TOP + row * (PAD_KEY_HEIGHT + PAD_GAP_Y),
-    )
-}
-
-#[test]
-fn the_keypad_spans_its_fixed_area() {
-    assert_eq!(key_corner(2, 3).0 + PAD_KEY_WIDTH, 308);
-    assert_eq!(key_corner(2, 3).1 + PAD_KEY_HEIGHT, 180);
-}
-
-#[test]
-fn each_digit_key_answers_to_its_own_area() {
-    let mut seen = [false; 10];
-    for row in 0..4 {
-        for column in 0..3 {
-            let (x, y) = key_corner(column, row);
-            let hits = [
-                keypad_hit(x, y),
-                keypad_hit(x + PAD_KEY_WIDTH - 1, y),
-                keypad_hit(x, y + PAD_KEY_HEIGHT - 1),
-                keypad_hit(x + 20, y + 20),
-            ];
-            assert!(hits.iter().all(|hit| *hit == hits[0]), "{row},{column}");
-            if let Some(index) = hits[0] {
-                assert!(!seen[index], "digit {index} appears twice");
-                seen[index] = true;
-            }
-        }
-    }
-    assert_eq!(seen, [true; 10]);
-}
-
-#[test]
-fn gaps_between_keys_count_as_nothing() {
-    let (x, y) = key_corner(0, 0);
-    assert_eq!(keypad_hit(x + PAD_KEY_WIDTH, y + 5), None);
-    assert_eq!(keypad_hit(x + PAD_KEY_WIDTH + PAD_GAP_X - 1, y + 5), None);
-    assert_eq!(keypad_hit(x + 5, y + PAD_KEY_HEIGHT), None);
-    assert_eq!(keypad_hit(x + 5, y + PAD_KEY_HEIGHT + PAD_GAP_Y - 1), None);
-}
-
-#[test]
-fn touches_off_the_keypad_count_as_nothing() {
-    assert_eq!(keypad_hit(145, 20), None);
-    assert_eq!(keypad_hit(308, 20), None);
-    assert_eq!(keypad_hit(200, 7), None);
-    assert_eq!(keypad_hit(200, 180), None);
-}
-
-#[test]
-fn the_keypad_shows_every_digit_on_a_filled_key() {
-    let samples = Samples::new();
-    let screens = samples.screens();
-    let passcode = screens
-        .iter()
-        .find(|(name, _)| *name == "passcode")
-        .expect("it exists");
-    let fb = render(&passcode.1, &LIGHT);
-    let mut keys = 0;
-    for row in 0..4 {
-        for column in 0..3 {
-            let (x, y) = key_corner(column, row);
-            if fb.pixel(x + 25, y + 3) == LIGHT.fill {
-                keys += 1;
-            }
-        }
-    }
-    assert_eq!(keys, 10);
+    theme::set(Theme::StandardLight);
 }

@@ -31,7 +31,8 @@ EIP-8141 chain, with the results in [docs/devnet.md](docs/devnet.md).
 |------|------|
 | `crates/qday-xmss` | The signature scheme, `no_std` |
 | `crates/qday-wallet` | Counter, key storage, passcode, backup, USB protocol, frame transactions, `no_std` |
-| `crates/qday-ui` | Screens, soft keys and themes, `no_std`, renders to PNG on the laptop |
+| `crates/qday-ui` | Screens, soft keys, five themes and the app controller, `no_std`, renders to PNG on the laptop |
+| `crates/qday-fontgen` | Turns the fonts in `assets/fonts` into the glyph tables in `qday-ui` |
 | `crates/qday-cli` | The `qday` laptop tool |
 | `firmware/` | ESP32-S3 app, kept out of the host workspace |
 | `contracts/` | Foundry: Solidity verifier with inline assembly, and the account |
@@ -45,7 +46,7 @@ EIP-8141 chain, with the results in [docs/devnet.md](docs/devnet.md).
 - [Fact-check](docs/fact-check.md): what in the original pitch holds, and what to correct
 - [Risks and blockers](docs/risks-and-blockers.md): ranked
 - [Devnet notes](docs/devnet.md)
-- [Screens](docs/screens): every screen in both themes
+- [Screens](docs/screens/all-themes.png): every screen in all five themes
 - [Original design spec](docs/superpowers/specs/2026-11-05-qday-design.md) and
   [plans](docs/superpowers/plans/README.md), kept for history. The build has moved on from them.
 
@@ -69,10 +70,10 @@ Build the firmware:
 cd firmware && source ~/export-esp.sh && cargo build --release
 ```
 
-Render every screen in both themes to PNG:
+Render every screen in every theme to PNG, into `docs/screens`:
 
 ```bash
-cargo run -p qday-ui --example preview docs/screens
+cargo run -p qday-ui --example preview
 ```
 
 Deploy an account and send from it. `scripts/frame-demo.sh` explains its settings at the top:
@@ -88,7 +89,8 @@ them, run this from the repository root:
 cargo run -p qday-xmss --example contract_fixtures > contracts/test/fixtures/signatures.json
 ```
 
-To rebuild the font atlases from Inter, pass the font file to `scripts/build-fonts.py`.
+To rebuild the glyph tables after changing a text style, run `cargo run -p qday-fontgen` and then
+`cargo fmt --all`.
 
 ## Key derivation note
 

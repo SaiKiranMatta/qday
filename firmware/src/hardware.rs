@@ -4,6 +4,7 @@ use embedded_graphics::{pixelcolor::Rgb565, pixelcolor::raw::RawU16};
 use embedded_hal::digital::OutputPin;
 use esp_hal::{
     Blocking,
+    delay::Delay,
     gpio::{Level, Output},
     peripherals::USB_DEVICE,
     rmt::{Channel, PulseCode, Tx},
@@ -15,7 +16,8 @@ use esp_hal::{
 use esp_storage::FlashStorage;
 use mipidsi::{Display, interface::Interface, models::Model};
 use qday_ui::app::{Host, Light};
-use qday_ui::fb::{Framebuffer, WIDTH};
+use qday_ui::canvas::WIDTH;
+use qday_ui::fb::Framebuffer;
 use qday_wallet::flash::{FlashError, SECTOR, WordFlash};
 use qday_wallet::rng::Rng;
 
@@ -216,7 +218,9 @@ where
         let display = &mut self.display;
         fb.send_changes(|first, rows, pixels| {
             let (top, bottom) = (first as u16, (first + rows - 1) as u16);
-            let colors = pixels.iter().map(|&pixel| Rgb565::from(RawU16::new(pixel)));
+            let colors = pixels
+                .iter()
+                .map(|&pixel| Rgb565::from(RawU16::new(pixel.swap_bytes())));
             let _ = display.set_pixels(0, top, (WIDTH - 1) as u16, bottom, colors);
         });
     }
@@ -245,6 +249,10 @@ where
                 return;
             }
         }
+    }
+
+    fn pause(&mut self, ms: u32) {
+        Delay::new().delay_millis(ms);
     }
 
     fn restart(&mut self) {
