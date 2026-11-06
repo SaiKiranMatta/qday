@@ -32,7 +32,12 @@ impl Signer {
 
     fn sign(&self, index: u32, message: &Hash) -> [u8; SIG_BYTES] {
         self.keys
-            .sign(&self.tree.root(), index, message, &self.tree.auth_path(index))
+            .sign(
+                &self.tree.root(),
+                index,
+                message,
+                &self.tree.auth_path(index),
+            )
             .expect("every fixture index is in range")
     }
 }
