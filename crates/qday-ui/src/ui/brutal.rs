@@ -231,12 +231,11 @@ pub fn home(
     c: &mut Canvas,
     s: &Status,
     root: &[u8; 32],
-    pending: bool,
     latest: Option<&Activity>,
     pressed: Option<usize>,
 ) {
     c.clear(BG);
-    header(c, "qday", text!(16, "tree {}", s.tree).as_str());
+    header(c, "qday", if s.connected { "usb" } else { "no usb" });
     let big = Rect::new(LEFT, TOP, 146.0, BOTTOM - TOP);
     tile(c, big, MINT, 18.0, false);
     c.text(24, 66, "account key", &ts(&BODY, INK));
@@ -257,50 +256,71 @@ pub fn home(
     c.round_rect(chip, 10.0, WHITE, if s.connected { 200 } else { 120 });
     c.text(32, 166, status, &ts(&CAP, INK));
 
+    // Right column: the latest thing signed or refused, then the mascot's mood about it.
     let x = LEFT + 146.0 + GAP;
     let w = RIGHT - x;
     let h = (BOTTOM - TOP - GAP) / 2.0;
-    tile(c, Rect::new(x, TOP, w, h), SKY, 18.0, false);
-    c.text(
-        x as i32 + 14,
-        TOP as i32 + 22,
-        "signatures",
-        &ts(&BODY, INK),
-    );
-    let end = c.text(
-        x as i32 + 13,
-        TOP as i32 + 54,
-        text!(8, "{}", s.next_index).as_str(),
-        &ts(&BIG, INK),
-    );
-    c.text(end + 4, TOP as i32 + 54, "/ 1,024", &ts(&CAP, INK));
-    let y2 = TOP + h + GAP;
-    let half = (w - GAP) / 2.0;
-    tile(c, Rect::new(x, y2, half, h), LIME, 18.0, false);
-    c.text(x as i32 + 12, y2 as i32 + 22, "tree", &ts(&BODY, INK));
-    c.text(
-        x as i32 + 12,
-        y2 as i32 + 54,
-        text!(8, "{}", s.tree).as_str(),
-        &ts(&BIG, INK),
-    );
-    if pending {
-        c.text(x as i32 + 34, y2 as i32 + 54, "+1", &ts(&CAP, INK));
+    let last = Rect::new(x, TOP, w, h);
+    tile(c, last, SKY, 18.0, false);
+    c.text(x as i32 + 14, TOP as i32 + 22, "latest", &ts(&BODY, INK));
+    match latest {
+        Some(a) => {
+            let title = fit_text(a.title, w - 28.0);
+            c.text(
+                x as i32 + 14,
+                TOP as i32 + 44,
+                title.as_str(),
+                &ts(&BODY, INK),
+            );
+            let detail = fit_text(a.detail, w - 28.0);
+            c.text(
+                x as i32 + 14,
+                TOP as i32 + 60,
+                detail.as_str(),
+                &ts(&CAP, INK),
+            );
+        }
+        None => {
+            c.text(
+                x as i32 + 14,
+                TOP as i32 + 48,
+                "nothing yet",
+                &ts(&BODY, INK),
+            );
+        }
     }
-    let pink = Rect::new(x + half + GAP, y2, w - half - GAP, h);
+    let y2 = TOP + h + GAP;
+    let pink = Rect::new(x, y2, w, h);
     tile(c, pink, PINK, 18.0, false);
     let mood = match latest {
         Some(a) if !a.approved => Mood::Worried,
         _ => Mood::Happy,
     };
-    mascot(
-        c,
-        pink.x + pink.w / 2.0 - 2.0,
-        y2 + h / 2.0 - 2.0,
-        19.0,
-        mood,
-    );
+    mascot(c, pink.x + pink.w / 2.0, y2 + h / 2.0 - 2.0, 19.0, mood);
     controls(c, &nav::tab_keys(Tab::Home, false, Setting::Theme), pressed);
+}
+
+/// `text` shortened with an ellipsis to fit `width` in the caption font.
+fn fit_text(text: &str, width: f32) -> crate::text::Text<48> {
+    let style = ts(&CAP, INK);
+    let mut out = crate::text::Text::<48>::new();
+    if style.width(text) as f32 <= width {
+        let _ = core::fmt::Write::write_str(&mut out, text);
+        return out;
+    }
+    let mut end = text.len();
+    while end > 0 {
+        end -= 1;
+        if !text.is_char_boundary(end) {
+            continue;
+        }
+        let mut trial = crate::text::Text::<48>::new();
+        let _ = core::fmt::Write::write_fmt(&mut trial, format_args!("{}...", &text[..end]));
+        if style.width(trial.as_str()) as f32 <= width {
+            return trial;
+        }
+    }
+    out
 }
 
 pub fn keys(c: &mut Canvas, s: &Status, pending: bool, pressed: Option<usize>) {
@@ -368,7 +388,12 @@ pub fn activity(
     }
     for (i, item) in items.iter().skip(offset).take(ACTIVITY_ROWS).enumerate() {
         let y = TOP + 6.0 + i as f32 * 34.0;
-        tick(c, 32.0, y + 16.0, 10.0, item.approved);
+        if coin_logo(c, 32.0, y + 16.0, 10.0, item.coin, &CAP, (MUTED, WHITE)) {
+            c.ring(32.0, y + 16.0, 10.0, 1.6, INK, 255);
+            status_badge(c, 39.5, y + 23.5, item.approved, (INK, RED, CARD));
+        } else {
+            tick(c, 32.0, y + 16.0, 10.0, item.approved);
+        }
         c.text(52, y as i32 + 14, item.title, &ts(&BODY, INK));
         c.text(52, y as i32 + 28, item.detail, &ts(&CAP, MUTED));
         if let Some(index) = item.index {

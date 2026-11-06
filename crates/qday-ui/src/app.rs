@@ -21,7 +21,9 @@ use crate::canvas::Canvas;
 use crate::fb::Framebuffer;
 use crate::format::{checksum_address, eth, short_address, token_amount, wait_text};
 use crate::nav::{self, Action, Keys, Scroll, Setting};
-use crate::screens::{self, ACTIVITY_ROWS, Activity, DeviceInfo, Passcode, ReviewInfo, Status};
+use crate::screens::{
+    self, ACTIVITY_ROWS, Activity, Coin, DeviceInfo, Passcode, ReviewInfo, Status,
+};
 use crate::theme::{self, Theme};
 use crate::widgets::{Tab, digit_in_slot, key_rect};
 
@@ -97,6 +99,18 @@ struct LogEntry {
     title: String,
     detail: String,
     index: Option<u32>,
+    coin: Coin,
+}
+
+/// What a transaction moves, for the activity row's logo.
+fn coin_of(tx: &FrameTx) -> Coin {
+    match &tx.action {
+        TxAction::Transfer { .. } => Coin::Eth,
+        TxAction::TokenTransfer { token, .. } => {
+            tokens::known(token).map_or(Coin::UnknownToken, |t| Coin::Token(t.symbol))
+        }
+        _ => Coin::None,
+    }
 }
 
 impl LogEntry {
@@ -106,6 +120,7 @@ impl LogEntry {
             title: &self.title,
             detail: &self.detail,
             index: self.index,
+            coin: self.coin,
         }
     }
 }
@@ -438,14 +453,7 @@ fn draw(
         }
         Mode::Home(Tab::Home) => {
             let latest = view.log.first().map(LogEntry::item);
-            screens::home(
-                c,
-                &status,
-                &view.root,
-                view.next_ready,
-                latest.as_ref(),
-                flash,
-            );
+            screens::home(c, &status, &view.root, latest.as_ref(), flash);
         }
         Mode::Home(Tab::Keys) => screens::keys(c, &status, view.next_ready, flash),
         Mode::Home(Tab::Activity) => screens::activity(c, &status, &items(), 0, false, flash),
@@ -694,7 +702,14 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             .map(|next| (next.key.root, next.key.pub_seed))
     }
 
-    fn remember(&mut self, approved: bool, title: String, detail: String, index: Option<u32>) {
+    fn remember(
+        &mut self,
+        approved: bool,
+        title: String,
+        detail: String,
+        index: Option<u32>,
+        coin: Coin,
+    ) {
         self.view.log.insert(
             0,
             LogEntry {
@@ -702,6 +717,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
                 title,
                 detail,
                 index,
+                coin,
             },
         );
         self.view.log.truncate(ACTIVITY_KEPT);
@@ -732,7 +748,13 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             review.tx().index
         );
         self.show_result(host, false, title, detail);
-        self.remember(false, title.to_string(), why.to_string(), None);
+        self.remember(
+            false,
+            title.to_string(),
+            why.to_string(),
+            None,
+            coin_of(review.tx()),
+        );
     }
 
     /// Ends a passcode entry without doing what it was for.
@@ -876,6 +898,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
                     shown.summary.clone(),
                     shown.detail.clone(),
                     Some(index),
+                    coin_of(review.tx()),
                 );
                 self.show_result(host, true, "Signed", format!("Key #{index:04} used"));
             }

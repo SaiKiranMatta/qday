@@ -191,22 +191,16 @@ pub fn home(
     c: &mut Canvas,
     s: &Status,
     root: &[u8; 32],
-    pending: bool,
     latest: Option<&Activity>,
     pressed: Option<usize>,
 ) {
     let crt = k();
     c.clear(crt.bg);
-    title_bar(c, "QDAY/OS 0.7", status_text(s).as_str());
+    // Key usage and the tree are the Keys screen's; home only says whether it's connected.
+    title_bar(c, "QDAY/OS 0.7", if s.connected { "USB" } else { "---" });
     tt(c, 8, 22, "QUANTUM-SAFE WALLET (XMSS/KECCAK)", crt.dim);
     let (head, tail) = hex_parts(root);
     let account = upper(text!(20, "{}..{}", head.as_str(), tail.as_str()).as_str());
-    let used = text!(16, "{}/1024", s.next_index);
-    let tree = if pending {
-        text!(16, "{} (NEXT READY)", s.tree)
-    } else {
-        text!(16, "{}", s.tree)
-    };
     let status = if s.connected { "READY" } else { "NO USB" };
     tt(
         c,
@@ -222,15 +216,7 @@ pub fn home(
         dots("ACCOUNT KEY", account.as_str(), COLS).as_str(),
         crt.fg,
     );
-    tt(
-        c,
-        8,
-        76,
-        dots("SIGNATURES", used.as_str(), COLS).as_str(),
-        crt.fg,
-    );
-    tt(c, 8, 92, dots("TREE", tree.as_str(), COLS).as_str(), crt.fg);
-    tt(c, 8, 116, "LAST", crt.dim);
+    tt(c, 8, 88, "LAST", crt.dim);
     match latest {
         Some(a) => {
             let mark = if a.approved { "OK " } else { "NO " };
@@ -238,13 +224,15 @@ pub fn home(
             tt(
                 c,
                 8,
-                132,
+                104,
                 line.as_str(),
                 if a.approved { crt.fg } else { crt.alert },
             );
+            let detail = text!(48, "   {}", upper(a.detail).as_str());
+            tt(c, 8, 120, detail.as_str(), crt.dim);
         }
         None => {
-            tt(c, 8, 132, "(NOTHING SIGNED YET)", crt.dim);
+            tt(c, 8, 104, "(NOTHING SIGNED YET)", crt.dim);
         }
     }
     prompt(
