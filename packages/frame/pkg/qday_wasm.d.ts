@@ -38,6 +38,15 @@ export function signingMessage(raw: Uint8Array | number[]): string;
 export function submission(raw: Uint8Array | number[], signature: Uint8Array | number[]): string;
 
 /**
+ * An ERC-20 transfer of `amount` (a decimal string, in the token's smallest unit). Returns the unsigned bytes.
+ *
+ * # Errors
+ *
+ * Fails on malformed addresses or amounts.
+ */
+export function tokenTransferTx(sender: string, nonce: bigint, index: number, token: string, to: string, amount: string): Uint8Array;
+
+/**
  * An ETH transfer. `value_wei` is a decimal string. Returns the unsigned bytes.
  *
  * # Errors
@@ -54,6 +63,7 @@ export interface InitOutput {
     readonly describe: (a: number, b: number) => [number, number, number, number];
     readonly signingMessage: (a: number, b: number) => [number, number, number, number];
     readonly submission: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly tokenTransferTx: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number, number];
     readonly transferTx: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

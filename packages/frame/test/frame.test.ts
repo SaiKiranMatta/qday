@@ -33,6 +33,16 @@ describe("the browser build matches the laptop tool byte for byte", () => {
     expect(f.describe(raw).action).toEqual({ kind: "transfer", to: TO, valueWei: "1000000000000000" });
   });
 
+  it("token transfer: names the token the way the device does", async () => {
+    const f = await loadFrame(wasmBytes);
+    const usdc = "0xd1108cbf3c5e7b44d7a58d4b2cda492a0ddf6a72";
+    const known = f.describe(f.tokenTransferTx(SENDER, 2n, 5, usdc, TO, 125_500_000n)).action;
+    expect(known).toEqual({ kind: "token", token: usdc, to: TO, amount: "125500000", symbol: "USDC", decimals: 6 });
+    const other = `0x${"5c".repeat(20)}` as const;
+    const unknown = f.describe(f.tokenTransferTx(SENDER, 2n, 5, other, TO, 1n)).action;
+    expect(unknown).toMatchObject({ kind: "token", token: other, symbol: null, decimals: null });
+  });
+
   it("refuses bytes that aren't a QDay transaction", async () => {
     const f = await loadFrame(wasmBytes);
     expect(() => f.describe(Uint8Array.of(1, 2, 3))).toThrow(/not an unsigned QDay transaction/);
