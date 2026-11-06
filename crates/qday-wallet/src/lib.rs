@@ -13,3 +13,4 @@ pub mod keystore;
 pub mod passcode;
 pub mod rlp;
 pub mod rng;
+pub mod wallet;
