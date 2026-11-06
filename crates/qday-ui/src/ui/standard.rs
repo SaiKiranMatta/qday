@@ -562,6 +562,7 @@ pub fn review(c: &mut Canvas, info: &ReviewInfo, pressed: Option<usize>) {
     };
     let fee = Row::Pair("Fee", info.fee);
     let key_row = match info.scheme {
+        _ if info.one_time => Row::Pair("Signature", "One-time hash"),
         Scheme::Xmss => Row::Pair("Key", key.as_str()),
         Scheme::MlDsa44 => Row::Pair("Signature", scheme_label(info.scheme)),
     };
@@ -926,6 +927,33 @@ pub fn scheme_confirm(
             Row::Pair("Signing now", scheme_label(other_scheme(target))),
             Row::Pair("Signing next", scheme_label(target)),
             Row::Pair("Funds", "don't move"),
+        ],
+    );
+    controls(c, &nav::review_keys(), pressed);
+    countdown(c, seconds_left, timeout);
+}
+
+pub fn invoice_confirm(
+    c: &mut Canvas,
+    number: u32,
+    seconds_left: u32,
+    timeout: u32,
+    pressed: Option<usize>,
+) {
+    let p = p();
+    c.clear(p.bg);
+    c.text(16, 22, "Share a key", &ts(&BODY_STRONG, p.text));
+    let title = text!(24, "Invoice #{number:04}");
+    let style = fit(title.as_str(), 290, &[&HEADLINE, &TITLE], p.text);
+    c.text(14, 58, title.as_str(), &style);
+    c.text(16, 77, "A fresh key to be paid on", &ts(&BODY, p.muted));
+    card_rows(
+        c,
+        88.0,
+        &[
+            Row::Pair("Gives the laptop", "one public key"),
+            Row::Pair("Funds", "don't move"),
+            Row::Pair("Passcode", "not needed"),
         ],
     );
     controls(c, &nav::review_keys(), pressed);

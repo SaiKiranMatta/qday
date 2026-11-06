@@ -9,6 +9,7 @@ use qday_wallet::counter::OneWayCounter;
 use qday_wallet::flash::Flash;
 use qday_wallet::frame::{Action as TxAction, Address, CHAIN_ID, FrameTx, MlFrameTx};
 use qday_wallet::input::{APPROVAL_TIMEOUT_MS, Approval, Debouncer, Decision, KeyState, Role};
+use qday_wallet::invoice::Spend;
 use qday_wallet::passcode::{Attempt, CODE_DIGITS, Code, MAX_FAILURES, Proof, shuffled_digits};
 use qday_wallet::protocol::{Line, NextKey, Request, Response, parse_request, response_line};
 use qday_wallet::rng::Rng;
@@ -122,6 +123,8 @@ pub struct Shown {
     c: String,
     fee: String,
     rotation: bool,
+    /// What the amount is counted in.
+    unit: &'static str,
     /// Short lines for the Activity tab.
     summary: String,
     detail: String,
@@ -159,6 +162,27 @@ impl Shown {
             c: String::new(),
             fee,
             rotation: false,
+            unit: "ETH",
+        })
+    }
+
+    /// Describes a spend of an invoice's note. `None` if it can't be shown whole.
+    #[must_use]
+    pub fn from_spend(spend: &Spend) -> Option<Self> {
+        let fee = eth(spend.fee);
+        if fee.len() > LONGEST_FEE {
+            return None;
+        }
+        Some(Self {
+            kind: ShownKind::Send,
+            summary: format!("Spent invoice #{}", spend.number),
+            detail: format!("to {}", short_address(&spend.to)),
+            a: format!("All of #{:04}", spend.number),
+            b: checksum_address(&spend.to),
+            c: String::new(),
+            fee,
+            rotation: false,
+            unit: "",
         })
     }
 
@@ -184,6 +208,7 @@ impl Shown {
                     c: String::new(),
                     fee,
                     rotation: false,
+                    unit: "ETH",
                 })
             }
             TxAction::Rotate { .. } => Some(Self {
@@ -193,6 +218,7 @@ impl Shown {
                 c: "Rotate keys".to_string(),
                 fee,
                 rotation: true,
+                unit: "ETH",
                 summary: "Rotated keys".to_string(),
                 detail: "to the next tree".to_string(),
             }),
@@ -217,6 +243,7 @@ impl Shown {
                     c: function,
                     fee,
                     rotation: false,
+                    unit: "ETH",
                 })
             }
         }
@@ -228,7 +255,7 @@ impl Shown {
         match self.kind {
             ShownKind::Send => screens::Review::Send {
                 amount: &self.a,
-                unit: "ETH",
+                unit: self.unit,
                 to: &self.b,
             },
             ShownKind::Call => screens::Review::Call {
@@ -278,7 +305,7 @@ impl Purpose {
             Self::Create | Self::ChangeNew(_) => "6 digits".to_string(),
             Self::CreateConfirm(_) | Self::ChangeConfirm(..) => "to confirm".to_string(),
             Self::Sign(Pending::Xmss(review), _) => format!("for key #{:04}", review.tx.index),
-            Self::Sign(Pending::MlDsa(_), _) => "to sign".to_string(),
+            Self::Sign(Pending::MlDsa(_) | Pending::Invoice(_), _) => "to sign".to_string(),
             Self::Scheme(_) => "to switch signing".to_string(),
             Self::ChangeOld => "to change it".to_string(),
             Self::Backup => "to show the words".to_string(),
@@ -309,6 +336,10 @@ enum Mode {
     },
     SchemeConfirm {
         target: Scheme,
+        approval: Approval,
+    },
+    InvoiceConfirm {
+        number: u32,
         approval: Approval,
     },
     RestoreConfirm {
@@ -381,9 +412,10 @@ fn keys_for(mode: &Mode) -> Keys {
         Mode::Home(tab) => nav::tab_keys(*tab, false, Setting::Theme),
         Mode::ActivityList { .. } => nav::tab_keys(Tab::Activity, true, Setting::Theme),
         Mode::DeviceMenu { setting } => nav::tab_keys(Tab::Device, true, *setting),
-        Mode::Review { .. } | Mode::SchemeConfirm { .. } | Mode::RestoreConfirm { .. } => {
-            nav::review_keys()
-        }
+        Mode::Review { .. }
+        | Mode::SchemeConfirm { .. }
+        | Mode::InvoiceConfirm { .. }
+        | Mode::RestoreConfirm { .. } => nav::review_keys(),
         Mode::Passcode { .. } => nav::passcode_keys(),
         Mode::SeedWords { page, .. } => nav::seed_keys(*page),
         Mode::BackupCheck { check, .. } => nav::check_keys(&check.question().choices),
@@ -444,12 +476,14 @@ fn draw(
             let (scheme, index) = match review {
                 Pending::Xmss(review) => (Scheme::Xmss, review.tx.index),
                 Pending::MlDsa(_) => (Scheme::MlDsa44, 0),
+                Pending::Invoice(_) => (Scheme::Xmss, 0),
             };
             let info = ReviewInfo {
                 review: shown.review(),
                 fee: &shown.fee,
                 chain_id: CHAIN_ID,
                 scheme,
+                one_time: matches!(review, Pending::Invoice(_)),
                 index,
                 rotation: shown.rotation,
                 seconds_left: seconds_left(approval, now_ms),
@@ -460,6 +494,10 @@ fn draw(
         Mode::SchemeConfirm { target, approval } => {
             let seconds = seconds_left(approval, now_ms);
             screens::scheme_confirm(c, *target, seconds, TIMEOUT_SECONDS, flash);
+        }
+        Mode::InvoiceConfirm { number, approval } => {
+            let seconds = seconds_left(approval, now_ms);
+            screens::invoice_confirm(c, *number, seconds, TIMEOUT_SECONDS, flash);
         }
         Mode::RestoreConfirm {
             job,
@@ -732,7 +770,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             Pending::Xmss(review) => {
                 format!("No signature. Key #{:04} is still unused.", review.tx.index)
             }
-            Pending::MlDsa(_) => "No signature was made.".to_string(),
+            Pending::MlDsa(_) | Pending::Invoice(_) => "No signature was made.".to_string(),
         };
         self.show_result(host, false, title, detail);
         self.remember(false, title.to_string(), why.to_string(), None);
@@ -845,6 +883,9 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             Purpose::Sign(Pending::MlDsa(review), shown) => {
                 self.ml_sign(host, &review, &shown, proof);
             }
+            Purpose::Sign(Pending::Invoice(spend), shown) => {
+                self.spend_invoice(host, &spend, &shown, proof);
+            }
             Purpose::Scheme(target) => self.switch_scheme(host, target, proof),
             Purpose::ChangeOld => {
                 let now = host.now_ms();
@@ -921,6 +962,42 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
                 self.show_result(host, false, "Not signed", detail);
             }
         }
+    }
+
+    fn spend_invoice(&mut self, host: &mut impl Host, spend: &Spend, shown: &Shown, proof: Proof) {
+        self.show_notice("Signing...", "One-time hash");
+        self.redraw(host);
+        match self.wallet.sign_invoice(spend, MAIN_ACCOUNT, proof) {
+            Ok(signature) => {
+                let response = Response::Sig {
+                    signature: signature.to_vec(),
+                    next: None,
+                };
+                Self::respond(host, &response);
+                self.remember(true, shown.summary.clone(), shown.detail.clone(), None);
+                let detail = format!("Invoice #{} spent", spend.number);
+                self.show_result(host, true, "Signed", detail);
+            }
+            Err(error) => {
+                Self::respond(host, &Response::Err(error));
+                let detail = if error == WalletError::InvoiceUsed {
+                    "That key already signed something else."
+                } else {
+                    "No signature was made."
+                };
+                self.show_result(host, false, "Not signed", detail.to_string());
+            }
+        }
+    }
+
+    fn hand_over_invoice(&mut self, host: &mut impl Host, number: u32) {
+        let response = self
+            .wallet
+            .invoice(MAIN_ACCOUNT, number)
+            .map_or_else(Response::Err, Response::Invoice);
+        Self::respond(host, &response);
+        host.set_light(Light::Off);
+        self.go_home(Tab::Home);
     }
 
     fn switch_scheme(&mut self, host: &mut impl Host, target: Scheme, proof: Proof) {
@@ -1010,7 +1087,10 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         // whatever screen that decision leads to.
         let deciding = matches!(
             self.mode,
-            Mode::Review { .. } | Mode::SchemeConfirm { .. } | Mode::RestoreConfirm { .. }
+            Mode::Review { .. }
+                | Mode::SchemeConfirm { .. }
+                | Mode::InvoiceConfirm { .. }
+                | Mode::RestoreConfirm { .. }
         );
         self.decide(host, now_ms);
         if let Some(raw_touch) = touched {
@@ -1079,6 +1159,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         let (decision, timed_out) = match &mut self.mode {
             Mode::Review { approval, .. }
             | Mode::SchemeConfirm { approval, .. }
+            | Mode::InvoiceConfirm { approval, .. }
             | Mode::RestoreConfirm { approval, .. } => (
                 approval.update(now_ms, keys, key_roles),
                 approval.remaining_ms(now_ms) == 0,
@@ -1098,6 +1179,14 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
                 self.ask_or_lock(host, Purpose::Scheme(target), now_ms);
             }
             Mode::SchemeConfirm { .. } => self.leave_switch(host),
+            Mode::InvoiceConfirm { number, .. } if approved => {
+                self.hand_over_invoice(host, number);
+            }
+            Mode::InvoiceConfirm { .. } => {
+                Self::respond(host, &Response::Err(WalletError::Rejected));
+                host.set_light(Light::Off);
+                self.go_home(Tab::Home);
+            }
             Mode::RestoreConfirm { job, .. } if approved => {
                 self.ask_or_lock(host, Purpose::Restore(job), now_ms);
             }
@@ -1399,6 +1488,21 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         let now_ms = host.now_ms();
         match request {
             Request::PubKey | Request::Scheme | Request::MlPubKey => {}
+            Request::Invoice(number) => {
+                host.set_light(Light::Amber);
+                self.mode = Mode::InvoiceConfirm {
+                    number,
+                    approval: Approval::new(now_ms, self.keys),
+                };
+                self.dirty = true;
+            }
+            Request::SpendInvoice(spend) => {
+                if spend.to == [0; 20] || spend.pool == [0; 20] {
+                    Self::respond(host, &Response::Err(WalletError::BadRequest));
+                } else {
+                    self.show_review(host, Pending::Invoice(spend), now_ms);
+                }
+            }
             Request::SignFrame(raw) => self.start_review(host, &raw, now_ms),
             Request::Prepare => {
                 let response = self
@@ -1445,27 +1549,30 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         }
     }
 
+    fn show_review(&mut self, host: &mut impl Host, review: Pending, now_ms: u64) {
+        let shown = match &review {
+            Pending::Xmss(review) => Shown::from_tx(&review.tx),
+            Pending::MlDsa(review) => Shown::from_ml_tx(&review.tx),
+            Pending::Invoice(spend) => Shown::from_spend(spend),
+        };
+        let Some(shown) = shown else {
+            Self::respond(host, &Response::Err(WalletError::BadRequest));
+            self.show_notice("Not shown", "That amount is too long to show whole.");
+            return;
+        };
+        host.set_light(Light::Amber);
+        let approval = Approval::new(now_ms, self.keys);
+        self.mode = Mode::Review {
+            review,
+            shown,
+            approval,
+        };
+        self.dirty = true;
+    }
+
     fn start_review(&mut self, host: &mut impl Host, raw: &[u8], now_ms: u64) {
         match self.wallet.check_transaction(raw) {
-            Ok(review) => {
-                let shown = match &review {
-                    Pending::Xmss(review) => Shown::from_tx(&review.tx),
-                    Pending::MlDsa(review) => Shown::from_ml_tx(&review.tx),
-                };
-                let Some(shown) = shown else {
-                    Self::respond(host, &Response::Err(WalletError::BadRequest));
-                    self.show_notice("Not shown", "That amount is too long to show whole.");
-                    return;
-                };
-                host.set_light(Light::Amber);
-                let approval = Approval::new(now_ms, self.keys);
-                self.mode = Mode::Review {
-                    review,
-                    shown,
-                    approval,
-                };
-                self.dirty = true;
-            }
+            Ok(review) => self.show_review(host, review, now_ms),
             Err(error) => {
                 Self::respond(host, &Response::Err(error));
                 if error == WalletError::RotationNeeded {
@@ -1545,6 +1652,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             Mode::DeviceMenu { .. } => "device-opened",
             Mode::Review { .. } => "review",
             Mode::SchemeConfirm { .. } => "scheme",
+            Mode::InvoiceConfirm { .. } => "invoice",
             Mode::RestoreConfirm { .. } => "restore",
             Mode::Passcode { .. } => "passcode",
             Mode::Result { .. } => "result",

@@ -13,8 +13,12 @@ pub mod layout {
     pub const KEY_SLOTS: u32 = 0x2000;
     /// Size of each of the two key slots.
     pub const KEY_SLOT_SIZE: u32 = 0x11000;
-    /// The derived ML-DSA public key: one sector. The sectors from here to 0x2FFFF are reserved.
+    /// The derived ML-DSA public key: one sector.
     pub const MLDSA_PUBLIC: u32 = 0x24000;
+    /// The record of spent invoices.
+    pub const SPENT_INVOICES: u32 = 0x25000;
+    /// Sectors in that record. The sectors after it, up to 0x2FFFF, are reserved.
+    pub const SPENT_INVOICE_SECTORS: u32 = 8;
     /// Touch calibration.
     pub const CALIBRATION: u32 = 0x3B000;
     /// The passcode: two sectors.

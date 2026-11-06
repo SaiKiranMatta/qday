@@ -3,12 +3,13 @@
 use qday_mldsa::{
     KeySeed, PublicKey as MlPublicKey, Signature as MlSignature, Signer as _, StandardSigner,
 };
-use qday_xmss::{Hash, KeySet, LEAVES, PublicKey, SIG_BYTES, Tree};
+use qday_xmss::{Hash, KeySet, LEAVES, ONE_TIME_SIG_BYTES, PublicKey, SIG_BYTES, Tree};
 use zeroize::Zeroize as _;
 
 use crate::counter::OneWayCounter;
 use crate::flash::Flash;
 use crate::frame::{Action, FrameTx, MlFrameTx};
+use crate::invoice::{Entry, Invoice, Spend, SpendLog, keys_for, spend_hash};
 use crate::keystore::{ActiveKey, KeyStore, PreparedKey, Slots, StoreError};
 use crate::mlkey::MlKeyStore;
 use crate::passcode::{Attempt, Code, MAX_FAILURES, Passcode, Proof};
@@ -45,6 +46,10 @@ pub enum WalletError {
     WrongScheme,
     /// ML-DSA signing gave up, or its result failed the check before release.
     SigningFailed,
+    /// This invoice's key has already signed something else.
+    InvoiceUsed,
+    /// There's no room to record another spent invoice.
+    SpendLogFull,
 }
 
 impl From<StoreError> for WalletError {
@@ -65,6 +70,8 @@ pub struct MlReview {
 /// A transaction ready to show, in whichever form the active scheme uses.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Pending {
+    /// A spend of an invoice's note.
+    Invoice(Spend),
     /// An XMSS transaction.
     Xmss(Review),
     /// An ML-DSA transaction.
@@ -87,6 +94,7 @@ pub struct Wallet<F, C> {
     counter: C,
     settings: Settings<F>,
     ml_keys: MlKeyStore<F>,
+    spends: SpendLog<F>,
     scheme: Scheme,
     slots: Slots,
 }
@@ -103,6 +111,7 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
         counter: C,
         settings: Settings<F>,
         ml_keys: MlKeyStore<F>,
+        spends: SpendLog<F>,
         now_ms: u64,
     ) -> Result<Self, WalletError> {
         let mut wallet = Self {
@@ -111,6 +120,7 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
             counter,
             settings,
             ml_keys,
+            spends,
             scheme: Scheme::Xmss,
             slots: Slots::default(),
         };
@@ -184,6 +194,7 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
         self.ml_keys.wipe()?;
         self.settings.set_scheme(Scheme::Xmss)?;
         self.scheme = Scheme::Xmss;
+        self.spends.wipe()?;
         self.passcode.wipe()?;
         Ok(())
     }
@@ -447,6 +458,50 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
         self.settings.set_scheme(scheme)?;
         self.scheme = scheme;
         Ok(())
+    }
+
+    /// The key for an invoice. Asking for one writes nothing, and asking twice gives the same key.
+    ///
+    /// # Errors
+    ///
+    /// Fails if there is no key, or if storage fails.
+    pub fn invoice(&mut self, account: u32, number: u32) -> Result<Invoice, WalletError> {
+        let mut seed = self.master_seed()?;
+        let keys = keys_for(&seed, account, number);
+        seed.zeroize();
+        Ok(Invoice {
+            number,
+            leaf: keys.leaf(0),
+            pub_seed: *keys.pub_seed(),
+        })
+    }
+
+    /// Signs a spend of an invoice's whole note. A key may only ever sign one message, so that's
+    /// recorded first, and the same request can be repeated after a power cut. Needs a fresh
+    /// passcode proof.
+    ///
+    /// # Errors
+    ///
+    /// Fails, without a signature, if the key has signed something else or nothing can be stored.
+    pub fn sign_invoice(
+        &mut self,
+        spend: &Spend,
+        account: u32,
+        _proof: Proof,
+    ) -> Result<[u8; ONE_TIME_SIG_BYTES], WalletError> {
+        if spend.to == [0; 20] || spend.pool == [0; 20] {
+            return Err(WalletError::BadRequest);
+        }
+        let mut seed = self.master_seed()?;
+        let keys = keys_for(&seed, account, spend.number);
+        seed.zeroize();
+        let leaf = keys.leaf(0);
+        let message = spend_hash(&spend.pool, &leaf, &spend.to, spend.fee);
+        match self.spends.record(&leaf, &message)? {
+            Entry::Recorded => Ok(keys.sign_one_time(&message)),
+            Entry::Used => Err(WalletError::InvoiceUsed),
+            Entry::Full => Err(WalletError::SpendLogFull),
+        }
     }
 
     /// The stored ML-DSA public key, which needs no passcode to show.

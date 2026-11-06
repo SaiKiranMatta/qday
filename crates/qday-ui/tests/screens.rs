@@ -70,6 +70,7 @@ fn every_screen() -> Vec<(&'static str, Draw)> {
         fee: "0.0026 ETH",
         chain_id: 31337,
         scheme: Scheme::Xmss,
+        one_time: false,
         index: 67,
         rotation: false,
         seconds_left: 24,
@@ -353,6 +354,29 @@ fn every_screen() -> Vec<(&'static str, Draw)> {
             Box::new(|c: &mut Canvas| scheme_confirm(c, Scheme::Xmss, 20, 30, None)),
         ),
         (
+            "share an invoice",
+            Box::new(|c: &mut Canvas| invoice_confirm(c, 1_000_000, 20, 30, Some(3))),
+        ),
+        (
+            "review invoice",
+            Box::new(move |c: &mut Canvas| {
+                review(
+                    c,
+                    &ReviewInfo {
+                        review: Review::Send {
+                            amount: "All of #1000000",
+                            unit: "",
+                            to: TO,
+                        },
+                        fee: "0.0003 ETH",
+                        one_time: true,
+                        ..send()
+                    },
+                    None,
+                )
+            }),
+        ),
+        (
             "signing",
             Box::new(|c: &mut Canvas| notice(c, "Signing...", "ML-DSA-44")),
         ),
@@ -515,6 +539,7 @@ fn the_scheme_changes_what_every_theme_shows() {
         fee: "0.0035 ETH",
         chain_id: 31337,
         scheme,
+        one_time: false,
         index: 0,
         rotation: false,
         seconds_left: 24,
@@ -542,6 +567,15 @@ fn the_scheme_changes_what_every_theme_shows() {
                 drawn(|c| device(c, &status, &info, Setting::Theme, false, None))
                     != drawn(|c| device(c, &other, &info, Setting::Theme, false, None)),
                 "{t:?} device"
+            );
+            let one_time = ReviewInfo {
+                one_time: true,
+                ..review_info(scheme)
+            };
+            assert!(
+                drawn(|c| review(c, &one_time, None))
+                    != drawn(|c| review(c, &review_info(scheme), None)),
+                "{t:?} one-time review"
             );
             assert!(
                 drawn(|c| review(c, &review_info(scheme), None))

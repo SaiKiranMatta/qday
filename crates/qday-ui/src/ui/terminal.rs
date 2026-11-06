@@ -575,6 +575,7 @@ pub fn review(c: &mut Canvas, info: &ReviewInfo, pressed: Option<usize>) {
         crt.fg,
     );
     let key_row = match info.scheme {
+        _ if info.one_time => dots("SIGNATURE", "ONE-TIME HASH", COLS),
         Scheme::Xmss => dots("ONE-TIME KEY", key.as_str(), COLS),
         Scheme::MlDsa44 => dots("SIGNATURE", scheme_label(info.scheme), COLS),
     };
@@ -865,6 +866,43 @@ pub fn scheme_confirm(
         8,
         120,
         dots("SIGNING NEXT", scheme_label(target), COLS).as_str(),
+        crt.fg,
+    );
+    tt(
+        c,
+        8,
+        176,
+        text!(32, "TIMEOUT {seconds_left}S").as_str(),
+        crt.dim,
+    );
+    fkeys(c, &nav::review_keys(), pressed);
+    crt_effects(c);
+}
+
+pub fn invoice_confirm(
+    c: &mut Canvas,
+    number: u32,
+    seconds_left: u32,
+    _timeout: u32,
+    pressed: Option<usize>,
+) {
+    let crt = k();
+    c.clear(crt.bg);
+    title_bar(c, "*** SHARE A KEY ***", "");
+    big(
+        c,
+        8,
+        28,
+        text!(24, "INVOICE #{number:04}").as_str(),
+        crt.bright,
+    );
+    tt(c, 8, 64, "A FRESH KEY TO BE PAID ON.", crt.fg);
+    tt(c, 8, 80, "FUNDS DON'T MOVE.", crt.fg);
+    tt(
+        c,
+        8,
+        104,
+        dots("GIVES THE LAPTOP", "ONE PUBLIC KEY", COLS).as_str(),
         crt.fg,
     );
     tt(

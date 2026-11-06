@@ -8,6 +8,7 @@ use common::{SimFlash, TestRng};
 use qday_wallet::counter::{CounterError, FlashCounter, OneWayCounter};
 use qday_wallet::flash::layout;
 use qday_wallet::frame::{Action, FrameTx};
+use qday_wallet::invoice::SpendLog;
 use qday_wallet::keystore::KeyStore;
 use qday_wallet::mlkey::MlKeyStore;
 use qday_wallet::passcode::{Attempt, Code, Passcode, Proof};
@@ -30,6 +31,7 @@ fn open(flash: &SimFlash) -> TestWallet {
         FlashCounter::new(flash.clone(), layout::COUNTER),
         Settings::new(flash.clone()),
         MlKeyStore::new(flash.clone()),
+        SpendLog::new(flash.clone()),
         0,
     )
     .expect("the flash is healthy")
@@ -301,6 +303,7 @@ fn nothing_is_signed_if_the_counter_fails() {
         StuckCounter,
         Settings::new(flash.clone()),
         MlKeyStore::new(flash.clone()),
+        SpendLog::new(flash.clone()),
         0,
     )
     .expect("the flash is healthy");
@@ -338,6 +341,7 @@ fn nothing_is_signed_if_the_counter_gives_the_wrong_index() {
         JumpyCounter,
         Settings::new(flash.clone()),
         MlKeyStore::new(flash.clone()),
+        SpendLog::new(flash.clone()),
         0,
     )
     .expect("the flash is healthy");

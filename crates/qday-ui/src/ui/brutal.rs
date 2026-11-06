@@ -534,7 +534,9 @@ pub fn review(c: &mut Canvas, info: &ReviewInfo, pressed: Option<usize>) {
         Review::Unknown { .. } => ("can't decode this", text!(40, "unknown"), ""),
         Review::Blind { .. } => ("not checked by the device", text!(40, "blind sign"), ""),
     };
-    let key = if info.scheme == Scheme::MlDsa44 {
+    let key = if info.one_time {
+        text!(40, "fee {} - one-time hash", info.fee)
+    } else if info.scheme == Scheme::MlDsa44 {
         let scheme = lower(scheme_label(info.scheme));
         text!(40, "fee {} - signature {}", info.fee, scheme.as_str())
     } else if info.rotation {
@@ -956,6 +958,42 @@ pub fn scheme_confirm(
     let from = lower(scheme_label(other_scheme(target)));
     c.text(24, y + 24, "signing now", &ts(&BODY, MUTED));
     c.text_right(293, y + 24, from.as_str(), &ts(&BODY, INK));
+    c.text(24, y + 46, "funds", &ts(&BODY, MUTED));
+    c.text_right(293, y + 46, "don't move", &ts(&BODY, INK));
+    controls(c, &nav::review_keys(), pressed);
+    countdown(c, seconds_left);
+}
+
+pub fn invoice_confirm(
+    c: &mut Canvas,
+    number: u32,
+    seconds_left: u32,
+    _timeout: u32,
+    pressed: Option<usize>,
+) {
+    c.clear(BG);
+    header(c, "share a key", "");
+    let hero = Rect::new(LEFT, TOP, RIGHT - LEFT, 70.0);
+    tile(c, hero, MINT, 18.0, false);
+    c.text(24, 62, "a fresh key to be paid on", &ts(&BODY, INK));
+    let title = text!(24, "invoice #{number:04}");
+    let style = if ts(&BIG, INK).width(title.as_str()) <= 270 {
+        ts(&BIG, INK)
+    } else {
+        ts(&TITLE, INK)
+    };
+    c.text(22, 100, title.as_str(), &style);
+    let top = TOP + 70.0 + GAP;
+    tile(
+        c,
+        Rect::new(LEFT, top, RIGHT - LEFT, BOTTOM - top),
+        CARD,
+        18.0,
+        false,
+    );
+    let y = top as i32;
+    c.text(24, y + 24, "gives the laptop", &ts(&BODY, MUTED));
+    c.text_right(293, y + 24, "one public key", &ts(&BODY, INK));
     c.text(24, y + 46, "funds", &ts(&BODY, MUTED));
     c.text_right(293, y + 46, "don't move", &ts(&BODY, INK));
     controls(c, &nav::review_keys(), pressed);

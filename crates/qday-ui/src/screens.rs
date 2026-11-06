@@ -145,6 +145,8 @@ pub struct ReviewInfo<'a> {
     pub fee: &'a str,
     pub chain_id: u64,
     pub scheme: Scheme,
+    /// An invoice's one-time key signs this, whatever the scheme.
+    pub one_time: bool,
     pub index: u32,
     pub rotation: bool,
     /// Seconds left to decide, and the full timeout.
@@ -294,6 +296,17 @@ pub fn scheme_confirm(
     pressed: Option<usize>,
 ) {
     dispatch!(scheme_confirm(c, target, seconds_left, timeout, pressed))
+}
+
+/// Asks before handing an invoice's key to the laptop.
+pub fn invoice_confirm(
+    c: &mut Canvas,
+    number: u32,
+    seconds_left: u32,
+    timeout: u32,
+    pressed: Option<usize>,
+) {
+    dispatch!(invoice_confirm(c, number, seconds_left, timeout, pressed))
 }
 
 /// A short message with no choices, e.g. "Tree switched".

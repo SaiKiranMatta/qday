@@ -105,6 +105,7 @@ fn screens() -> Vec<(&'static str, Draw)> {
         fee: "0.0026 ETH",
         chain_id: 31337,
         scheme: Scheme::Xmss,
+        one_time: false,
         index: 67,
         rotation: false,
         seconds_left: 24,
@@ -451,6 +452,29 @@ fn screens() -> Vec<(&'static str, Draw)> {
                     ..latest()
                 }];
                 activity(c, &ml, &items, 0, false, None)
+            }),
+        ),
+        (
+            "32-share-invoice",
+            Box::new(|c: &mut Canvas| invoice_confirm(c, 12, 24, 30, None)),
+        ),
+        (
+            "33-review-invoice",
+            Box::new(move |c: &mut Canvas| {
+                review(
+                    c,
+                    &ReviewInfo {
+                        review: Review::Send {
+                            amount: "All of #0012",
+                            unit: "",
+                            to: TO,
+                        },
+                        fee: "0.0003 ETH",
+                        one_time: true,
+                        ..send()
+                    },
+                    None,
+                )
             }),
         ),
         (
