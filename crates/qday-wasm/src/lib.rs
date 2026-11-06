@@ -2,15 +2,21 @@
 //! transaction with this, sends the bytes to the device to sign, and submits what this returns, so the
 //! browser, the laptop tool and the device can never disagree about what was signed.
 
+use qday_mldsa::Signer;
 use qday_mldsa::blob::prepare_checked;
 use qday_wallet::frame::{Action, Address, FrameTx, MlFrameTx, StealthNote};
 use qday_wallet::hex;
 use qday_wallet::stealth::{
-    Announcement, CIPHERTEXT_BYTES, Ciphertext, MetaAddress, finds, key_for, pay_to,
+    Announcement, CIPHERTEXT_BYTES, Ciphertext, MetaAddress, finds, key_for, meta_address_for,
+    pay_to, signer_for, spend_hash, view_seed_for,
 };
 use qday_wallet::submission::{ml_submission_json, submission_json};
 use qday_wallet::tokens;
+use qday_xmss::{Hash, KeySet, LEAVES, Tree};
 use wasm_bindgen::prelude::*;
+
+/// The account a stealth address belongs to, as the laptop tool uses.
+const ACCOUNT: u32 = 0;
 
 fn address(text: &str) -> Result<Address, JsError> {
     hex::decode_array(text)
@@ -375,4 +381,106 @@ fn describe_xmss(tx: &FrameTx) -> String {
         tx.index,
         tx.max_fee_wei()
     )
+}
+
+/// A wallet's keys held in the page, for the demo wallet. The page must keep its own one-time key
+/// counter: nothing here stops it signing with a key twice.
+#[wasm_bindgen]
+pub struct SoftKeys {
+    seed: Hash,
+    keys: KeySet,
+    tree: Tree,
+}
+
+#[wasm_bindgen]
+impl SoftKeys {
+    /// Derives the keys and builds the tree from a 32-byte seed.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a seed of the wrong length.
+    #[wasm_bindgen(constructor)]
+    pub fn new(seed: &str) -> Result<Self, JsError> {
+        let seed: Hash =
+            hex::decode_array(seed).ok_or_else(|| JsError::new("not a 32-byte seed"))?;
+        let keys = KeySet::derive(&seed, 0);
+        let tree = Tree::build(&keys, |_| {});
+        Ok(Self { seed, keys, tree })
+    }
+
+    /// The tree's root, as 0x hex.
+    #[must_use]
+    pub fn root(&self) -> String {
+        hex::encode(&self.tree.root())
+    }
+
+    /// The public seed, as 0x hex.
+    #[wasm_bindgen(js_name = pubSeed)]
+    #[must_use]
+    pub fn pub_seed(&self) -> String {
+        hex::encode(self.keys.pub_seed())
+    }
+
+    /// Signs a 32-byte message with one-time key `index`, as 0x hex.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a bad message, or an index past the end of the tree.
+    pub fn sign(&self, index: u32, message: &str) -> Result<String, JsError> {
+        if index >= LEAVES {
+            return Err(JsError::new("that key index is past the end of the tree"));
+        }
+        let signature = self
+            .keys
+            .sign(
+                &self.tree.root(),
+                index,
+                &hash(message)?,
+                &self.tree.auth_path(index),
+            )
+            .map_err(|_| JsError::new("that key index can't sign"))?;
+        Ok(hex::encode(&signature))
+    }
+
+    /// The stealth address, as 0x hex.
+    #[wasm_bindgen(js_name = stealthAddress)]
+    #[must_use]
+    pub fn stealth_address(&self) -> String {
+        hex::encode(&meta_address_for(&self.seed, ACCOUNT))
+    }
+
+    /// The seed that finds payments and can't spend them, as 0x hex.
+    #[wasm_bindgen(js_name = viewKey)]
+    #[must_use]
+    pub fn view_key(&self) -> String {
+        hex::encode(&view_seed_for(&self.seed, ACCOUNT))
+    }
+
+    /// Signs a spend of a stealth note with 32 random bytes, as 0x hex. `fee` is a decimal string.
+    ///
+    /// # Errors
+    ///
+    /// Fails on malformed input, or if the note isn't this wallet's.
+    #[wasm_bindgen(js_name = spendStealth)]
+    pub fn spend_stealth(
+        &self,
+        sealed: &str,
+        key_hash: &str,
+        pool: &str,
+        to: &str,
+        fee: &str,
+        random: &[u8],
+    ) -> Result<String, JsError> {
+        let key_hash = hash(key_hash)?;
+        let random: &Hash = random
+            .try_into()
+            .map_err(|_| JsError::new("a spend needs 32 random bytes"))?;
+        let signer = signer_for(&self.seed, ACCOUNT, &ciphertext(sealed)?, &key_hash)
+            .ok_or_else(|| JsError::new("that note isn't this wallet's"))?;
+        let message = spend_hash(&address(pool)?, &key_hash, &address(to)?, wei(fee)?);
+        let signature = signer
+            .sign(&message, random)
+            .map_err(|_| JsError::new("signing failed"))?;
+        Ok(hex::encode(&signature))
+    }
 }

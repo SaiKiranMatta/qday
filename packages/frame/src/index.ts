@@ -27,6 +27,27 @@ export interface StealthNote {
   ciphertext: Hex;
 }
 
+/** A spend of a stealth note, which sends the whole note to `to` and pays `fee` to whoever submits it. */
+export interface NoteSpend {
+  ciphertext: Hex;
+  keyHash: Hex;
+  pool: Hex;
+  to: Hex;
+  fee: bigint;
+}
+
+/** A wallet's keys held in the page. Nothing here stops a one-time key being used twice: see DemoSigner. */
+export interface SoftKeys {
+  root: Hex;
+  pubSeed: Hex;
+  sign(index: number, message: Hex): Hex;
+  stealthAddress(): Hex;
+  viewKey(): Hex;
+  spendStealth(spend: NoteSpend, random: Uint8Array): Hex;
+  /** Frees the keys held in WebAssembly memory. */
+  free(): void;
+}
+
 export interface FrameCodec {
   createTx(sender: Hex, index: number, factory: Hex, root: Hex, pubSeed: Hex): Uint8Array;
   transferTx(sender: Hex, nonce: bigint, index: number, to: Hex, valueWei: bigint): Uint8Array;
@@ -45,6 +66,8 @@ export interface FrameCodec {
   stealthFinds(view: Hex, address: Hex, note: StealthNote): boolean;
   /** The key a spend gives the pool. */
   stealthKey(view: Hex, address: Hex, ciphertext: Hex): Hex;
+  /** Derives a wallet's keys from a seed, which builds its tree and takes a moment. */
+  softKeys(seed: Hex): SoftKeys;
   signingMessage(raw: Uint8Array): Hex;
   /** The eth_sendFrameTransaction object for a signed transaction. */
   submission(raw: Uint8Array, signature: Uint8Array): Record<string, unknown>;
@@ -72,6 +95,19 @@ function codec(): FrameCodec {
       JSON.parse(wasm.stealthPay(address, random ?? crypto.getRandomValues(new Uint8Array(RANDOM_BYTES)))) as StealthNote,
     stealthFinds: (view, address, note) => wasm.stealthFinds(view, address, note.keyHash, note.viewTag, note.ciphertext),
     stealthKey: (view, address, ciphertext) => wasm.stealthKey(view, address, ciphertext) as Hex,
+    softKeys: (seed) => {
+      const keys = new wasm.SoftKeys(seed);
+      return {
+        root: keys.root() as Hex,
+        pubSeed: keys.pubSeed() as Hex,
+        sign: (index, message) => keys.sign(index, message) as Hex,
+        stealthAddress: () => keys.stealthAddress() as Hex,
+        viewKey: () => keys.viewKey() as Hex,
+        spendStealth: (spend, random) =>
+          keys.spendStealth(spend.ciphertext, spend.keyHash, spend.pool, spend.to, spend.fee.toString(), random) as Hex,
+        free: () => keys.free(),
+      };
+    },
     signingMessage: (raw) => wasm.signingMessage(raw) as Hex,
     submission: (raw, signature) => JSON.parse(wasm.submission(raw, signature)) as Record<string, unknown>,
     describe: (raw) => JSON.parse(wasm.describe(raw)) as TxDescription,
@@ -83,3 +119,5 @@ export function loadFrame(module?: BufferSource): Promise<FrameCodec> {
   loading ??= (module ? init({ module_or_path: module }) : init()).then(codec);
   return loading;
 }
+
+export * from "./demo";

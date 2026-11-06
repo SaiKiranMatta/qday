@@ -136,3 +136,55 @@ describe("stealth payments in the browser", () => {
     expect(f.describe(ml)).toMatchObject({ index: null, action });
   });
 });
+
+describe("software keys in the browser", () => {
+  const POOL_ADDRESS = `0x${"90".repeat(20)}` as const;
+
+  it("makes the laptop tool's public key", async () => {
+    const keys = (await loadFrame(wasmBytes)).softKeys(LAPTOP_SEED);
+    expect(`${keys.root} ${keys.pubSeed}`).toBe(cli("pubkey", LAPTOP_SEED));
+  });
+
+  it("makes the laptop tool's signature", async () => {
+    const keys = (await loadFrame(wasmBytes)).softKeys(LAPTOP_SEED);
+    const message = `0x${"11".repeat(32)}` as const;
+    expect(keys.sign(5, message)).toBe(cli("sign", LAPTOP_SEED, "5", message));
+  });
+
+  it("refuses a key index past the end of the tree", async () => {
+    const keys = (await loadFrame(wasmBytes)).softKeys(LAPTOP_SEED);
+    expect(() => keys.sign(1024, `0x${"11".repeat(32)}`)).toThrow(/index/);
+  });
+
+  it("refuses a seed of the wrong length", async () => {
+    const f = await loadFrame(wasmBytes);
+    expect(() => f.softKeys("0x00")).toThrow(/seed/);
+  });
+
+  it("gives the laptop tool's stealth address and view key", async () => {
+    const keys = (await loadFrame(wasmBytes)).softKeys(LAPTOP_SEED);
+    expect(keys.stealthAddress()).toBe(cli("stealth-address", LAPTOP_SEED));
+    expect(keys.viewKey()).toBe(cli("stealth-view", LAPTOP_SEED));
+  });
+
+  it("signs a spend as the laptop tool does", async () => {
+    const f = await loadFrame(wasmBytes);
+    const keys = f.softKeys(LAPTOP_SEED);
+    const paid = f.stealthPay(keys.stealthAddress(), RANDOM);
+    const rnd = `0x${"33".repeat(32)}` as const;
+    const spend = { ciphertext: paid.ciphertext, keyHash: paid.keyHash, pool: POOL_ADDRESS, to: TO as `0x${string}`, fee: 1000n };
+    expect(keys.spendStealth(spend, fromHex(rnd))).toBe(
+      cli("stealth-sign", LAPTOP_SEED, paid.ciphertext, paid.keyHash, POOL_ADDRESS, TO, "1000", rnd),
+    );
+  });
+
+  it("won't sign a spend of someone else's note", async () => {
+    const f = await loadFrame(wasmBytes);
+    const keys = f.softKeys(LAPTOP_SEED);
+    const other = f.softKeys(`0x${"77".repeat(32)}`);
+    const paid = f.stealthPay(other.stealthAddress(), RANDOM);
+    const spend = { ciphertext: paid.ciphertext, keyHash: paid.keyHash, pool: POOL_ADDRESS, to: TO as `0x${string}`, fee: 1000n };
+    expect(() => keys.spendStealth(spend, new Uint8Array(32))).toThrow(/note/);
+  });
+});
+

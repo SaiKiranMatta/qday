@@ -1,6 +1,193 @@
 /* @ts-self-types="./qday_wasm.d.ts" */
 
 /**
+ * A wallet's keys held in the page, for the demo wallet. The page must keep its own one-time key
+ * counter: nothing here stops it signing with a key twice.
+ */
+export class SoftKeys {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        SoftKeysFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_softkeys_free(ptr, 0);
+    }
+    /**
+     * Derives the keys and builds the tree from a 32-byte seed.
+     *
+     * # Errors
+     *
+     * Fails on a seed of the wrong length.
+     * @param {string} seed
+     */
+    constructor(seed) {
+        const ptr0 = passStringToWasm0(seed, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.softkeys_new(ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        this.__wbg_ptr = ret[0];
+        SoftKeysFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * The public seed, as 0x hex.
+     * @returns {string}
+     */
+    pubSeed() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.softkeys_pubSeed(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * The tree's root, as 0x hex.
+     * @returns {string}
+     */
+    root() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.softkeys_root(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Signs a 32-byte message with one-time key `index`, as 0x hex.
+     *
+     * # Errors
+     *
+     * Fails on a bad message, or an index past the end of the tree.
+     * @param {number} index
+     * @param {string} message
+     * @returns {string}
+     */
+    sign(index, message) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const val2 = +index;
+            const ptr0 = passStringToWasm0(message, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.softkeys_sign(this.__wbg_ptr, val2, ptr0, len0);
+            var ptr3 = ret[0];
+            var len3 = ret[1];
+            if (ret[3]) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+        }
+    }
+    /**
+     * Signs a spend of a stealth note with 32 random bytes, as 0x hex. `fee` is a decimal string.
+     *
+     * # Errors
+     *
+     * Fails on malformed input, or if the note isn't this wallet's.
+     * @param {string} sealed
+     * @param {string} key_hash
+     * @param {string} pool
+     * @param {string} to
+     * @param {string} fee
+     * @param {Uint8Array | number[]} random
+     * @returns {string}
+     */
+    spendStealth(sealed, key_hash, pool, to, fee, random) {
+        let deferred8_0;
+        let deferred8_1;
+        try {
+            let ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5;
+            try {
+                ptr0 = passStringToWasm0(sealed, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+                len0 = WASM_VECTOR_LEN;
+                ptr1 = passStringToWasm0(key_hash, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+                len1 = WASM_VECTOR_LEN;
+                ptr2 = passStringToWasm0(pool, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+                len2 = WASM_VECTOR_LEN;
+                ptr3 = passStringToWasm0(to, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+                len3 = WASM_VECTOR_LEN;
+                ptr4 = passStringToWasm0(fee, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+                len4 = WASM_VECTOR_LEN;
+                ptr5 = passArray8ToWasm0(random, wasm.__wbindgen_malloc);
+                len5 = WASM_VECTOR_LEN;
+            } catch (e) {
+                if (ptr5) { wasm.__wbindgen_free(ptr5, len5 * 1, 1); }
+                if (ptr4) { wasm.__wbindgen_free(ptr4, len4 * 1, 1); }
+                if (ptr3) { wasm.__wbindgen_free(ptr3, len3 * 1, 1); }
+                if (ptr2) { wasm.__wbindgen_free(ptr2, len2 * 1, 1); }
+                if (ptr1) { wasm.__wbindgen_free(ptr1, len1 * 1, 1); }
+                if (ptr0) { wasm.__wbindgen_free(ptr0, len0 * 1, 1); }
+                throw e;
+            }
+            const ret = wasm.softkeys_spendStealth(this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, ptr4, len4, ptr5, len5);
+            var ptr7 = ret[0];
+            var len7 = ret[1];
+            if (ret[3]) {
+                ptr7 = 0; len7 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred8_0 = ptr7;
+            deferred8_1 = len7;
+            return getStringFromWasm0(ptr7, len7);
+        } finally {
+            wasm.__wbindgen_free(deferred8_0, deferred8_1, 1);
+        }
+    }
+    /**
+     * The stealth address, as 0x hex.
+     * @returns {string}
+     */
+    stealthAddress() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.softkeys_stealthAddress(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * The seed that finds payments and can't spend them, as 0x hex.
+     * @returns {string}
+     */
+    viewKey() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.softkeys_viewKey(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+}
+if (Symbol.dispose) SoftKeys.prototype[Symbol.dispose] = SoftKeys.prototype.free;
+
+/**
  * The account's first transaction, which deploys it through `factory`. Returns the unsigned bytes.
  *
  * # Errors
@@ -515,6 +702,9 @@ function __wbg_get_imports() {
             const ret = Error(getStringFromWasm0(arg0, arg1));
             return ret;
         },
+        __wbg___wbindgen_throw_4c88d8bf264fd984: function(arg0, arg1) {
+            throw new Error(getStringFromWasm0(arg0, arg1));
+        },
         __wbindgen_init_externref_table: function() {
             const table = wasm.__wbindgen_externrefs;
             table.set(0, undefined);
@@ -529,6 +719,10 @@ function __wbg_get_imports() {
         "./qday_wasm_bg.js": import0,
     };
 }
+
+const SoftKeysFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_softkeys_free(ptr, 1));
 
 function getArrayU8FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
