@@ -14,6 +14,7 @@ use qday_wallet::passcode::{Attempt, CODE_DIGITS, Code, MAX_FAILURES, Proof, shu
 use qday_wallet::protocol::{Line, NextKey, Request, Response, parse_request, response_line};
 use qday_wallet::rng::Rng;
 use qday_wallet::settings::{CROSSES, Calibration, Scheme, Settings};
+use qday_wallet::stealth::StealthSpend;
 use qday_wallet::wallet::{
     MAIN_ACCOUNT, MlReview, Pending, RESTORE_SKIP, Review, Wallet, WalletError,
 };
@@ -24,8 +25,8 @@ use crate::fb::Framebuffer;
 use crate::format::{checksum_address, eth, short_address, wait_text};
 use crate::nav::{self, Action, Keys, Scroll, Setting};
 use crate::screens::{
-    self, ACTIVITY_ROWS, Activity, DeviceInfo, Passcode, ReviewInfo, Status, other_scheme,
-    scheme_label,
+    self, ACTIVITY_ROWS, Activity, DeviceInfo, Passcode, ReviewInfo, ShareInfo, Status,
+    other_scheme, scheme_label,
 };
 use crate::theme::{self, Theme};
 use crate::widgets::{Tab, digit_in_slot, key_rect};
@@ -166,6 +167,26 @@ impl Shown {
         })
     }
 
+    /// Describes a spend of a stealth note. `None` if it can't be shown whole.
+    #[must_use]
+    pub fn from_stealth(spend: &StealthSpend) -> Option<Self> {
+        let fee = eth(spend.fee);
+        if fee.len() > LONGEST_FEE {
+            return None;
+        }
+        Some(Self {
+            kind: ShownKind::Send,
+            summary: "Spent stealth note".to_string(),
+            detail: format!("to {}", short_address(&spend.to)),
+            a: "Whole note".to_string(),
+            b: checksum_address(&spend.to),
+            c: String::new(),
+            fee,
+            rotation: false,
+            unit: "",
+        })
+    }
+
     /// Describes a spend of an invoice's note. `None` if it can't be shown whole.
     #[must_use]
     pub fn from_spend(spend: &Spend) -> Option<Self> {
@@ -279,6 +300,7 @@ enum Purpose {
     CreateConfirm(Code),
     Sign(Pending, Shown),
     Scheme(Scheme),
+    ViewKey,
     ChangeOld,
     ChangeNew(Proof),
     ChangeConfirm(Proof, Code),
@@ -294,6 +316,7 @@ impl Purpose {
             Self::CreateConfirm(_) | Self::ChangeConfirm(..) => "Enter it again",
             Self::Sign(..)
             | Self::Scheme(_)
+            | Self::ViewKey
             | Self::ChangeOld
             | Self::Backup
             | Self::Restore(_) => "Enter passcode",
@@ -305,13 +328,22 @@ impl Purpose {
             Self::Create | Self::ChangeNew(_) => "6 digits".to_string(),
             Self::CreateConfirm(_) | Self::ChangeConfirm(..) => "to confirm".to_string(),
             Self::Sign(Pending::Xmss(review), _) => format!("for key #{:04}", review.tx.index),
-            Self::Sign(Pending::MlDsa(_) | Pending::Invoice(_), _) => "to sign".to_string(),
+            Self::Sign(_, _) => "to sign".to_string(),
+            Self::ViewKey => "to share the view key".to_string(),
             Self::Scheme(_) => "to switch signing".to_string(),
             Self::ChangeOld => "to change it".to_string(),
             Self::Backup => "to show the words".to_string(),
             Self::Restore(_) => "to restore".to_string(),
         }
     }
+}
+
+/// What's about to be handed to the laptop.
+#[derive(Clone, Copy)]
+enum Sharing {
+    Invoice(u32),
+    Address,
+    ViewKey,
 }
 
 /// What the device is doing.
@@ -338,8 +370,8 @@ enum Mode {
         target: Scheme,
         approval: Approval,
     },
-    InvoiceConfirm {
-        number: u32,
+    ShareConfirm {
+        what: Sharing,
         approval: Approval,
     },
     RestoreConfirm {
@@ -414,7 +446,7 @@ fn keys_for(mode: &Mode) -> Keys {
         Mode::DeviceMenu { setting } => nav::tab_keys(Tab::Device, true, *setting),
         Mode::Review { .. }
         | Mode::SchemeConfirm { .. }
-        | Mode::InvoiceConfirm { .. }
+        | Mode::ShareConfirm { .. }
         | Mode::RestoreConfirm { .. } => nav::review_keys(),
         Mode::Passcode { .. } => nav::passcode_keys(),
         Mode::SeedWords { page, .. } => nav::seed_keys(*page),
@@ -476,14 +508,18 @@ fn draw(
             let (scheme, index) = match review {
                 Pending::Xmss(review) => (Scheme::Xmss, review.tx.index),
                 Pending::MlDsa(_) => (Scheme::MlDsa44, 0),
-                Pending::Invoice(_) => (Scheme::Xmss, 0),
+                Pending::Invoice(_) | Pending::Stealth(_) => (Scheme::Xmss, 0),
             };
             let info = ReviewInfo {
                 review: shown.review(),
                 fee: &shown.fee,
                 chain_id: CHAIN_ID,
                 scheme,
-                one_time: matches!(review, Pending::Invoice(_)),
+                signature: match review {
+                    Pending::Invoice(_) => Some("One-time hash"),
+                    Pending::Stealth(_) => Some("One-time ML-DSA"),
+                    Pending::Xmss(_) | Pending::MlDsa(_) => None,
+                },
                 index,
                 rotation: shown.rotation,
                 seconds_left: seconds_left(approval, now_ms),
@@ -495,9 +531,40 @@ fn draw(
             let seconds = seconds_left(approval, now_ms);
             screens::scheme_confirm(c, *target, seconds, TIMEOUT_SECONDS, flash);
         }
-        Mode::InvoiceConfirm { number, approval } => {
-            let seconds = seconds_left(approval, now_ms);
-            screens::invoice_confirm(c, *number, seconds, TIMEOUT_SECONDS, flash);
+        Mode::ShareConfirm { what, approval } => {
+            let invoice;
+            let (title, detail, gives, passcode) = match what {
+                Sharing::Invoice(number) => {
+                    invoice = format!("Invoice #{number:04}");
+                    (
+                        invoice.as_str(),
+                        "A fresh key to be paid on",
+                        "one public key",
+                        false,
+                    )
+                }
+                Sharing::Address => (
+                    "Stealth address",
+                    "Lets anyone pay you privately",
+                    "your public address",
+                    false,
+                ),
+                Sharing::ViewKey => (
+                    "View key",
+                    "Lets the laptop find your payments",
+                    "your view key",
+                    true,
+                ),
+            };
+            let info = ShareInfo {
+                title,
+                detail,
+                gives,
+                passcode,
+                seconds_left: seconds_left(approval, now_ms),
+                timeout: TIMEOUT_SECONDS,
+            };
+            screens::share_confirm(c, &info, flash);
         }
         Mode::RestoreConfirm {
             job,
@@ -770,7 +837,9 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             Pending::Xmss(review) => {
                 format!("No signature. Key #{:04} is still unused.", review.tx.index)
             }
-            Pending::MlDsa(_) | Pending::Invoice(_) => "No signature was made.".to_string(),
+            Pending::MlDsa(_) | Pending::Invoice(_) | Pending::Stealth(_) => {
+                "No signature was made.".to_string()
+            }
         };
         self.show_result(host, false, title, detail);
         self.remember(false, title.to_string(), why.to_string(), None);
@@ -781,6 +850,11 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         match purpose {
             Purpose::Sign(pending, _) => self.refuse(host, &pending, timed_out),
             Purpose::Scheme(_) => self.leave_switch(host),
+            Purpose::ViewKey => {
+                Self::respond(host, &Response::Err(WalletError::Rejected));
+                let detail = "The view key stayed on the device.".to_string();
+                self.show_result(host, false, "Not shared", detail);
+            }
             Purpose::Restore(_) => {
                 Self::respond(host, &Response::Err(WalletError::Rejected));
                 let detail = "The device's keys are unchanged.".to_string();
@@ -866,7 +940,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
                 host.restart();
             }
             Err(error) => {
-                if let Purpose::Sign(..) | Purpose::Restore(_) = purpose {
+                if let Purpose::Sign(..) | Purpose::Restore(_) | Purpose::ViewKey = purpose {
                     Self::respond(host, &Response::Err(error));
                 }
                 self.show_result(host, false, "Device error", "Storage failed".to_string());
@@ -886,6 +960,10 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             Purpose::Sign(Pending::Invoice(spend), shown) => {
                 self.spend_invoice(host, &spend, &shown, proof);
             }
+            Purpose::Sign(Pending::Stealth(spend), shown) => {
+                self.spend_stealth(host, &spend, &shown, proof);
+            }
+            Purpose::ViewKey => self.hand_over_view_key(host, proof),
             Purpose::Scheme(target) => self.switch_scheme(host, target, proof),
             Purpose::ChangeOld => {
                 let now = host.now_ms();
@@ -990,11 +1068,69 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         }
     }
 
-    fn hand_over_invoice(&mut self, host: &mut impl Host, number: u32) {
-        let response = self
+    fn spend_stealth(
+        &mut self,
+        host: &mut impl Host,
+        spend: &StealthSpend,
+        shown: &Shown,
+        proof: Proof,
+    ) {
+        self.show_notice("Signing...", "One-time ML-DSA");
+        self.redraw(host);
+        match self
             .wallet
-            .invoice(MAIN_ACCOUNT, number)
-            .map_or_else(Response::Err, Response::Invoice);
+            .sign_stealth(spend, MAIN_ACCOUNT, proof, &mut self.rng)
+        {
+            Ok(signature) => {
+                let response = Response::Sig {
+                    signature: signature.to_vec(),
+                    next: None,
+                };
+                Self::respond(host, &response);
+                self.remember(true, shown.summary.clone(), shown.detail.clone(), None);
+                self.show_result(host, true, "Signed", "Stealth note spent".to_string());
+            }
+            Err(error) => {
+                Self::respond(host, &Response::Err(error));
+                let detail = "No signature was made.".to_string();
+                self.show_result(host, false, "Not signed", detail);
+            }
+        }
+    }
+
+    fn hand_over_view_key(&mut self, host: &mut impl Host, proof: Proof) {
+        match self.wallet.view_seed(MAIN_ACCOUNT, proof) {
+            Ok(view) => {
+                Self::respond(host, &Response::ViewKey(view));
+                let detail = "It can find payments, not spend them.".to_string();
+                self.show_result(host, true, "View key shared", detail);
+            }
+            Err(error) => {
+                Self::respond(host, &Response::Err(error));
+                let detail = "The view key stayed on the device.".to_string();
+                self.show_result(host, false, "Not shared", detail);
+            }
+        }
+    }
+
+    /// Hands over what doesn't need a passcode.
+    fn hand_over(&mut self, host: &mut impl Host, what: Sharing, now_ms: u64) {
+        let response = match what {
+            Sharing::Invoice(number) => self
+                .wallet
+                .invoice(MAIN_ACCOUNT, number)
+                .map_or_else(Response::Err, Response::Invoice),
+            Sharing::Address => self
+                .wallet
+                .meta_address(MAIN_ACCOUNT)
+                .map_or_else(Response::Err, |meta| {
+                    Response::StealthAddress(meta.to_vec())
+                }),
+            Sharing::ViewKey => {
+                self.ask_or_lock(host, Purpose::ViewKey, now_ms);
+                return;
+            }
+        };
         Self::respond(host, &response);
         host.set_light(Light::Off);
         self.go_home(Tab::Home);
@@ -1089,7 +1225,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             self.mode,
             Mode::Review { .. }
                 | Mode::SchemeConfirm { .. }
-                | Mode::InvoiceConfirm { .. }
+                | Mode::ShareConfirm { .. }
                 | Mode::RestoreConfirm { .. }
         );
         self.decide(host, now_ms);
@@ -1159,7 +1295,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         let (decision, timed_out) = match &mut self.mode {
             Mode::Review { approval, .. }
             | Mode::SchemeConfirm { approval, .. }
-            | Mode::InvoiceConfirm { approval, .. }
+            | Mode::ShareConfirm { approval, .. }
             | Mode::RestoreConfirm { approval, .. } => (
                 approval.update(now_ms, keys, key_roles),
                 approval.remaining_ms(now_ms) == 0,
@@ -1179,10 +1315,8 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
                 self.ask_or_lock(host, Purpose::Scheme(target), now_ms);
             }
             Mode::SchemeConfirm { .. } => self.leave_switch(host),
-            Mode::InvoiceConfirm { number, .. } if approved => {
-                self.hand_over_invoice(host, number);
-            }
-            Mode::InvoiceConfirm { .. } => {
+            Mode::ShareConfirm { what, .. } if approved => self.hand_over(host, what, now_ms),
+            Mode::ShareConfirm { .. } => {
                 Self::respond(host, &Response::Err(WalletError::Rejected));
                 host.set_light(Light::Off);
                 self.go_home(Tab::Home);
@@ -1488,13 +1622,15 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         let now_ms = host.now_ms();
         match request {
             Request::PubKey | Request::Scheme | Request::MlPubKey => {}
-            Request::Invoice(number) => {
-                host.set_light(Light::Amber);
-                self.mode = Mode::InvoiceConfirm {
-                    number,
-                    approval: Approval::new(now_ms, self.keys),
-                };
-                self.dirty = true;
+            Request::Invoice(number) => self.ask_to_share(host, Sharing::Invoice(number), now_ms),
+            Request::StealthAddress => self.ask_to_share(host, Sharing::Address, now_ms),
+            Request::ViewKey => self.ask_to_share(host, Sharing::ViewKey, now_ms),
+            Request::SpendStealth(spend) => {
+                if spend.to == [0; 20] || spend.pool == [0; 20] {
+                    Self::respond(host, &Response::Err(WalletError::BadRequest));
+                } else {
+                    self.show_review(host, Pending::Stealth(spend), now_ms);
+                }
             }
             Request::SpendInvoice(spend) => {
                 if spend.to == [0; 20] || spend.pool == [0; 20] {
@@ -1549,11 +1685,21 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         }
     }
 
+    fn ask_to_share(&mut self, host: &mut impl Host, what: Sharing, now_ms: u64) {
+        host.set_light(Light::Amber);
+        self.mode = Mode::ShareConfirm {
+            what,
+            approval: Approval::new(now_ms, self.keys),
+        };
+        self.dirty = true;
+    }
+
     fn show_review(&mut self, host: &mut impl Host, review: Pending, now_ms: u64) {
         let shown = match &review {
             Pending::Xmss(review) => Shown::from_tx(&review.tx),
             Pending::MlDsa(review) => Shown::from_ml_tx(&review.tx),
             Pending::Invoice(spend) => Shown::from_spend(spend),
+            Pending::Stealth(spend) => Shown::from_stealth(spend),
         };
         let Some(shown) = shown else {
             Self::respond(host, &Response::Err(WalletError::BadRequest));
@@ -1652,7 +1798,11 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             Mode::DeviceMenu { .. } => "device-opened",
             Mode::Review { .. } => "review",
             Mode::SchemeConfirm { .. } => "scheme",
-            Mode::InvoiceConfirm { .. } => "invoice",
+            Mode::ShareConfirm { what, .. } => match what {
+                Sharing::Invoice(_) => "invoice",
+                Sharing::Address => "address",
+                Sharing::ViewKey => "viewkey",
+            },
             Mode::RestoreConfirm { .. } => "restore",
             Mode::Passcode { .. } => "passcode",
             Mode::Result { .. } => "result",

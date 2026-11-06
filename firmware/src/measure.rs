@@ -127,7 +127,7 @@ fn draw(c: &mut qday_ui::canvas::Canvas, screen: usize) {
                 fee: "0.0026 ETH",
                 chain_id: 1337,
                 scheme: Scheme::Xmss,
-                one_time: false,
+                signature: None,
                 index: 67,
                 rotation: false,
                 seconds_left: 24,

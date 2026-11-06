@@ -20,9 +20,10 @@ use qday_wallet::hex;
 use qday_wallet::invoice::{Spend, SpendLog, spend_hash};
 use qday_wallet::keystore::KeyStore;
 use qday_wallet::mlkey::MlKeyStore;
-use qday_wallet::passcode::{Code, Passcode};
+use qday_wallet::passcode::{Attempt, Code, Passcode};
 use qday_wallet::protocol::{Line, Request, Response, parse_response, request_line};
 use qday_wallet::settings::{CROSSES, Calibration, Scheme, Settings};
+use qday_wallet::stealth::{StealthSpend, pay_to, view_seed_for};
 use qday_wallet::wallet::{MAIN_ACCOUNT, Wallet, WalletError};
 use qday_xmss::{PublicKey, keccak256, verify, verify_one_time};
 
@@ -897,7 +898,7 @@ fn the_ml_dsa_review_shows_a_signature_row_and_the_real_fee() {
         fee: "0.0035 ETH",
         chain_id: CHAIN_ID,
         scheme: Scheme::MlDsa44,
-        one_time: false,
+        signature: None,
         index: 0,
         rotation: false,
         seconds_left: 30,
@@ -1255,7 +1256,7 @@ fn the_review_says_a_one_time_key_signs() {
         fee: "0.001 ETH",
         chain_id: CHAIN_ID,
         scheme: Scheme::Xmss,
-        one_time: true,
+        signature: Some("One-time hash"),
         index: 0,
         rotation: false,
         seconds_left: 30,
@@ -1298,6 +1299,205 @@ fn a_locked_device_refuses_a_spend() {
     rig.press(3);
     assert_eq!(rig.screen(), "locked");
     assert_eq!(rig.last_response(), Response::Err(WalletError::Rejected));
+}
+
+// Stealth payments
+
+fn stealth_spend(rig: &mut Rig, fee: u128) -> StealthSpend {
+    let meta = rig
+        .app
+        .wallet()
+        .meta_address(MAIN_ACCOUNT)
+        .expect("it derives");
+    let announcement = pay_to(&meta, &[0x55; 64]).expect("the address is good");
+    StealthSpend {
+        ciphertext: announcement.ciphertext,
+        key_hash: announcement.key_hash,
+        pool: POOL,
+        to: TO,
+        fee,
+    }
+}
+
+fn spend_request(spend: StealthSpend) -> Request {
+    Request::SpendStealth(Box::new(spend))
+}
+
+#[test]
+fn the_stealth_address_needs_a_press_but_no_passcode() {
+    let mut rig = rig();
+    rig.request(&Request::StealthAddress);
+    assert_eq!(rig.screen(), "address");
+    assert!(rig.host.sent.is_empty());
+    rig.wait(520);
+    rig.press(3);
+    let want = rig
+        .app
+        .wallet()
+        .meta_address(MAIN_ACCOUNT)
+        .expect("it derives");
+    assert_eq!(rig.last_response(), Response::StealthAddress(want.to_vec()));
+    assert_eq!(rig.screen(), "wallet");
+}
+
+#[test]
+fn k1_refuses_to_hand_over_the_address() {
+    let mut rig = rig();
+    rig.request(&Request::StealthAddress);
+    rig.wait(520);
+    rig.press(0);
+    assert_eq!(rig.last_response(), Response::Err(WalletError::Rejected));
+}
+
+#[test]
+fn the_view_key_needs_the_passcode() {
+    let mut rig = rig();
+    rig.request(&Request::ViewKey);
+    assert_eq!(rig.screen(), "viewkey");
+    rig.approve(CODE);
+    let Response::ViewKey(view) = rig.last_response() else {
+        panic!("it must hand it over");
+    };
+    let seed = {
+        let wallet = rig.app.wallet();
+        let Ok(Attempt::Correct(proof)) = wallet.enter_passcode(&CODE, 1 << 40) else {
+            panic!("the code is right");
+        };
+        wallet.seed(proof).expect("it reads")
+    };
+    assert_eq!(view, view_seed_for(&seed, MAIN_ACCOUNT));
+    assert_eq!(rig.screen(), "result");
+}
+
+#[test]
+fn cancelling_the_passcode_keeps_the_view_key() {
+    let mut rig = rig();
+    rig.request(&Request::ViewKey);
+    rig.wait(520);
+    rig.press(3);
+    rig.press(0);
+    assert_eq!(rig.last_response(), Response::Err(WalletError::Rejected));
+}
+
+#[test]
+fn a_request_during_a_share_is_refused() {
+    let mut rig = rig();
+    rig.request(&Request::ViewKey);
+    rig.sign_request(0);
+    assert_eq!(rig.last_response(), Response::Err(WalletError::BadRequest));
+    assert_eq!(rig.screen(), "viewkey");
+}
+
+#[test]
+fn an_approved_stealth_spend_gives_a_valid_signature() {
+    let mut rig = rig();
+    let spend = stealth_spend(&mut rig, FEE);
+    rig.request(&spend_request(spend));
+    assert_eq!(rig.screen(), "review");
+    rig.approve(CODE);
+    let Response::Sig { signature, next } = rig.last_response() else {
+        panic!("it must sign");
+    };
+    assert_eq!(next, None);
+    assert_eq!(signature.len(), 2420);
+    assert_eq!(rig.counter(), 0);
+}
+
+#[test]
+fn a_ciphertext_for_another_key_gets_no_signature() {
+    let mut rig = rig();
+    let mut spend = stealth_spend(&mut rig, FEE);
+    spend.key_hash = [0x77; 32];
+    rig.request(&spend_request(spend));
+    rig.approve(CODE);
+    assert_eq!(rig.last_response(), Response::Err(WalletError::BadRequest));
+    assert_eq!(rig.screen(), "result");
+}
+
+#[test]
+fn a_stealth_spend_to_zero_is_refused_with_no_screen() {
+    let mut rig = rig();
+    let mut spend = stealth_spend(&mut rig, FEE);
+    spend.to = [0; 20];
+    rig.request(&spend_request(spend));
+    assert_eq!(rig.last_response(), Response::Err(WalletError::BadRequest));
+    assert_eq!(rig.screen(), "wallet");
+}
+
+#[test]
+fn k1_rejects_a_stealth_spend() {
+    let mut rig = rig();
+    let spend = stealth_spend(&mut rig, FEE);
+    rig.request(&spend_request(spend));
+    rig.wait(520);
+    rig.press(0);
+    assert_eq!(rig.last_response(), Response::Err(WalletError::Rejected));
+}
+
+#[test]
+fn a_stealth_fee_too_long_to_show_is_refused() {
+    let mut rig = rig();
+    let spend = stealth_spend(&mut rig, 1_234_567_890_123);
+    rig.request(&spend_request(spend));
+    assert_eq!(rig.last_response(), Response::Err(WalletError::BadRequest));
+    assert_eq!(rig.screen(), "notice");
+}
+
+#[test]
+fn the_stealth_review_shows_the_true_recipient() {
+    let mut rig = rig();
+    let spend = stealth_spend(&mut rig, FEE);
+    let shown = Shown::from_stealth(&spend).expect("this fits");
+    let Review::Send { amount, unit, to } = shown.review() else {
+        panic!("a spend is a send");
+    };
+    assert_eq!((amount, unit), ("Whole note", ""));
+    assert_eq!(to, checksum_address(&TO));
+}
+
+#[test]
+fn the_stealth_review_says_a_one_time_ml_dsa_key_signs() {
+    let _theme = theme_lock();
+    let mut rig = rig();
+    let spend = stealth_spend(&mut rig, FEE);
+    rig.request(&spend_request(spend));
+    let shown = Shown::from_stealth(&spend).expect("this fits");
+    let mut want = Framebuffer::new();
+    let info = screens::ReviewInfo {
+        review: shown.review(),
+        fee: "0.001 ETH",
+        chain_id: CHAIN_ID,
+        scheme: Scheme::Xmss,
+        signature: Some("One-time ML-DSA"),
+        index: 0,
+        rotation: false,
+        seconds_left: 30,
+        timeout: 30,
+    };
+    screens::review(&mut want.canvas(), &info, None);
+    assert!(pixels(rig.app.frame()) == pixels(&want));
+}
+
+#[test]
+fn a_spent_stealth_note_is_in_the_activity_log() {
+    let mut rig = rig();
+    let spend = stealth_spend(&mut rig, FEE);
+    rig.request(&spend_request(spend));
+    rig.approve(CODE);
+    let activity = rig.app.activity();
+    let latest = activity.first().expect("it was recorded");
+    assert!(latest.approved);
+    assert_eq!(latest.title, "Spent stealth note");
+    assert_eq!(latest.index, None);
+}
+
+#[test]
+fn stealth_works_in_ml_dsa_mode() {
+    let mut rig = switched_rig();
+    let spend = stealth_spend(&mut rig, FEE);
+    rig.request(&spend_request(spend));
+    rig.approve(CODE);
+    assert!(matches!(rig.last_response(), Response::Sig { .. }));
 }
 
 // Other requests

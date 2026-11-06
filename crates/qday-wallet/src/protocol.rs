@@ -1,5 +1,6 @@
 //! The text protocol on the USB port. One request, one response.
 
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -10,12 +11,13 @@ use qday_xmss::{Hash, ONE_TIME_SIG_BYTES, SIG_BYTES};
 use crate::hex;
 use crate::invoice::{Invoice, Spend};
 use crate::settings::Scheme;
+use crate::stealth::{META_ADDRESS_BYTES, StealthSpend};
 use crate::wallet::WalletError;
 
 /// Every protocol line starts with this. Anything else is log output.
 pub const PREFIX: &str = "QDAY1 ";
 /// The longest line, including the newline.
-pub const MAX_LINE: usize = 8192;
+pub const MAX_LINE: usize = 9216;
 
 /// A request from the laptop.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,6 +32,12 @@ pub enum Request {
     Invoice(u32),
     /// Review and sign a spend of an invoice's note.
     SpendInvoice(Spend),
+    /// Hand over the stealth address, once the person agrees.
+    StealthAddress,
+    /// Hand over the view seed, once the person agrees and enters the passcode.
+    ViewKey,
+    /// Review and sign a spend of a stealth note.
+    SpendStealth(Box<StealthSpend>),
     /// Review and sign a raw unsigned frame transaction.
     SignFrame(Vec<u8>),
     /// Build the next tree.
@@ -72,6 +80,10 @@ pub enum Response {
     MlPubKey(Vec<u8>),
     /// An invoice's key.
     Invoice(Invoice),
+    /// The 4,160-byte stealth address.
+    StealthAddress(Vec<u8>),
+    /// The view seed.
+    ViewKey(Hash),
     /// A signature.
     Sig {
         /// The signature: 2,500 bytes for XMSS, 2,420 for ML-DSA, 2,176 for an invoice.
@@ -131,6 +143,15 @@ fn parse_body(body: &str) -> Option<Request> {
         "SCHEME" => Request::Scheme,
         "MLPUBKEY" => Request::MlPubKey,
         "INVOICE" => Request::Invoice(number(words.next()?)?),
+        "STEALTHADDRESS" => Request::StealthAddress,
+        "VIEWKEY" => Request::ViewKey,
+        "SPENDSTEALTH" => Request::SpendStealth(Box::new(StealthSpend {
+            ciphertext: hex::decode_array(words.next()?)?,
+            key_hash: hex::decode_array(words.next()?)?,
+            pool: hex::decode_array(words.next()?)?,
+            to: hex::decode_array(words.next()?)?,
+            fee: wide_number(words.next()?)?,
+        })),
         "SPENDINVOICE" => Request::SpendInvoice(Spend {
             number: number(words.next()?)?,
             pool: hex::decode_array(words.next()?)?,
@@ -170,6 +191,16 @@ pub fn request_line(request: &Request) -> String {
         Request::Scheme => format!("{PREFIX}SCHEME\n"),
         Request::MlPubKey => format!("{PREFIX}MLPUBKEY\n"),
         Request::Invoice(number) => format!("{PREFIX}INVOICE {number}\n"),
+        Request::StealthAddress => format!("{PREFIX}STEALTHADDRESS\n"),
+        Request::ViewKey => format!("{PREFIX}VIEWKEY\n"),
+        Request::SpendStealth(spend) => format!(
+            "{PREFIX}SPENDSTEALTH {} {} {} {} {}\n",
+            hex::encode(&spend.ciphertext),
+            hex::encode(&spend.key_hash),
+            hex::encode(&spend.pool),
+            hex::encode(&spend.to),
+            spend.fee
+        ),
         Request::SpendInvoice(spend) => format!(
             "{PREFIX}SPENDINVOICE {} {} {} {}\n",
             spend.number,
@@ -222,6 +253,10 @@ pub fn response_line(response: &Response) -> String {
         ),
         Response::Scheme(scheme) => format!("{PREFIX}SCHEME {}\n", scheme_name(*scheme)),
         Response::MlPubKey(key) => format!("{PREFIX}MLPUBKEY {}\n", hex::encode(key)),
+        Response::StealthAddress(address) => {
+            format!("{PREFIX}STEALTHADDRESS {}\n", hex::encode(address))
+        }
+        Response::ViewKey(seed) => format!("{PREFIX}VIEWKEY {}\n", hex::encode(seed)),
         Response::Invoice(invoice) => format!(
             "{PREFIX}INVOICE {} {} {}\n",
             invoice.number,
@@ -271,6 +306,15 @@ pub fn parse_response(line: &str) -> Option<Response> {
             let key = hex::decode(words.next()?)?;
             (key.len() == PUBLIC_KEY_BYTES && words.next().is_none())
                 .then_some(Response::MlPubKey(key))
+        }
+        "STEALTHADDRESS" => {
+            let address = hex::decode(words.next()?)?;
+            (address.len() == META_ADDRESS_BYTES && words.next().is_none())
+                .then_some(Response::StealthAddress(address))
+        }
+        "VIEWKEY" => {
+            let seed = hex::decode_array(words.next()?)?;
+            words.next().is_none().then_some(Response::ViewKey(seed))
         }
         "INVOICE" => {
             let invoice = Invoice {
@@ -342,8 +386,11 @@ impl LineBuffer {
 
 #[cfg(test)]
 mod tests {
+    use alloc::boxed::Box;
+
     use crate::invoice::{Invoice, Spend};
     use crate::settings::Scheme;
+    use crate::stealth::StealthSpend;
     use qday_mldsa::PUBLIC_KEY_BYTES;
 
     use alloc::format;
@@ -524,6 +571,99 @@ mod tests {
             to: TO,
             fee: 340_282_366_920_938_463_463_374_607_431_768_211_455,
         }
+    }
+
+    fn stealth_spend() -> StealthSpend {
+        StealthSpend {
+            ciphertext: [0x33; 1120],
+            key_hash: A,
+            pool: POOL,
+            to: TO,
+            fee: 1000,
+        }
+    }
+
+    #[test]
+    fn stealth_requests_match_the_protocol() {
+        assert_eq!(
+            request_line(&Request::StealthAddress),
+            "QDAY1 STEALTHADDRESS\n"
+        );
+        assert_eq!(request_line(&Request::ViewKey), "QDAY1 VIEWKEY\n");
+        for request in [Request::StealthAddress, Request::ViewKey] {
+            let line = request_line(&request);
+            assert_eq!(parse_request(line.trim_end()), Some(Ok(request)));
+        }
+    }
+
+    #[test]
+    fn stealth_spends_match_the_protocol() {
+        let want = format!(
+            "QDAY1 SPENDSTEALTH {} {} {} {} 1000\n",
+            hex::encode(&[0x33; 1120]),
+            a(),
+            hex::encode(&POOL),
+            hex::encode(&TO)
+        );
+        let request = Request::SpendStealth(Box::new(stealth_spend()));
+        assert_eq!(request_line(&request), want);
+        assert_eq!(parse_request(want.trim_end()), Some(Ok(request)));
+    }
+
+    #[test]
+    fn bad_stealth_requests_are_refused() {
+        let (ct, pool, to) = (
+            hex::encode(&[0x33; 1120]),
+            hex::encode(&POOL),
+            hex::encode(&TO),
+        );
+        let short = hex::encode(&[0x33; 1119]);
+        for line in [
+            "QDAY1 STEALTHADDRESS 1".to_string(),
+            "QDAY1 VIEWKEY 1".to_string(),
+            format!("QDAY1 SPENDSTEALTH {short} {} {pool} {to} 1", a()),
+            format!("QDAY1 SPENDSTEALTH {ct} 0x00 {pool} {to} 1"),
+            format!("QDAY1 SPENDSTEALTH {ct} {} {pool} {to}", a()),
+            format!("QDAY1 SPENDSTEALTH {ct} {} {pool} {to} 1 2", a()),
+        ] {
+            assert_eq!(
+                parse_request(&line),
+                Some(Err(WalletError::BadRequest)),
+                "{}",
+                &line[..30]
+            );
+        }
+    }
+
+    #[test]
+    fn stealth_responses_match_the_protocol() {
+        let address = Response::StealthAddress(vec![0x44; 4160]);
+        let want = format!("QDAY1 STEALTHADDRESS {}\n", hex::encode(&[0x44; 4160]));
+        assert_eq!(response_line(&address), want);
+        assert_eq!(parse_response(want.trim_end()), Some(address));
+
+        let view = Response::ViewKey(A);
+        let want = format!("QDAY1 VIEWKEY {}\n", a());
+        assert_eq!(response_line(&view), want);
+        assert_eq!(parse_response(want.trim_end()), Some(view));
+    }
+
+    #[test]
+    fn bad_stealth_responses_are_refused() {
+        for line in [
+            format!("QDAY1 STEALTHADDRESS {}", hex::encode(&[0x44; 4159])),
+            format!("QDAY1 STEALTHADDRESS {} x", hex::encode(&[0x44; 4160])),
+            "QDAY1 VIEWKEY 0x00".to_string(),
+            format!("QDAY1 VIEWKEY {} x", a()),
+        ] {
+            assert_eq!(parse_response(&line), None, "{}", &line[..24]);
+        }
+    }
+
+    #[test]
+    fn a_stealth_address_fits_in_a_line() {
+        let response = Response::StealthAddress(vec![0; 4160]);
+        assert!(response_line(&response).len() <= MAX_LINE);
     }
 
     #[test]

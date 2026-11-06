@@ -70,7 +70,7 @@ fn every_screen() -> Vec<(&'static str, Draw)> {
         fee: "0.0026 ETH",
         chain_id: 31337,
         scheme: Scheme::Xmss,
-        one_time: false,
+        signature: None,
         index: 67,
         rotation: false,
         seconds_left: 24,
@@ -355,7 +355,56 @@ fn every_screen() -> Vec<(&'static str, Draw)> {
         ),
         (
             "share an invoice",
-            Box::new(|c: &mut Canvas| invoice_confirm(c, 1_000_000, 20, 30, Some(3))),
+            Box::new(|c: &mut Canvas| {
+                share_confirm(
+                    c,
+                    &ShareInfo {
+                        title: "Invoice #1000000",
+                        detail: "A fresh key to be paid on",
+                        gives: "one public key",
+                        passcode: false,
+                        seconds_left: 20,
+                        timeout: 30,
+                    },
+                    Some(3),
+                )
+            }),
+        ),
+        (
+            "share the view key",
+            Box::new(|c: &mut Canvas| {
+                share_confirm(
+                    c,
+                    &ShareInfo {
+                        title: "View key",
+                        detail: "Lets the laptop find your payments",
+                        gives: "your view key",
+                        passcode: true,
+                        seconds_left: 20,
+                        timeout: 30,
+                    },
+                    None,
+                )
+            }),
+        ),
+        (
+            "review stealth",
+            Box::new(move |c: &mut Canvas| {
+                review(
+                    c,
+                    &ReviewInfo {
+                        review: Review::Send {
+                            amount: "Whole note",
+                            unit: "",
+                            to: TO,
+                        },
+                        fee: "0.0003 ETH",
+                        signature: Some("One-time ML-DSA"),
+                        ..send()
+                    },
+                    None,
+                )
+            }),
         ),
         (
             "review invoice",
@@ -369,7 +418,7 @@ fn every_screen() -> Vec<(&'static str, Draw)> {
                             to: TO,
                         },
                         fee: "0.0003 ETH",
-                        one_time: true,
+                        signature: Some("One-time hash"),
                         ..send()
                     },
                     None,
@@ -539,7 +588,7 @@ fn the_scheme_changes_what_every_theme_shows() {
         fee: "0.0035 ETH",
         chain_id: 31337,
         scheme,
-        one_time: false,
+        signature: None,
         index: 0,
         rotation: false,
         seconds_left: 24,
@@ -569,7 +618,7 @@ fn the_scheme_changes_what_every_theme_shows() {
                 "{t:?} device"
             );
             let one_time = ReviewInfo {
-                one_time: true,
+                signature: Some("One-time ML-DSA"),
                 ..review_info(scheme)
             };
             assert!(

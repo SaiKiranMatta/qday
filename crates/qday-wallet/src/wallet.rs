@@ -1,5 +1,7 @@
 //! The wallet's rules, on top of the counter, key slots and passcode.
 
+use alloc::boxed::Box;
+
 use qday_mldsa::{
     KeySeed, PublicKey as MlPublicKey, Signature as MlSignature, Signer as _, StandardSigner,
 };
@@ -73,6 +75,8 @@ pub struct MlReview {
 pub enum Pending {
     /// A spend of an invoice's note.
     Invoice(Spend),
+    /// A spend of a stealth note.
+    Stealth(Box<StealthSpend>),
     /// An XMSS transaction.
     Xmss(Review),
     /// An ML-DSA transaction.

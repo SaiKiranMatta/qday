@@ -105,7 +105,7 @@ fn screens() -> Vec<(&'static str, Draw)> {
         fee: "0.0026 ETH",
         chain_id: 31337,
         scheme: Scheme::Xmss,
-        one_time: false,
+        signature: None,
         index: 67,
         rotation: false,
         seconds_left: 24,
@@ -456,7 +456,20 @@ fn screens() -> Vec<(&'static str, Draw)> {
         ),
         (
             "32-share-invoice",
-            Box::new(|c: &mut Canvas| invoice_confirm(c, 12, 24, 30, None)),
+            Box::new(|c: &mut Canvas| {
+                share_confirm(
+                    c,
+                    &ShareInfo {
+                        title: "Invoice #0012",
+                        detail: "A fresh key to be paid on",
+                        gives: "one public key",
+                        passcode: false,
+                        seconds_left: 24,
+                        timeout: 30,
+                    },
+                    None,
+                )
+            }),
         ),
         (
             "33-review-invoice",
@@ -470,7 +483,60 @@ fn screens() -> Vec<(&'static str, Draw)> {
                             to: TO,
                         },
                         fee: "0.0003 ETH",
-                        one_time: true,
+                        signature: Some("One-time hash"),
+                        ..send()
+                    },
+                    None,
+                )
+            }),
+        ),
+        (
+            "34-share-address",
+            Box::new(|c: &mut Canvas| {
+                share_confirm(
+                    c,
+                    &ShareInfo {
+                        title: "Stealth address",
+                        detail: "Lets anyone pay you privately",
+                        gives: "your public address",
+                        passcode: false,
+                        seconds_left: 24,
+                        timeout: 30,
+                    },
+                    None,
+                )
+            }),
+        ),
+        (
+            "35-share-view-key",
+            Box::new(|c: &mut Canvas| {
+                share_confirm(
+                    c,
+                    &ShareInfo {
+                        title: "View key",
+                        detail: "Lets the laptop find your payments",
+                        gives: "your view key",
+                        passcode: true,
+                        seconds_left: 24,
+                        timeout: 30,
+                    },
+                    None,
+                )
+            }),
+        ),
+        (
+            "36-review-stealth",
+            Box::new(move |c: &mut Canvas| {
+                review(
+                    c,
+                    &ReviewInfo {
+                        review: Review::Send {
+                            amount: "Whole note",
+                            unit: "",
+                            to: TO,
+                        },
+                        fee: "0.0003 ETH",
+                        signature: Some("One-time ML-DSA"),
                         ..send()
                     },
                     None,
