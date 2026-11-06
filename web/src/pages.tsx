@@ -22,6 +22,7 @@ export function WalletPage({
   setup,
   onSend,
   onReceive,
+  onMintTokens,
   onOpenActivity,
 }: {
   account: AccountView;
@@ -40,9 +41,23 @@ export function WalletPage({
   /** Null while sending isn't possible (no account yet, or no device in mock mode). */
   onSend: (() => void) | null;
   onReceive: (() => void) | null;
+  /** Local devnet only: mints test tokens to the account. */
+  onMintTokens: (() => Promise<void>) | null;
   onOpenActivity: () => void;
 }) {
   const [managing, setManaging] = useState(false);
+  const [minting, setMinting] = useState<"idle" | "busy" | "error">("idle");
+  const mint = async () => {
+    if (!onMintTokens) return;
+    setMinting("busy");
+    try {
+      await onMintTokens();
+      setMinting("idle");
+    } catch (e) {
+      console.error("[qday] minting test tokens failed", e);
+      setMinting("error");
+    }
+  };
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
       <div className="space-y-6">
@@ -77,9 +92,20 @@ export function WalletPage({
         <section className="rounded-3xl bg-surface p-6">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold">Assets</h2>
-            <button onClick={() => setManaging(true)} className="text-xs text-muted hover:text-alabaster">
-              Manage tokens
-            </button>
+            <div className="flex items-center gap-4">
+              {onMintTokens && (
+                <button
+                  onClick={() => void mint()}
+                  disabled={minting === "busy"}
+                  className={`text-xs hover:text-alabaster disabled:opacity-50 ${minting === "error" ? "text-bad" : "text-muted"}`}
+                >
+                  {minting === "busy" ? "Minting…" : minting === "error" ? "Couldn't mint. Retry" : "Get test tokens"}
+                </button>
+              )}
+              <button onClick={() => setManaging(true)} className="text-xs text-muted hover:text-alabaster">
+                Manage tokens
+              </button>
+            </div>
           </div>
           <div className="mt-4 divide-y divide-line/60">
             {tokens.selected.map((token) => (

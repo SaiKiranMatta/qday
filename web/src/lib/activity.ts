@@ -149,11 +149,12 @@ async function tokenTransfers(
     const token = byAddress.get(lower(log.address));
     if (!token) return null;
     const other = kind === "sent" ? log.topics[2] : log.topics[1];
+    const minted = kind === "received" && other !== undefined && BigInt(other) === 0n;
     return {
       id: `${log.transactionHash}:${Number(log.logIndex)}`,
       kind,
       amount: { tokenId: token.id, value: formatAmount(BigInt(log.data), token.decimals) },
-      counterparty: other ? short(`0x${other.slice(26)}`) : undefined,
+      counterparty: minted ? "Test mint" : other ? short(`0x${other.slice(26)}`) : undefined,
       at: times.get(Number(log.blockNumber)) ?? new Date().toISOString(),
       status: "confirmed",
     };

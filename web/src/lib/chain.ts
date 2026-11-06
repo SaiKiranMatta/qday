@@ -142,6 +142,37 @@ export async function requestTestEth(to: Address): Promise<void> {
   await client.waitForTransactionReceipt({ hash, timeout: MINE_TIMEOUT_MS });
 }
 
+/** True where the app can mint test tokens itself: a private devnet with a funded dev key. */
+export const CAN_MINT_TEST_TOKENS = NETWORK.faucet.kind === "key";
+
+const mintAbi = [
+  { type: "function", name: "mint", stateMutability: "nonpayable", inputs: [{ type: "address" }, { type: "uint256" }], outputs: [] },
+] as const;
+
+/** Mints a round amount of each test token (anyone can mint the devnet's TestERC20) to an address. */
+export async function requestTestTokens(to: Address, tokens: Token[]): Promise<void> {
+  if (NETWORK.faucet.kind !== "key") throw new Error("Test tokens are only minted on the local devnet.");
+  const wallet = createWalletClient({
+    account: privateKeyToAccount(NETWORK.faucet.key),
+    chain: devnet,
+    transport: http(RPC_URL, { timeout: REQUEST_TIMEOUT_MS }),
+  });
+  for (const token of tokens) {
+    if (!token.address || token.custom) continue;
+    // 1,000 of a dollar-style token, 1 of anything finer (1 WBTC, 1 of an 18-decimal token).
+    const amount = 10n ** BigInt(token.decimals) * (token.decimals <= 6 ? 1000n : 1n);
+    const hash = await wallet.writeContract({
+      address: token.address,
+      abi: mintAbi,
+      functionName: "mint",
+      args: [to, amount],
+      type: "legacy",
+      gasPrice: 2_000_000_000n,
+    });
+    await client.waitForTransactionReceipt({ hash, timeout: MINE_TIMEOUT_MS });
+  }
+}
+
 export interface FrameReceipt {
   hash: Hex;
   block: number;

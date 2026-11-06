@@ -10,6 +10,7 @@ import { SendModal } from "./components/SendModal";
 import { useDevice } from "./lib/useDevice";
 import { useTokens } from "./lib/useTokens";
 import { NATIVE_ID } from "./lib/tokens";
+import { CAN_MINT_TEST_TOKENS, requestTestTokens } from "./lib/chain";
 import { MOCK, MOCK_ACCOUNT } from "./lib/wallet";
 import { ActivityPage, DevicePage, WalletPage } from "./pages";
 
@@ -138,6 +139,14 @@ function ConnectedApp({
           }
           onSend={!MOCK && live.onChain?.deployed ? () => setDialog("send") : null}
           onReceive={account.address !== "0x" ? () => setDialog("receive") : null}
+          onMintTokens={
+            !MOCK && CAN_MINT_TEST_TOKENS && live.onChain
+              ? async () => {
+                  await requestTestTokens(live.onChain!.address, tokens.selected);
+                  await live.refresh();
+                }
+              : null
+          }
           onOpenActivity={() => setPage("activity")}
         />
       )}
