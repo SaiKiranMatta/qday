@@ -146,7 +146,9 @@ coupon_edge = [-17.3, -7.7, 66.33, 87.33];
 coupon_edge_z = 10;
 coupon_gap = 5;
 
-// Electronics, for the previews only
+// Previews only
+case_colour = "white";
+
 board_z = 11;
 board_t = 1.6;
 
@@ -475,7 +477,7 @@ module stylus() {
 }
 
 module assembly() {
-    color("#5a4bb0") tray();
+    color(case_colour) tray();
     translate([0, 0, explode]) {
         breadboard();
         spacer_in_place();
@@ -486,12 +488,12 @@ module assembly() {
         screen();
     }
     translate([-explode, 0, 0]) stylus();
-    translate([0, 0, 3.4 * explode]) color("#7a68d8") bezel();
+    translate([0, 0, 3.4 * explode]) color(case_colour) bezel();
 }
 
 module closed() {
-    color("#5a4bb0") tray();
-    color("#7a68d8") bezel();
+    color(case_colour) tray();
+    color(case_colour) bezel();
 }
 
 if (part == "tray") {
