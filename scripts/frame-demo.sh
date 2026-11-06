@@ -8,9 +8,7 @@
 #
 # Environment:
 #   QDAY_RPC_URL          RPC endpoint (default http://127.0.0.1:8545)
-#   QDAY_STAKING_REGISTRY staking registry address (needed by deploy)
-#   QDAY_STAKE            stake in wei (default 12000000000000000, which is 0.012 ETH)
-#   QDAY_UNSTAKE_DELAY    unstake delay in seconds (default 86400)
+#   QDAY_FACTORY          account factory, from tools/devnet/deploy-qday.sh (has a default)
 #   QDAY_FUNDING_KEY      key that pays for deploy (needed by deploy)
 #   QDAY_FUNDING_WEI      extra wei sent to the account for gas and transfers (default 1 ETH)
 #   QDAY_DEVICE_PORT      sign on the device at this port instead of with a laptop key
@@ -22,8 +20,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 RPC=${QDAY_RPC_URL:-http://127.0.0.1:8545}
 STATE=${QDAY_STATE_DIR:-$HOME/.qday-devnet}
-STAKE=${QDAY_STAKE:-12000000000000000}
-UNSTAKE_DELAY=${QDAY_UNSTAKE_DELAY:-86400}
+FACTORY=${QDAY_FACTORY:-0xbCebAd3eCE45625983409B429406a5Dc8d38f876}
 FUNDING_WEI=${QDAY_FUNDING_WEI:-1000000000000000000}
 PORT=${QDAY_DEVICE_PORT:-}
 RECEIPT_TRIES=120
@@ -62,28 +59,17 @@ active_key() {
   fi
 }
 
-# Creates a contract and prints its address.
-create() {
-  forge create --root "$ROOT/contracts" --rpc-url "$RPC" --private-key "$QDAY_FUNDING_KEY" \
-    --legacy --gas-price "$GAS_PRICE" --broadcast "$@" | awk '/Deployed to:/ {print $3}'
-}
-
 deploy() {
-  : "${QDAY_STAKING_REGISTRY:?set QDAY_STAKING_REGISTRY}"
   : "${QDAY_FUNDING_KEY:?set QDAY_FUNDING_KEY}"
   read -r root pub_seed < <(active_key)
-
-  verifier=$(create src/XMSSVerifier.sol:XMSSVerifier)
-  [ -n "$verifier" ] || die "the verifier did not deploy"
-  account=$(create src/QDayFrameAccount.sol:QDayFrameAccount --value "$STAKE" --constructor-args \
-    "$verifier" "$root" "$pub_seed" "$QDAY_STAKING_REGISTRY" "$STAKE" "$UNSTAKE_DELAY")
-  [ -n "$account" ] || die "the account did not deploy"
+  account=$(cast call --rpc-url "$RPC" "$FACTORY" 'accountAddress(bytes32,bytes32)(address)' \
+    "$root" "$pub_seed")
 
   cast send --rpc-url "$RPC" --private-key "$QDAY_FUNDING_KEY" --legacy --gas-price "$GAS_PRICE" \
+    "$FACTORY" 'createAccount(bytes32,bytes32)' "$root" "$pub_seed" >/dev/null
+  cast send --rpc-url "$RPC" --private-key "$QDAY_FUNDING_KEY" --legacy --gas-price "$GAS_PRICE" \
     --value "$FUNDING_WEI" "$account" >/dev/null
-  echo "$verifier" >"$STATE/verifier"
   echo "$account" >"$STATE/account"
-  echo "verifier $verifier"
   echo "account  $account"
   echo "root     $root"
 }

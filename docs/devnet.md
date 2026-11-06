@@ -67,6 +67,40 @@ another key were all refused with `BadSignature`. A replay was refused with a no
 gateway reports that replay as `prefix gas budget exceeded`, because it shows the node's public
 mempool note ahead of the real error.
 
+## Web wallet
+
+Tested on 2026-11-07 in a browser, on the same chain. The page was the real web app. A test-only Web
+Serial port connected it to the real app and wallet code on simulated flash. No board was involved.
+
+The chain's own gateway refuses an XMSS account made by the factory: its budget for an unstaked sender is
+100,000 gas, and `tools/devnet/local/up.sh` is what raises it. The XMSS rows below went through a throwaway
+second gateway, patched as `up.sh` patches it. The ML-DSA account is staked, so it needs no patch, and
+`scripts/mldsa-demo.sh` sent through the chain's own gateway the same day.
+
+| Step | Account | Result |
+|---|---|---|
+| Create, ETH transfer, USDC transfer | XMSS | Mined |
+| Private payment | XMSS | Mined, 360,325 gas |
+| Claim to a new address | XMSS | Mined, 1,567,105 gas |
+| Create (dev key pays), ETH transfer | ML-DSA | Mined |
+| Private payment | ML-DSA | Mined, 1,448,125 gas |
+| Rejected on the device, then claimed to the account | ML-DSA | Refused, then mined at 1,382,451 gas |
+
+The private payments went to the device's own private address, which is the same in both schemes.
+
+To run the wallet against a devnet not started by `up.sh`, set `VITE_QDAY_DEV_KEY` to a funded key. ML-DSA
+accounts need `VITE_QDAY_STAKING_REGISTRY` on any devnet. `tools/devnet/deploy-stealth.sh` deploys what
+ML-DSA accounts and private payments share, after `tools/devnet/deploy-qday.sh`.
+
+The wallet's limits:
+
+- Private payments carry ETH only, and ML-DSA accounts can't send tokens.
+- Only a network with a dev key can use private payments or create ML-DSA accounts, because the dev key
+  submits claims and deploys the accounts. That means the local devnet.
+- The device shows the amount and the pool for a private payment, not the recipient. The address the person
+  pasted is what decides who gets paid, so a page that swaps it can't be caught on the device.
+- The view key stays in the page's memory, so each visit asks the device for it again.
+
 ## Public reference network (not our target)
 
 ethrex hegota-testnet: chain id 8141, RPC `https://rpc1.privacy.ethrex.xyz`, explorer
