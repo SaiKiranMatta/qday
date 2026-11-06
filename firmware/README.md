@@ -1,7 +1,8 @@
 # QDay firmware
 
-Touch test for the YD-ESP32-S3 N16R8 and the MSP2807 2.8" display (ILI9341, 240x320, XPT2046
-touch). It starts the screen in landscape and draws a dot wherever you press.
+Touch and button test for the YD-ESP32-S3 N16R8 and the MSP2807 2.8" display (ILI9341, 240x320,
+XPT2046 touch). It starts the screen in landscape, draws a dot wherever you press, and lights a box
+on screen while each of the four buttons is held.
 
 ## Wiring
 
@@ -86,9 +87,12 @@ To build without flashing, use `cargo build --release`.
 
 ## Expected result
 
-The firmware turns the backlight on once the screen has started. The screen shows `Touch the screen`
-in white on black, and each press draws a yellow dot. The serial monitor prints a `touch:` line for
-each reading, with the raw position, the pressure and the pixel position.
+The firmware turns the backlight on once the screen has started. The screen shows
+`Touch or press a button` in white on black, with four grey boxes labelled K1-K4 along the bottom.
+Each touch draws a yellow dot, and a box turns yellow while its button is held.
+
+The serial monitor prints a `touch:` line for each reading, with the raw position, the pressure and
+the pixel position. It also prints a `key:` line each time a button goes down or up.
 
 | Problem | Likely cause |
 |---|---|
@@ -100,3 +104,6 @@ each reading, with the raw position, the pressure and the pixel position.
 | Text upside down | Change `.flip_horizontal()` to `.flip_vertical()` in `src/main.rs` |
 | No dots and no `touch:` lines | T_CLK, T_CS, T_DIN or T_DO wiring |
 | Dots away from your finger | Adjust the `RAW_X_*` and `RAW_Y_*` values in `src/main.rs` |
+| One box never lights | That button's signal wire, or its solder joints |
+| No box lights | The ground wires: c1 to the minus rail, or the ground rail to the minus rail |
+| A box stays lit | That button's signal wire is touching ground |
