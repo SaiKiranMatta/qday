@@ -182,6 +182,16 @@ pub fn open(view: &Hash, meta: &MetaAddress, ciphertext: &Ciphertext) -> Option<
     })
 }
 
+/// True if an announcement is a payment to this owner. The view tag rules out most others cheaply,
+/// and the key hash settles it. `None` if the address is malformed.
+#[must_use]
+pub fn finds(view: &Hash, meta: &MetaAddress, announced: &Announcement) -> Option<bool> {
+    if open_view_tag(view, &announced.ciphertext) != Some(announced.view_tag) {
+        return Some(false);
+    }
+    Some(open(view, meta, &announced.ciphertext)?.key_hash == announced.key_hash)
+}
+
 /// The key a spend gives the pool.
 #[must_use]
 pub fn key_for(view: &Hash, meta: &MetaAddress, ciphertext: &Ciphertext) -> Option<Vec<u8>> {

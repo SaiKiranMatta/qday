@@ -686,6 +686,7 @@ dependencies = [
 name = "qday-wasm"
 version = "0.1.0"
 dependencies = [
+ "qday-mldsa",
  "qday-wallet",
  "wasm-bindgen",
 ]

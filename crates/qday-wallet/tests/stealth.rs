@@ -15,7 +15,7 @@ use qday_wallet::mlkey::MlKeyStore;
 use qday_wallet::passcode::{Attempt, Code, Passcode, Proof};
 use qday_wallet::settings::{Scheme, Settings};
 use qday_wallet::stealth::{
-    Announcement, CIPHERTEXT_BYTES, META_ADDRESS_BYTES, MetaAddress, StealthSpend, key_for,
+    Announcement, CIPHERTEXT_BYTES, META_ADDRESS_BYTES, MetaAddress, StealthSpend, finds, key_for,
     meta_address_for, open as open_payment, pay_to, spend_hash, view_seed_for,
 };
 use qday_wallet::wallet::{MAIN_ACCOUNT, Wallet, WalletError};
@@ -364,4 +364,39 @@ fn restoring_the_same_seed_gives_the_same_address() {
         .restore(&seed, 0, 0, proof_now, |_| {})
         .expect("it restores");
     assert_eq!(address(&mut restored), meta);
+}
+
+#[test]
+fn the_owner_finds_an_announcement() {
+    let seed = [0x5E; 32];
+    let meta = meta_address_for(&seed, 0);
+    let paid = pay_to(&meta, &RANDOM).expect("the address is good");
+    assert_eq!(finds(&view_seed_for(&seed, 0), &meta, &paid), Some(true));
+}
+
+#[test]
+fn someone_else_finds_nothing() {
+    let meta = meta_address_for(&[0x5E; 32], 0);
+    let paid = pay_to(&meta, &RANDOM).expect("the address is good");
+    let other = [0x77; 32];
+    let found = finds(
+        &view_seed_for(&other, 0),
+        &meta_address_for(&other, 0),
+        &paid,
+    );
+    assert_eq!(found, Some(false));
+}
+
+#[test]
+fn a_wrong_tag_or_key_hash_is_not_found() {
+    let seed = [0x5E; 32];
+    let view = view_seed_for(&seed, 0);
+    let meta = meta_address_for(&seed, 0);
+    let paid = pay_to(&meta, &RANDOM).expect("the address is good");
+    let mut wrong_tag = paid.clone();
+    wrong_tag.view_tag ^= 1;
+    assert_eq!(finds(&view, &meta, &wrong_tag), Some(false));
+    let mut wrong_hash = paid;
+    wrong_hash.key_hash[0] ^= 1;
+    assert_eq!(finds(&view, &meta, &wrong_hash), Some(false));
 }

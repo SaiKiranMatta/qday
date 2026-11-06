@@ -13,7 +13,7 @@ use qday_wallet::frame::{Address, FrameTx, MlFrameTx};
 use qday_wallet::hex;
 use qday_wallet::protocol::scheme_name;
 use qday_wallet::stealth::{
-    Ciphertext, MetaAddress, StealthSpend, key_for, meta_address_for, open, open_view_tag, pay_to,
+    Announcement, Ciphertext, MetaAddress, StealthSpend, finds, key_for, meta_address_for, pay_to,
     signer_for, spend_hash, view_seed_for,
 };
 use qday_xmss::{Hash, KeySet, Tree};
@@ -254,17 +254,13 @@ fn scan(view: &str, meta: &str, file: &str) -> Result<String> {
         let [key_hash, tag, text] = fields[..] else {
             bail!("an announcement is a key hash, a view tag and a ciphertext");
         };
-        let (key_hash, tag): (Hash, u8) = (hash(key_hash)?, tag.parse()?);
-        let sealed = ciphertext(text)?;
-        let Some(tag_now) = open_view_tag(&view, &sealed) else {
-            continue;
+        let announced = Announcement {
+            ciphertext: ciphertext(text)?,
+            key_hash: hash(key_hash)?,
+            view_tag: tag.parse()?,
         };
-        if tag_now != tag {
-            continue;
-        }
-        let opened = open(&view, &meta, &sealed).context("the stealth address is malformed")?;
-        if opened.key_hash == key_hash {
-            found.push(format!("{} {text}", hex::encode(&key_hash)));
+        if finds(&view, &meta, &announced).context("the stealth address is malformed")? {
+            found.push(format!("{} {text}", hex::encode(&announced.key_hash)));
         }
     }
     Ok(found.join("\n"))
