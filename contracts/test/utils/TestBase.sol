@@ -5,6 +5,7 @@ pragma solidity 0.8.28;
 interface Vm {
     function etch(address target, bytes calldata code) external;
     function prank(address sender) external;
+    function deal(address account, uint256 balance) external;
     function expectRevert(bytes4 selector) external;
     function expectEmit() external;
     function readFile(string calldata path) external view returns (string memory);
@@ -21,6 +22,10 @@ abstract contract TestBase {
 
     function _loadFixtures() internal {
         fixtures = vm.readFile("test/fixtures/signatures.json");
+    }
+
+    function _loadFixtures(string memory path) internal {
+        fixtures = vm.readFile(path);
     }
 
     function _bytes(string memory key) internal view returns (bytes memory) {

@@ -494,6 +494,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "qday-mldsa",
  "qday-wallet",
  "qday-xmss",
  "serde_json",
@@ -513,6 +514,8 @@ version = "0.1.0"
 dependencies = [
  "fips204",
  "qday-xmss",
+ "serde_json",
+ "sha3",
  "zeroize",
 ]
 
