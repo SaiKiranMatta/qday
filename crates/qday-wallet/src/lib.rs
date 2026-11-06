@@ -4,13 +4,17 @@
 
 extern crate alloc;
 
+pub mod activity;
 pub mod backup;
 pub mod counter;
 pub mod flash;
 pub mod frame;
 pub mod hex;
+pub mod input;
 pub mod keystore;
 pub mod passcode;
+pub mod protocol;
 pub mod rlp;
 pub mod rng;
+pub mod settings;
 pub mod wallet;

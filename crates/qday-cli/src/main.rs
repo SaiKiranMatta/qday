@@ -1,5 +1,6 @@
 //! The `qday` laptop tool.
 
+mod device;
 mod json;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -48,6 +49,35 @@ enum Command {
     FrameRotateJson(SignedRotation),
     /// Print a signed rotation as wire bytes
     FrameRotateRaw(SignedRotation),
+    /// Print the device's keys, then any prepared next key
+    DevicePubkey { port: String },
+    /// Print what the device logs
+    DeviceLog { port: String, seconds: u64 },
+    /// Sign a transfer on the device and print submission JSON
+    DeviceSend {
+        port: String,
+        sender: String,
+        nonce: u64,
+        to: String,
+        value_wei: u128,
+    },
+    /// Sign a rotation on the device and print submission JSON
+    DeviceRotate {
+        port: String,
+        sender: String,
+        nonce: u64,
+    },
+    /// Build the next tree on the device
+    DevicePrepare { port: String },
+    /// Switch the device to a prepared tree
+    DeviceActivate { port: String, tree: u32 },
+    /// Replace the keys on the device
+    DeviceRestore {
+        port: String,
+        seed: String,
+        tree: u32,
+        chain_next_index: u32,
+    },
 }
 
 #[derive(Args)]
@@ -170,6 +200,44 @@ fn run(command: Command) -> Result<String> {
         Command::FrameRotateJson(args) => {
             let tx = args.rotation.tx()?;
             Ok(json::submission(&tx, &signature(&args.signature)?).to_string())
+        }
+        Command::DevicePubkey { port } => Ok(device::open(&port)?.status()?.line()),
+        Command::DeviceLog { port, seconds } => {
+            device::open(&port)?.log(seconds)?;
+            Ok(String::new())
+        }
+        Command::DeviceSend {
+            port,
+            sender,
+            nonce,
+            to,
+            value_wei,
+        } => {
+            let (sender, to) = (address(&sender)?, address(&to)?);
+            Ok(device::open(&port)?
+                .send(sender, nonce, to, value_wei)?
+                .to_string())
+        }
+        Command::DeviceRotate {
+            port,
+            sender,
+            nonce,
+        } => Ok(device::open(&port)?
+            .rotate(address(&sender)?, nonce)?
+            .to_string()),
+        Command::DevicePrepare { port } => Ok(device::open(&port)?.prepare()?.line()),
+        Command::DeviceActivate { port, tree } => {
+            device::open(&port)?.activate(tree)?;
+            Ok("activated".to_string())
+        }
+        Command::DeviceRestore {
+            port,
+            seed,
+            tree,
+            chain_next_index,
+        } => {
+            device::open(&port)?.restore(hash(&seed)?, tree, chain_next_index)?;
+            Ok("restored".to_string())
         }
         Command::FrameRotateRaw(args) => Ok(hex::encode(
             &args.rotation.tx()?.encode(&signature(&args.signature)?),
