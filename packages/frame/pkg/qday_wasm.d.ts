@@ -2,6 +2,55 @@
 /* eslint-disable */
 
 /**
+ * A wallet's keys held in the page, for the demo wallet. The page must keep its own one-time key
+ * counter: nothing here stops it signing with a key twice.
+ */
+export class SoftKeys {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Derives the keys and builds the tree from a 32-byte seed.
+     *
+     * # Errors
+     *
+     * Fails on a seed of the wrong length.
+     */
+    constructor(seed: string);
+    /**
+     * The public seed, as 0x hex.
+     */
+    pubSeed(): string;
+    /**
+     * The tree's root, as 0x hex.
+     */
+    root(): string;
+    /**
+     * Signs a 32-byte message with one-time key `index`, as 0x hex.
+     *
+     * # Errors
+     *
+     * Fails on a bad message, or an index past the end of the tree.
+     */
+    sign(index: number, message: string): string;
+    /**
+     * Signs a spend of a stealth note with 32 random bytes, as 0x hex. `fee` is a decimal string.
+     *
+     * # Errors
+     *
+     * Fails on malformed input, or if the note isn't this wallet's.
+     */
+    spendStealth(sealed: string, key_hash: string, pool: string, to: string, fee: string, random: Uint8Array | number[]): string;
+    /**
+     * The stealth address, as 0x hex.
+     */
+    stealthAddress(): string;
+    /**
+     * The seed that finds payments and can't spend them, as 0x hex.
+     */
+    viewKey(): string;
+}
+
+/**
  * The account's first transaction, which deploys it through `factory`. Returns the unsigned bytes.
  *
  * # Errors
@@ -122,12 +171,20 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly __wbg_softkeys_free: (a: number, b: number) => void;
     readonly createTx: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
     readonly describe: (a: number, b: number) => [number, number, number, number];
     readonly mlBlob: (a: number, b: number) => [number, number, number, number];
     readonly mlStealthPayTx: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number, number, number];
     readonly mlTransferTx: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number) => [number, number, number, number];
     readonly signingMessage: (a: number, b: number) => [number, number, number, number];
+    readonly softkeys_new: (a: number, b: number) => [number, number, number];
+    readonly softkeys_pubSeed: (a: number) => [number, number];
+    readonly softkeys_root: (a: number) => [number, number];
+    readonly softkeys_sign: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly softkeys_spendStealth: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number) => [number, number, number, number];
+    readonly softkeys_stealthAddress: (a: number) => [number, number];
+    readonly softkeys_viewKey: (a: number) => [number, number];
     readonly stealthFinds: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number];
     readonly stealthKey: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly stealthPay: (a: number, b: number, c: number, d: number) => [number, number, number, number];

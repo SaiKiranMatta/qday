@@ -14,7 +14,9 @@ const NAV: { page: Page; label: string; icon: IconName }[] = [
 const NAV_STEP_PX = 44;
 
 /** Whether a QDay is attached, and what the sidebar can do about it. */
-export type ShellDevice = { connected: true; onDisconnect: () => void } | { connected: false; connecting: boolean };
+export type ShellDevice =
+  | { connected: true; demo: boolean; onDisconnect: () => void }
+  | { connected: false; connecting: boolean };
 
 /** Sidebar and page area. Without a device the pages wait behind the connect panel. */
 export function Shell({
@@ -67,6 +69,11 @@ export function Shell({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
+        {device.connected && device.demo && (
+          <p role="note" className="bg-warn/15 px-5 py-2 text-center text-xs font-medium text-warn">
+            Demo wallet: keys live in this browser. Test ETH only.
+          </p>
+        )}
         <header className="px-5 pt-6 md:hidden">
           <Wordmark className="text-3xl" />
         </header>
@@ -123,10 +130,16 @@ function DeviceRow({ device }: { device: ShellDevice }) {
       </span>
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-medium">
-          {device.connected ? "QDay connected" : device.connecting ? "Connecting…" : "No device"}
+          {device.connected ? (device.demo ? "Demo wallet" : "QDay connected") : device.connecting ? "Connecting…" : "No device"}
         </span>
         <span className="block text-xs text-muted">
-          {device.connected ? "Ready to sign" : device.connecting ? "Check your QDay" : "Not connected"}
+          {device.connected
+            ? device.demo
+              ? "Keys in this browser"
+              : "Ready to sign"
+            : device.connecting
+              ? "Check your QDay"
+              : "Not connected"}
         </span>
       </span>
       {device.connected && (

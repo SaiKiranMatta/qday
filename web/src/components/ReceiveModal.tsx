@@ -10,12 +10,14 @@ export function ReceiveModal({
   address,
   privateAddress,
   privateSetup,
+  demo,
   onEnablePrivate,
   onClose,
 }: {
   address: `0x${string}`;
   privateAddress: `0x${string}` | null;
   privateSetup: SetupState;
+  demo: boolean;
   /** Null when there's no account yet to set up private payments for. */
   onEnablePrivate: (() => void) | null;
   onClose: () => void;
@@ -93,7 +95,9 @@ export function ReceiveModal({
       ) : (
         <div>
           <p className="text-sm leading-relaxed text-muted">
-            Your QDay asks you to share the private address, then the key that finds payments, which can't spend them.
+            {demo
+              ? "Turns on a private address for this demo wallet."
+              : "Your QDay asks you to share the private address, then the key that finds payments, which can't spend them."}
           </p>
           {privateSetup.kind === "error" && (
             <p role="alert" className="mt-3 text-xs text-bad">
@@ -105,7 +109,7 @@ export function ReceiveModal({
             disabled={!onEnablePrivate || privateSetup.kind === "sharing"}
             onClick={() => onEnablePrivate?.()}
           >
-            {privateSetup.kind === "sharing" ? "Waiting for your QDay…" : "Set up on your QDay"}
+            {privateSetup.kind === "sharing" ? "Setting up…" : demo ? "Set up" : "Set up on your QDay"}
           </Button>
           {!onEnablePrivate && <p className="mt-2 text-center text-xs text-muted">Create your account first.</p>}
         </div>

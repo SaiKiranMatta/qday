@@ -1,4 +1,7 @@
+import { useState } from "react";
+import { hasDemoWallet } from "../lib/demo";
 import type { ConnectionState } from "../lib/useDevice";
+import { DemoIntro } from "./DemoIntro";
 import { DeviceArt } from "./DeviceArt";
 import { Icon } from "./icons";
 import { Button, StatusDot } from "./ui";
@@ -17,10 +20,13 @@ const STEPS = [
 export function ConnectPanel({
   state,
   onConnect,
+  onTryDemo,
 }: {
   state: Exclude<ConnectionState, { kind: "connected" }>;
   onConnect: () => void;
+  onTryDemo: (seed?: `0x${string}`) => void;
 }) {
+  const [intro, setIntro] = useState(false);
   const unsupported = state.kind === "unsupported";
   const connecting = state.kind === "connecting";
 
@@ -68,11 +74,30 @@ export function ConnectPanel({
           </>
         )}
 
+        <Button
+          variant={unsupported ? "primary" : "secondary"}
+          className="mt-3 w-full"
+          disabled={connecting}
+          onClick={() => setIntro(true)}
+        >
+          Try without a device
+        </Button>
+
         <p className="mt-7 flex items-start gap-2.5 border-t border-line/60 pt-5 text-xs leading-relaxed text-muted">
           <Icon name="lock" className="mt-px size-4 text-alabaster/70" />
-          Your keys never leave the device, and every transfer is approved on it.
+          On a QDay, your keys never leave the device, and every transfer is approved on it.
         </p>
       </section>
+      {intro && (
+        <DemoIntro
+          saved={hasDemoWallet()}
+          onStart={(seed) => {
+            setIntro(false);
+            onTryDemo(seed);
+          }}
+          onClose={() => setIntro(false)}
+        />
+      )}
     </div>
   );
 }
