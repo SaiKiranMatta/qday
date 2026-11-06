@@ -128,7 +128,7 @@ sequenceDiagram
     L-->>W: Announcement event
     W->>W: Scan with the view key: this note is ours
     W->>D: Claim the whole note to an address, less a fee
-    D->>D: You approve; the device signs with the one-time key
+    D->>D: You approve, and the device signs with the one-time key
     D->>W: One-time ML-DSA signature
     W->>R: The key and the signature
     R->>L: spend(key, signature, to, fee)
