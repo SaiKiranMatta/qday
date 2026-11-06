@@ -120,9 +120,15 @@ chain's own gateway, signed on the board with its keys and passcode.
 | 0.001 ETH transfer | XMSS | 193,679 |
 | 0.0125 ETH transfer | ML-DSA | 1,308,782 |
 | 0.002 ETH transfer, after switching back | XMSS | 191,993 |
+| 0.05 ETH private payment, from the web wallet | XMSS | 360,325 |
+| Claim to a new address, from the web wallet | Stealth signer | 1,566,169 |
 
 Switching to ML-DSA and back left the XMSS key and counter unchanged. The board and the chain agreed on the
-next signature throughout. Private payments and the web wallet have not run on the board yet.
+next signature at each check.
+
+The last two rows ran in Chrome over real Web Serial, with the board sharing its private address and view
+key. The new address received 0.0466 ETH: the note less the 0.0034 ETH fee. A private payment from an
+ML-DSA account has only run on simulated flash.
 
 ## Public reference network (not our target)
 
