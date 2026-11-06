@@ -73,17 +73,18 @@ function ownFrameTx(tx: RpcTx, at: string, eth: Token): ActivityItem | null {
   const frames = tx.frames ?? [];
   const factory = lower(FACTORY);
   if (frames.some((f) => BigInt(f.mode) === 0n && lower(f.to) === factory && f.data.startsWith(CREATE_SELECTOR))) {
-    return { id: tx.hash, kind: "created", at, status: "confirmed" };
+    return { id: tx.hash, txHash: tx.hash, kind: "created", at, status: "confirmed" };
   }
   // Frames after the spend frame are the actions; the last one carries the point of the transaction.
   const action = frames.filter((f) => BigInt(f.mode) === 2n).at(-1);
   if (!action) return null;
   if (action.to === null && action.data.startsWith(ROTATE_SELECTOR)) {
-    return { id: tx.hash, kind: "refresh", at, status: "confirmed" };
+    return { id: tx.hash, txHash: tx.hash, kind: "refresh", at, status: "confirmed" };
   }
   if (action.to && BigInt(action.value) > 0n) {
     return {
       id: tx.hash,
+      txHash: tx.hash,
       kind: "sent",
       amount: { tokenId: NATIVE_ID, value: formatAmount(BigInt(action.value), eth.decimals) },
       counterparty: short(action.to),
@@ -102,6 +103,7 @@ function incomingEth(tx: RpcTx, account: string, at: string, eth: Token): Activi
     const from = tx.sender ?? tx.from;
     return {
       id: tx.hash,
+      txHash: tx.hash,
       kind: "received",
       amount: { tokenId: NATIVE_ID, value: formatAmount(BigInt(paid.value), eth.decimals) },
       counterparty: short(from),
@@ -112,6 +114,7 @@ function incomingEth(tx: RpcTx, account: string, at: string, eth: Token): Activi
   if (lower(tx.to) !== account || !tx.value || BigInt(tx.value) === 0n) return null;
   return {
     id: tx.hash,
+    txHash: tx.hash,
     kind: "received",
     amount: { tokenId: NATIVE_ID, value: formatAmount(BigInt(tx.value), eth.decimals) },
     counterparty: short(tx.from),
@@ -152,6 +155,7 @@ async function tokenTransfers(
     const minted = kind === "received" && other !== undefined && BigInt(other) === 0n;
     return {
       id: `${log.transactionHash}:${Number(log.logIndex)}`,
+      txHash: log.transactionHash,
       kind,
       amount: { tokenId: token.id, value: formatAmount(BigInt(log.data), token.decimals) },
       counterparty: minted ? "Test mint" : other ? short(`0x${other.slice(26)}`) : undefined,

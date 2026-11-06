@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { formatAmount } from "../lib/chain";
+import { txUrl } from "../lib/explorer";
 import { addressLines, exactEth, exactUnits, parseAmount, shortHex } from "../lib/format";
 import { KNOWN_TOKENS, NATIVE_ID, type Token, isAddress } from "../lib/tokens";
 import { type Draft, type SendFees, type SendStep, feeFor } from "../lib/useSend";
@@ -389,6 +390,14 @@ function Sent({ draft, block, hash, onClose }: { draft: Draft; block: number; ha
             <button onClick={copy} className="shrink-0 text-xs font-medium text-alabaster/80 hover:text-alabaster">
               {copied ? "Copied" : "Copy"}
             </button>
+            <a
+              href={txUrl(hash)}
+              target="_blank"
+              rel="noreferrer"
+              className="shrink-0 text-xs font-medium text-alabaster/80 hover:text-alabaster"
+            >
+              View
+            </a>
           </dd>
         </div>
       </dl>

@@ -11,6 +11,8 @@ export type ActivityKind = "sent" | "received" | "created" | "refresh" | "refuse
 
 export interface ActivityItem {
   id: string;
+  /** The on-chain transaction, for the explorer link. Unset for things that never reached the chain. */
+  txHash?: string;
   kind: ActivityKind;
   amount?: TokenAmount;
   /** Who or what the other side was, already shortened for display. */
