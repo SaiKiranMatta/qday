@@ -8,8 +8,18 @@ interface IStakingRegistry {
     function addStake(uint32 unstakeDelay) external payable;
 }
 
+/// @notice Receives the account's new root after a rotation, so the account can be found by its current key.
+interface IQDayAccountFactory {
+    function recordRoot(bytes32 firstRoot, bytes32 firstPubSeed, bytes32 newRoot) external;
+}
+
 /// @notice An EIP-8141 account with no ECDSA owner. Only a QDay signature can move its funds.
-/// @dev Solidity can't emit the frame opcodes, so the account deploys six tiny helpers that do.
+/// @dev This is the shared implementation. Each account is a minimal proxy (EIP-1167) that delegates
+///      here, with its first key appended to its code, so deploying one writes no storage and fits
+///      the alt mempool's 500,000 state-gas budget for a deploy frame. Solidity can't emit the frame
+///      opcodes, so the implementation deploys six tiny helpers that do.
+///      The account's own VERIFY frame may sit anywhere; its spend frame follows it and the action
+///      frame follows that. That lets a first transaction put a deploy frame in front.
 contract QDayFrameAccount {
     error BadRotation();
     error BadSignature();
@@ -30,6 +40,7 @@ contract QDayFrameAccount {
 
     bytes32 private constant ROTATE_TAG = "QDAY-ROTATE-V1";
 
+    uint256 private constant MODE_VERIFY = 1;
     uint256 private constant MODE_SENDER = 2;
     uint256 private constant SCHEME_ARBITRARY = 0;
     uint256 private constant APPROVE_SCOPE = 3;
@@ -44,10 +55,9 @@ contract QDayFrameAccount {
     uint256 private constant FRAME_MODE = 2;
     uint256 private constant FRAME_DATA_LENGTH = 4;
 
-    uint256 private constant SPEND_FRAME = 1;
-    uint256 private constant ACTION_FRAME = 2;
-
     XMSSVerifier public immutable verifier;
+    /// @notice The factory that deployed this implementation. Told about rotations.
+    address public immutable factory;
     address public immutable approveOp;
     address public immutable txParamOp;
     address public immutable sigParamOp;
@@ -55,8 +65,12 @@ contract QDayFrameAccount {
     address public immutable frameParamOp;
     address public immutable frameDataLoadOp;
 
-    bytes32 public root;
-    bytes32 public pubSeed;
+    /// @notice Length of the proxy code in front of the first key.
+    uint256 public constant PROXY_BYTES = 45;
+
+    /// @dev Set by the first rotation. Until then the key is the one appended to the proxy's code.
+    bytes32 private rotatedRoot;
+    bytes32 private rotatedPubSeed;
     uint256 public nextIndex;
     uint256 public tree;
 
@@ -65,17 +79,9 @@ contract QDayFrameAccount {
         _;
     }
 
-    constructor(
-        address verifier_,
-        bytes32 root_,
-        bytes32 pubSeed_,
-        address stakingRegistry,
-        uint256 stake,
-        uint32 unstakeDelay
-    ) payable {
+    constructor(address verifier_) {
         verifier = XMSSVerifier(verifier_);
-        root = root_;
-        pubSeed = pubSeed_;
+        factory = msg.sender;
 
         approveOp = _deploy(hex"5f355f5faa");
         txParamOp = _deploy(hex"5f35b05f5260205ff3");
@@ -83,11 +89,34 @@ contract QDayFrameAccount {
         sigDataCopyOp = _deploy(hex"6040356020355f355fb56020355ff3");
         frameParamOp = _deploy(hex"6020355f35b35f5260205ff3");
         frameDataLoadOp = _deploy(hex"6020355f35b15f5260205ff3");
-
-        IStakingRegistry(stakingRegistry).addStake{value: stake}(unstakeDelay);
     }
 
     receive() external payable {}
+
+    /// @notice The active tree's root.
+    function root() public view returns (bytes32) {
+        bytes32 rotated = rotatedRoot;
+        if (rotated != bytes32(0)) return rotated;
+        (bytes32 first,) = firstKey();
+        return first;
+    }
+
+    /// @notice The active tree's public seed.
+    function pubSeed() public view returns (bytes32) {
+        if (rotatedRoot != bytes32(0)) return rotatedPubSeed;
+        (, bytes32 first) = firstKey();
+        return first;
+    }
+
+    /// @notice The key the account was created with, read from the end of its proxy code.
+    function firstKey() public view returns (bytes32 firstRoot, bytes32 firstPubSeed) {
+        assembly ("memory-safe") {
+            let ptr := mload(0x40)
+            extcodecopy(address(), ptr, PROXY_BYTES, 0x40)
+            firstRoot := mload(ptr)
+            firstPubSeed := mload(add(ptr, 0x20))
+        }
+    }
 
     /// @notice Approves the transaction if it carries a valid signature. VERIFY frames can't write
     ///         storage, so this only checks that the next frame will spend the key.
@@ -101,19 +130,21 @@ contract QDayFrameAccount {
         if (index < nextIndex) revert KeyAlreadyUsed();
 
         uint256 frames = _read(txParamOp, abi.encode(TX_FRAME_COUNT));
-        if (frames <= SPEND_FRAME || !_isSpendOf(index)) revert NoSpendFrame();
+        uint256 spendFrame = _ownVerifyFrame(frames) + 1;
+        uint256 actionFrame = spendFrame + 1;
+        if (frames <= spendFrame || !_isSpendOf(index, spendFrame)) revert NoSpendFrame();
 
         bytes32 message = bytes32(_read(txParamOp, abi.encode(TX_SIG_HASH)));
-        if (frames > ACTION_FRAME && _isRotate()) {
-            bytes32 newRoot = _frameWord(4, ACTION_FRAME);
-            bytes32 newPubSeed = _frameWord(36, ACTION_FRAME);
+        if (frames > actionFrame && _isRotate(actionFrame)) {
+            bytes32 newRoot = _frameWord(4, actionFrame);
+            bytes32 newPubSeed = _frameWord(36, actionFrame);
             if (newRoot == bytes32(0)) revert BadRotation();
             message = rotationMessage(message, newRoot, newPubSeed);
         } else if (index >= LEAVES - ROTATION_RESERVE) {
             revert ReservedKey();
         }
 
-        if (!verifier.verify(root, pubSeed, message, signature)) revert BadSignature();
+        if (!verifier.verify(root(), pubSeed(), message, signature)) revert BadSignature();
 
         (bool ok,) = approveOp.delegatecall(abi.encode(APPROVE_SCOPE));
         if (!ok) revert OpcodeFailed();
@@ -128,11 +159,18 @@ contract QDayFrameAccount {
     /// @notice Switches to a new tree. The address stays the same.
     function rotate(bytes32 newRoot, bytes32 newPubSeed) external onlySelf {
         if (newRoot == bytes32(0)) revert BadRotation();
-        root = newRoot;
-        pubSeed = newPubSeed;
+        rotatedRoot = newRoot;
+        rotatedPubSeed = newPubSeed;
         nextIndex = 0;
         tree += 1;
         emit Rotated(tree, newRoot, newPubSeed);
+        (bytes32 firstRoot, bytes32 firstPubSeed) = firstKey();
+        IQDayAccountFactory(factory).recordRoot(firstRoot, firstPubSeed, newRoot);
+    }
+
+    /// @notice Stakes in a mempool staking registry, from the account's own balance.
+    function addStake(address registry, uint256 amount, uint32 unstakeDelay) external onlySelf {
+        IStakingRegistry(registry).addStake{value: amount}(unstakeDelay);
     }
 
     /// @notice The message a rotation signs, which binds the transaction to the next key.
@@ -148,13 +186,20 @@ contract QDayFrameAccount {
         if (helper == address(0)) revert OpcodeFailed();
     }
 
-    function _isSpendOf(uint256 index) private view returns (bool) {
-        return _isSelfCall(SPEND_FRAME, SPEND_DATA_BYTES, this.spendIndex.selector)
-            && uint256(_frameWord(4, SPEND_FRAME)) == index;
+    /// @dev The first VERIFY frame: the one running this check. Frames before it can only be a deploy.
+    function _ownVerifyFrame(uint256 frames) private view returns (uint256) {
+        for (uint256 frame = 0; frame < frames; ++frame) {
+            if (_frameParam(frame, FRAME_MODE) == MODE_VERIFY) return frame;
+        }
+        revert NoSpendFrame();
     }
 
-    function _isRotate() private view returns (bool) {
-        return _isSelfCall(ACTION_FRAME, ROTATE_DATA_BYTES, this.rotate.selector);
+    function _isSpendOf(uint256 index, uint256 frame) private view returns (bool) {
+        return _isSelfCall(frame, SPEND_DATA_BYTES, this.spendIndex.selector) && uint256(_frameWord(4, frame)) == index;
+    }
+
+    function _isRotate(uint256 frame) private view returns (bool) {
+        return _isSelfCall(frame, ROTATE_DATA_BYTES, this.rotate.selector);
     }
 
     /// @dev Whether a frame is this account calling itself with the given selector.
