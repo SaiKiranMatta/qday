@@ -149,6 +149,17 @@ contract QDayHashPoolTest is TestBase {
         _expectRefused(_word("leaf0"), _word("seed0"), _bytes("sig0"), TO, FEE + 1);
     }
 
+    function test_another_pool_is_refused() public {
+        QDayHashPool other = QDayHashPool(address(0x7777));
+        vm.etch(address(other), type(QDayHashPool).runtimeCode);
+        bytes32 leaf = _word("leaf0");
+        bytes32 seed = _word("seed0");
+        bytes memory signature = _bytes("sig0");
+        other.pay{value: 1 ether}(leaf);
+        vm.expectRevert(QDayHashPool.BadSignature.selector);
+        other.spend(leaf, seed, signature, TO, FEE);
+    }
+
     function test_another_chain_is_refused() public {
         pool.pay{value: 1 ether}(_word("leaf0"));
         vm.chainId(1);
@@ -180,8 +191,8 @@ contract QDayHashPoolTest is TestBase {
         bytes memory good = _bytes("sig0");
         bytes memory short = new bytes(good.length - 1);
         bytes memory long = new bytes(good.length + 1);
-        for (uint256 i = 0; i < short.length; i++) {
-            short[i] = good[i];
+        for (uint256 i = 0; i < good.length; i++) {
+            if (i < short.length) short[i] = good[i];
             long[i] = good[i];
         }
         _expectRefused(_word("leaf0"), _word("seed0"), short, TO, FEE);
@@ -213,7 +224,12 @@ contract QDayHashPoolTest is TestBase {
     function test_a_payee_that_burns_gas_doesnt_stop_the_spend() public {
         pool.pay{value: 1 ether}(_word("leaf0"));
         vm.etch(TO, address(new BurnsGas()).code);
-        pool.spend(_word("leaf0"), _word("seed0"), _bytes("sig0"), TO, FEE);
+        bytes32 leaf = _word("leaf0");
+        bytes32 seed = _word("seed0");
+        bytes memory signature = _bytes("sig0");
+        uint256 before = gasleft();
+        pool.spend(leaf, seed, signature, TO, FEE);
+        _assertTrue(before - gasleft() < 400_000, "the payee burned the submitter's gas");
         _assertEq(pool.owed(TO), 1 ether - FEE, "not kept");
     }
 
