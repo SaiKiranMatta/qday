@@ -1,0 +1,24 @@
+[package]
+name = "qday-firmware"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[dependencies]
+embedded-graphics = "0.8.2"
+embedded-hal-bus = "0.3.0"
+esp-backtrace = { version = "0.20.0", features = ["esp32s3", "panic-handler", "println"] }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
+esp-hal = { version = "~1.2.2", features = ["esp32s3"] }
+esp-println = { version = "0.18.0", features = ["esp32s3"] }
+mipidsi = "0.10.0"
+
+[profile.dev]
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1
+debug = 2
+lto = "fat"
+opt-level = "s"
