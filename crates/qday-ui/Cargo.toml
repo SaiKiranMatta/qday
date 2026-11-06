@@ -14,6 +14,7 @@ qday-xmss = { path = "../qday-xmss" }
 
 [dev-dependencies]
 png = "0.18"
+qday-mldsa = { path = "../qday-mldsa" }
 
 # The drawing code is float geometry throughout, so the workspace's pedantic casts don't fit it.
 [lints.clippy]

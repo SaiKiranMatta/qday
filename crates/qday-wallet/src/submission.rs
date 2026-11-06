@@ -5,7 +5,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::frame::{CHAIN_ID, FrameTx};
+use crate::frame::{Address, CHAIN_ID, FrameTx, FrameView, MlFrameTx};
 use crate::hex;
 
 fn quantity(value: u128) -> String {
@@ -19,8 +19,25 @@ fn string(text: &str) -> String {
 /// Builds the submission object for a signed transaction.
 #[must_use]
 pub fn submission_json(tx: &FrameTx, signature: &[u8]) -> String {
-    let frames: Vec<String> = tx
-        .frame_views()
+    let fees = (tx.max_priority_fee, tx.max_fee);
+    build(&tx.frame_views(), &tx.sender, tx.nonce, fees, signature)
+}
+
+/// Builds the submission object for a signed two-frame transaction.
+#[must_use]
+pub fn ml_submission_json(tx: &MlFrameTx, signature: &[u8]) -> String {
+    let fees = (tx.max_priority_fee, tx.max_fee);
+    build(&tx.frame_views(), &tx.sender, tx.nonce, fees, signature)
+}
+
+fn build(
+    frame_views: &[FrameView],
+    sender: &Address,
+    nonce: u64,
+    (max_priority_fee, max_fee): (u128, u128),
+    signature: &[u8],
+) -> String {
+    let frames: Vec<String> = frame_views
         .iter()
         .map(|frame| {
             let target = frame
@@ -42,11 +59,11 @@ pub fn submission_json(tx: &FrameTx, signature: &[u8]) -> String {
         "{{\"chainId\":{},\"nonceKeys\":[{}],\"nonceSeq\":{},\"sender\":{},\"frames\":[{}],\"signatures\":[{{\"scheme\":0,\"signer\":\"0x\",\"msg\":\"0x\",\"signature\":{}}}],\"fees\":{{\"maxPriorityFeePerGas\":{},\"maxFeePerGas\":{},\"maxFeePerBlobGas\":\"0x0\"}},\"blobVersionedHashes\":[],\"recentRootReferences\":[]}}",
         quantity(u128::from(CHAIN_ID)),
         quantity(0),
-        quantity(u128::from(tx.nonce)),
-        string(&hex::encode(&tx.sender)),
+        quantity(u128::from(nonce)),
+        string(&hex::encode(sender)),
         frames.join(","),
         string(&hex::encode(signature)),
-        quantity(tx.max_priority_fee),
-        quantity(tx.max_fee),
+        quantity(max_priority_fee),
+        quantity(max_fee),
     )
 }

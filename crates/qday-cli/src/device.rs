@@ -5,18 +5,21 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
-use qday_wallet::frame::{Address, FrameTx};
+use qday_mldsa::SIGNATURE_BYTES;
+use qday_wallet::frame::{Address, FrameTx, MlFrameTx};
 use qday_wallet::hex;
 use qday_wallet::protocol::{
-    NextKey, PREFIX, Request, Response, error_code, parse_response, request_line,
+    NextKey, PREFIX, Request, Response, error_code, parse_response, request_line, scheme_name,
 };
+use qday_wallet::settings::Scheme;
+use qday_wallet::stealth::StealthSpend;
 use serde_json::Value;
 
 use crate::json;
 
 /// Opening the port can reset the board, so the first request gets this many tries.
-const PUBKEY_TRIES: u32 = 5;
-const PUBKEY_WAIT: Duration = Duration::from_secs(1);
+const HELLO_TRIES: u32 = 5;
+const HELLO_WAIT: Duration = Duration::from_secs(1);
 /// Signing waits for a person, and tree building takes minutes.
 const LONG_WAIT: Duration = Duration::from_secs(300);
 const BAUD: u32 = 115_200;
@@ -119,31 +122,101 @@ impl<P: Read + Write> Device<P> {
         }
     }
 
-    /// Asks for the keys, retrying because opening the port can reset the board.
-    pub fn status(&mut self) -> Result<Status> {
-        for _ in 0..PUBKEY_TRIES {
-            match self.exchange(&Request::PubKey, PUBKEY_WAIT)? {
-                Some(Response::PubKey {
-                    root,
-                    pub_seed,
-                    next_index,
-                    tree,
-                    next,
-                }) => {
-                    return Ok(Status {
-                        root,
-                        pub_seed,
-                        next_index,
-                        tree,
-                        next,
-                    });
-                }
+    /// Sends a first request, retrying because opening the port can reset the board.
+    fn hello(&mut self, request: &Request) -> Result<Response> {
+        for _ in 0..HELLO_TRIES {
+            match self.exchange(request, HELLO_WAIT)? {
                 Some(Response::Err(error)) => bail!("the device said {}", error_code(error)),
-                Some(_) => bail!("the device gave the wrong response"),
+                Some(response) => return Ok(response),
                 None => {}
             }
         }
-        bail!("the device did not answer after {PUBKEY_TRIES} tries")
+        bail!("the device did not answer after {HELLO_TRIES} tries")
+    }
+
+    /// Asks for the keys.
+    pub fn status(&mut self) -> Result<Status> {
+        match self.hello(&Request::PubKey)? {
+            Response::PubKey {
+                root,
+                pub_seed,
+                next_index,
+                tree,
+                next,
+            } => Ok(Status {
+                root,
+                pub_seed,
+                next_index,
+                tree,
+                next,
+            }),
+            _ => bail!("the device gave the wrong response"),
+        }
+    }
+
+    /// Asks which scheme is active. This works in either mode, so it's the safe first request.
+    pub fn scheme(&mut self) -> Result<Scheme> {
+        match self.hello(&Request::Scheme)? {
+            Response::Scheme(scheme) => Ok(scheme),
+            _ => bail!("the device gave the wrong response"),
+        }
+    }
+
+    /// Reads the stored ML-DSA public key.
+    pub fn ml_pubkey(&mut self) -> Result<Vec<u8>> {
+        self.scheme()?;
+        match self.request(&Request::MlPubKey)? {
+            Response::MlPubKey(key) => Ok(key),
+            _ => bail!("the device gave the wrong response"),
+        }
+    }
+
+    /// Asks the device for its stealth address, which the person has to agree to.
+    pub fn stealth_address(&mut self) -> Result<Vec<u8>> {
+        self.scheme()?;
+        match self.request(&Request::StealthAddress)? {
+            Response::StealthAddress(address) => Ok(address),
+            _ => bail!("the device gave the wrong response"),
+        }
+    }
+
+    /// Asks the device for its view seed, which needs the person's passcode.
+    pub fn view_key(&mut self) -> Result<[u8; 32]> {
+        self.scheme()?;
+        match self.request(&Request::ViewKey)? {
+            Response::ViewKey(view) => Ok(view),
+            _ => bail!("the device gave the wrong response"),
+        }
+    }
+
+    /// Signs a spend of a stealth note on the device.
+    pub fn spend_stealth(&mut self, spend: &StealthSpend) -> Result<Vec<u8>> {
+        self.scheme()?;
+        match self.request(&Request::SpendStealth(Box::new(*spend)))? {
+            Response::Sig { signature, .. } if signature.len() == SIGNATURE_BYTES => Ok(signature),
+            _ => bail!("the device gave the wrong response"),
+        }
+    }
+
+    /// Signs a two-frame transfer on the device and returns the submission JSON.
+    pub fn ml_send(
+        &mut self,
+        sender: Address,
+        nonce: u64,
+        to: Address,
+        value: u128,
+    ) -> Result<Value> {
+        let scheme = self.scheme()?;
+        if scheme != Scheme::MlDsa44 {
+            bail!("the device is on {}: switch it first", scheme_name(scheme));
+        }
+        let tx = MlFrameTx::transfer(sender, nonce, to, value);
+        match self.request(&Request::SignFrame(tx.encode(&[])))? {
+            Response::Sig { signature, .. } if signature.len() == SIGNATURE_BYTES => {
+                Ok(json::ml_submission(&tx, &signature))
+            }
+            _ => bail!("the device gave the wrong response"),
+        }
     }
 
     fn sign(&mut self, tx: &FrameTx) -> Result<Value> {
@@ -209,7 +282,7 @@ impl<P: Read + Write> Device<P> {
 
     /// Replaces the keys on the device.
     pub fn restore(&mut self, seed: [u8; 32], tree: u32, chain_next_index: u32) -> Result<()> {
-        self.status()?;
+        self.scheme()?;
         self.expect_ok(&Request::Restore {
             seed,
             tree,
@@ -239,8 +312,10 @@ mod tests {
     use std::collections::VecDeque;
     use std::io::{Error, ErrorKind, Read, Result, Write};
 
-    use qday_wallet::frame::{Action, FrameTx};
+    use qday_wallet::frame::{Action, FrameTx, MlFrameTx};
     use qday_wallet::protocol::{Request, Response, parse_request, response_line};
+    use qday_wallet::settings::Scheme;
+    use qday_wallet::stealth::StealthSpend;
     use qday_wallet::wallet::WalletError;
 
     use super::Device;
@@ -371,6 +446,157 @@ mod tests {
     }
 
     #[test]
+    fn scheme_is_retried_while_the_board_resets() {
+        let mut fake = FakeDevice::new(vec![None, None, Some(Response::Scheme(Scheme::MlDsa44))]);
+        let scheme = Device::new(&mut fake).scheme().expect("it answers");
+        assert_eq!(scheme, Scheme::MlDsa44);
+        assert_eq!(fake.requests.len(), 3);
+    }
+
+    #[test]
+    fn scheme_gives_up_after_five_tries() {
+        let mut fake = FakeDevice::new(vec![None; 5]);
+        assert!(Device::new(&mut fake).scheme().is_err());
+        assert_eq!(fake.requests.len(), 5);
+    }
+
+    #[test]
+    fn ml_pubkey_says_hello_with_scheme_then_reads_the_key() {
+        let mut fake = FakeDevice::new(vec![
+            Some(Response::Scheme(Scheme::MlDsa44)),
+            Some(Response::MlPubKey(vec![6; 1312])),
+        ]);
+        let key = Device::new(&mut fake).ml_pubkey().expect("it answers");
+        assert_eq!(key, vec![6; 1312]);
+        assert_eq!(fake.requests, [Request::Scheme, Request::MlPubKey]);
+    }
+
+    #[test]
+    fn ml_send_builds_the_two_frame_transfer() {
+        let mut fake = FakeDevice::new(vec![
+            Some(Response::Scheme(Scheme::MlDsa44)),
+            Some(Response::Sig {
+                signature: vec![9; 2420],
+                next: None,
+            }),
+        ]);
+        let json = Device::new(&mut fake)
+            .ml_send(SENDER, 7, TO, 1000)
+            .expect("the device signs");
+        let want = MlFrameTx::transfer(SENDER, 7, TO, 1000);
+        assert_eq!(fake.requests[1], Request::SignFrame(want.encode(&[])));
+        assert_eq!(
+            json,
+            crate::json::ml_submission(&want, &vec![9; 2420]),
+            "the submission carries the device's signature"
+        );
+    }
+
+    #[test]
+    fn ml_send_says_so_when_the_device_is_on_xmss() {
+        let mut fake = FakeDevice::new(vec![Some(Response::Scheme(Scheme::Xmss))]);
+        let error = Device::new(&mut fake)
+            .ml_send(SENDER, 7, TO, 1000)
+            .expect_err("nothing is signed");
+        assert!(error.to_string().contains("xmss"), "{error}");
+        assert_eq!(fake.requests, [Request::Scheme]);
+    }
+
+    #[test]
+    fn ml_send_refuses_an_xmss_length_signature() {
+        let mut fake = FakeDevice::new(vec![
+            Some(Response::Scheme(Scheme::MlDsa44)),
+            Some(Response::Sig {
+                signature: vec![9; 2500],
+                next: None,
+            }),
+        ]);
+        assert!(Device::new(&mut fake).ml_send(SENDER, 7, TO, 1000).is_err());
+    }
+
+    #[test]
+    fn restoring_works_in_ml_dsa_mode() {
+        let mut fake = FakeDevice::new(vec![
+            Some(Response::Scheme(Scheme::MlDsa44)),
+            Some(Response::Ok),
+        ]);
+        Device::new(&mut fake)
+            .restore([5; 32], 0, 0)
+            .expect("the device restores");
+        assert_eq!(fake.requests[0], Request::Scheme);
+    }
+
+    fn stealth_spend() -> StealthSpend {
+        StealthSpend {
+            ciphertext: [3; 1120],
+            key_hash: [4; 32],
+            pool: SENDER,
+            to: TO,
+            fee: 1000,
+        }
+    }
+
+    #[test]
+    fn stealth_address_says_hello_with_scheme_then_asks() {
+        let mut fake = FakeDevice::new(vec![
+            Some(Response::Scheme(Scheme::Xmss)),
+            Some(Response::StealthAddress(vec![7; 4160])),
+        ]);
+        let got = Device::new(&mut fake)
+            .stealth_address()
+            .expect("it answers");
+        assert_eq!(got, vec![7; 4160]);
+        assert_eq!(fake.requests, [Request::Scheme, Request::StealthAddress]);
+    }
+
+    #[test]
+    fn view_key_returns_the_seed() {
+        let mut fake = FakeDevice::new(vec![
+            Some(Response::Scheme(Scheme::MlDsa44)),
+            Some(Response::ViewKey([8; 32])),
+        ]);
+        assert_eq!(
+            Device::new(&mut fake).view_key().expect("it answers"),
+            [8; 32]
+        );
+    }
+
+    #[test]
+    fn spend_stealth_returns_the_ml_dsa_signature() {
+        let mut fake = FakeDevice::new(vec![
+            Some(Response::Scheme(Scheme::Xmss)),
+            Some(Response::Sig {
+                signature: vec![9; 2420],
+                next: None,
+            }),
+        ]);
+        let signature = Device::new(&mut fake)
+            .spend_stealth(&stealth_spend())
+            .expect("the device signs");
+        assert_eq!(signature, vec![9; 2420]);
+        assert_eq!(
+            fake.requests[1],
+            Request::SpendStealth(Box::new(stealth_spend()))
+        );
+    }
+
+    #[test]
+    fn spend_stealth_refuses_another_signature_length() {
+        let mut fake = FakeDevice::new(vec![
+            Some(Response::Scheme(Scheme::Xmss)),
+            Some(Response::Sig {
+                signature: vec![9; 2176],
+                next: None,
+            }),
+        ]);
+        assert!(
+            Device::new(&mut fake)
+                .spend_stealth(&stealth_spend())
+                .is_err()
+        );
+    }
+
+    #[test]
     fn a_refusal_is_an_error_with_its_code() {
         let mut fake = FakeDevice::new(vec![
             Some(status_response(None)),
@@ -437,7 +663,7 @@ mod tests {
         let mut fake = FakeDevice::new(vec![
             Some(status_response(None)),
             Some(Response::Ok),
-            Some(status_response(None)),
+            Some(Response::Scheme(Scheme::Xmss)),
             Some(Response::Ok),
         ]);
         let mut device = Device::new(&mut fake);

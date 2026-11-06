@@ -1,10 +1,14 @@
-import type { DeviceStatus } from "@qday/device";
+import type { DeviceStatus, SchemeId } from "@qday/device";
 import { type ComponentProps, type ReactNode, useState } from "react";
+import { keccak256 } from "viem";
 import { ActivityList, ActivitySkeleton } from "./components/ActivityList";
 import { ManageTokens } from "./components/ManageTokens";
 import { TokenLogo } from "./components/TokenLogo";
 import { Button } from "./components/ui";
 import { capacity } from "./lib/capacity";
+import { SCHEMES } from "./lib/schemes";
+import type { PrivateNote, SetupState } from "./lib/useStealth";
+import { exactEth } from "./lib/format";
 import { groupThousands, shortHex } from "./lib/format";
 import { DeviceArt } from "./components/DeviceArt";
 import { Icon } from "./components/icons";
@@ -25,6 +29,7 @@ export function WalletPage({
   onReceive,
   onMintTokens,
   onOpenActivity,
+  privatePayments,
 }: {
   account: AccountView;
   tokens: TokenList;
@@ -35,6 +40,7 @@ export function WalletPage({
     address: `0x${string}` | null;
     balanceWei: bigint;
     step: SetupStep;
+    scheme: SchemeId;
     onFund: () => void;
     onCreate: () => void;
   } | null;
@@ -44,6 +50,14 @@ export function WalletPage({
   /** Local devnet only: mints test tokens to the account. */
   onMintTokens: (() => Promise<void>) | null;
   onOpenActivity: () => void;
+  /** Null until there's an account to claim to. */
+  privatePayments: {
+    setup: SetupState;
+    notes: PrivateNote[];
+    scanned: boolean;
+    onEnable: () => void;
+    onClaim: (note: PrivateNote) => void;
+  } | null;
 }) {
   const [managing, setManaging] = useState(false);
   const [minting, setMinting] = useState<"idle" | "busy" | "error">("idle");
@@ -142,8 +156,67 @@ export function WalletPage({
         </Card>
       </div>
 
+      {privatePayments && <PrivatePayments {...privatePayments} />}
+
       {managing && <ManageTokens tokens={tokens} onClose={() => setManaging(false)} />}
     </div>
+  );
+}
+
+/** Payments to the stealth address, found by scanning the pool. Claiming sends a whole note out. */
+function PrivatePayments({
+  setup,
+  notes,
+  scanned,
+  onEnable,
+  onClaim,
+}: {
+  setup: SetupState;
+  notes: PrivateNote[];
+  scanned: boolean;
+  onEnable: () => void;
+  onClaim: (note: PrivateNote) => void;
+}) {
+  const waiting = notes.filter((note) => !note.spent);
+  return (
+    <Card title="Private payments">
+      {setup.kind !== "on" ? (
+        <div className="py-3">
+          <p className="max-w-xl text-sm leading-relaxed text-muted">
+            A private address lets anyone pay you without the payment pointing to this account. Your QDay asks you to share the
+            address, then the key that finds payments, which can't spend them. This page forgets that key when you leave.
+          </p>
+          {setup.kind === "error" && (
+            <p role="alert" className="mt-3 text-xs text-bad">
+              {setup.message}
+            </p>
+          )}
+          <Button variant="secondary" className="mt-4" disabled={setup.kind === "sharing"} onClick={onEnable}>
+            {setup.kind === "sharing" ? "Waiting for your QDay…" : "Set up on your QDay"}
+          </Button>
+        </div>
+      ) : !scanned ? (
+        <p className="py-3 text-sm text-muted">Looking for payments…</p>
+      ) : waiting.length === 0 ? (
+        <EmptyState title="No private payments waiting" body="Open Receive to copy your private address." />
+      ) : (
+        <ul className="divide-y divide-line/60">
+          {waiting.map((note) => (
+            <li key={note.keyHash} className="flex items-center gap-4 py-3.5">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium tabular-nums">
+                  {exactEth(note.valueWei)} <span className="text-muted">ETH</span>
+                </div>
+                <div className="truncate font-mono text-xs text-muted">{shortHex(note.keyHash, 8, 6)}</div>
+              </div>
+              <Button variant="secondary" className="h-9" onClick={() => onClaim(note)}>
+                Claim
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 
@@ -289,6 +362,9 @@ export function DevicePage({
   const [showDetails, setShowDetails] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const cap = capacity(status);
+  const ml = status.scheme === "ml-dsa-44";
+  // The ID the device's own Wallet tab shows.
+  const deviceId = ml ? keccak256(status.publicKey) : status.root;
   const refresh = async () => {
     setRefreshing(true);
     try {
@@ -310,8 +386,8 @@ export function DevicePage({
           </div>
           <h2 className="mt-2 text-2xl font-semibold tracking-tight">QDay</h2>
           <div className="mt-1 flex items-center gap-2 text-sm text-muted">
-            Device ID <span className="font-mono text-xs text-alabaster/80">{shortHex(status.root, 8, 6)}</span>
-            <CopyIconButton text={status.root} label="Copy device ID" />
+            Device ID <span className="font-mono text-xs text-alabaster/80">{shortHex(deviceId, 8, 6)}</span>
+            <CopyIconButton text={deviceId} label="Copy device ID" />
           </div>
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <Button variant="secondary" onClick={() => void refresh()} disabled={refreshing}>
@@ -367,8 +443,9 @@ export function DevicePage({
           <h2 className="text-base font-semibold">Details</h2>
           <dl className="mt-2 divide-y divide-line/60">
             <Row label="Connection" value="USB" />
-            <Row label="Key set" value={`#${status.tree + 1}`} />
-            <Row label="Next signature" value={`#${String(status.nextIndex).padStart(4, "0")}`} />
+            <Row label="Signing" value={SCHEMES[status.scheme].name} />
+            {!ml && <Row label="Key set" value={`#${status.tree + 1}`} />}
+            {!ml && <Row label="Next signature" value={`#${String(status.nextIndex).padStart(4, "0")}`} />}
           </dl>
           <div className="border-t border-line/60">
             <button
@@ -382,8 +459,8 @@ export function DevicePage({
             {showDetails && (
               <div className="mb-4 animate-enter rounded-2xl bg-onyx px-4 py-2">
                 <dl className="divide-y divide-line/60">
-                  <Row label="Public key" value={status.root} mono />
-                  <Row label="Public seed" value={status.pubSeed} mono />
+                  <Row label="Public key" value={ml ? status.publicKey : status.root} mono />
+                  {!ml && <Row label="Public seed" value={status.pubSeed} mono />}
                 </dl>
                 <div className="border-t border-line/60 pt-3 text-xs text-muted">Device log</div>
                 <pre className="mt-2 mb-3 max-h-48 overflow-auto font-mono text-xs leading-relaxed text-muted">

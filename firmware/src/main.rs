@@ -7,6 +7,8 @@
 extern crate alloc;
 
 mod hardware;
+#[cfg(feature = "measure")]
+mod measure;
 
 use core::cell::RefCell;
 
@@ -17,6 +19,7 @@ use esp_hal::{
     delay::Delay,
     gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull},
     main,
+    psram::{Psram, PsramConfig, PsramMode, SpiRamFreq},
     rmt::{Rmt, TxChannelConfig, TxChannelCreator},
     rng::{Trng, TrngSource},
     spi::{
@@ -34,9 +37,11 @@ use mipidsi::{
     options::{ColorOrder, Orientation, Rotation},
 };
 use qday_ui::app::{App, Light};
+use qday_ui::fb::{Framebuffer, PIXELS};
 use qday_wallet::counter::FlashCounter;
 use qday_wallet::flash::{Aligned, layout};
 use qday_wallet::keystore::KeyStore;
+use qday_wallet::mlkey::MlKeyStore;
 use qday_wallet::passcode::Passcode;
 use qday_wallet::protocol::LineBuffer;
 use qday_wallet::settings::Settings;
@@ -46,10 +51,12 @@ use hardware::{Board, HardwareRng, PartitionFlash, StatusLight, Touch, UsbWatch,
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-/// Everything allocated lives in internal RAM, because flash operations turn off the cache that
-/// external RAM depends on. `heap_peak` in `qday-ui`'s tests measures what this has to cover, and
-/// what isn't given to the heap is left for the stack.
-const HEAP_BYTES: usize = 256 * 1024;
+/// Everything allocated lives in internal RAM, because flash operations and external RAM can't run
+/// at once. Only the framebuffer is in PSRAM, and it's never in a flash operation's way: nothing
+/// here runs in an interrupt, and the screen is only drawn between flash operations. `heap_peak` in
+/// `qday-ui`'s tests measures what the heap has to cover, and the rest of RAM is left for the stack,
+/// which ML-DSA needs at least 117 KB of.
+const HEAP_BYTES: usize = 96 * 1024;
 const RECLAIMED_HEAP_BYTES: usize = 73_744;
 /// Over breadboard wires the picture turns to noise at 80 MHz.
 const LCD_MHZ: u32 = 40;
@@ -60,11 +67,29 @@ const POLL_MS: u32 = 5;
 
 #[main]
 fn main() -> ! {
+    #[cfg(feature = "measure")]
+    measure::paint_stack();
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
     // The RAM the bootloader used is free now, and using it costs the stack nothing.
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: RECLAIMED_HEAP_BYTES);
     esp_alloc::heap_allocator!(size: HEAP_BYTES);
+    let psram = Psram::new(
+        peripherals.PSRAM,
+        PsramConfig {
+            mode: PsramMode::OctalSpi,
+            ram_frequency: SpiRamFreq::Freq80m,
+            ..Default::default()
+        },
+    );
+    let (psram_start, psram_bytes) = psram.raw_parts();
+    assert!(
+        psram_bytes >= PIXELS * size_of::<u16>(),
+        "the framebuffer needs PSRAM"
+    );
+    let psram_range = psram_start as usize..psram_start as usize + psram_bytes;
+    // SAFETY: nothing else uses PSRAM, it's aligned, and it stays mapped for the whole program.
+    let screen = unsafe { core::slice::from_raw_parts_mut(psram_start.cast::<u16>(), PIXELS) };
     let mut delay = Delay::new();
 
     let spi_config = Config::default()
@@ -121,13 +146,16 @@ fn main() -> ! {
     let _entropy = TrngSource::new(peripherals.RNG, peripherals.ADC1);
     let rng = HardwareRng(Trng::try_new().expect("the entropy source is running"));
 
-    let flash = RefCell::new(Aligned(PartitionFlash(FlashStorage::new(
-        peripherals.FLASH,
-    ))));
+    let flash = RefCell::new(Aligned(PartitionFlash {
+        storage: FlashStorage::new(peripherals.FLASH),
+        psram: psram_range,
+    }));
     let wallet = Wallet::open(
         KeyStore::new(&flash),
         Passcode::new(&flash, layout::PASSCODE),
         FlashCounter::new(&flash, layout::COUNTER),
+        Settings::new(&flash),
+        MlKeyStore::new(&flash),
         now_ms(),
     )
     .expect("the qday partition can be read");
@@ -141,7 +169,14 @@ fn main() -> ! {
     };
 
     let hold_k1 = keys[0].is_low();
-    let mut app = App::start(wallet, settings, rng, hold_k1, &mut board);
+    #[allow(
+        unused_mut,
+        reason = "only the measuring build draws before the app starts"
+    )]
+    let mut fb = Framebuffer::placed(screen);
+    #[cfg(feature = "measure")]
+    let mut report = measure::Report::run(&mut fb, &mut board, &flash);
+    let mut app = App::start(wallet, settings, fb, rng, hold_k1, &mut board);
 
     let mut lines = LineBuffer::default();
     let mut watch = UsbWatch::default();
@@ -159,6 +194,8 @@ fn main() -> ! {
             keys[3].is_low(),
         ];
         app.poll(&mut board, held, touch.read());
+        #[cfg(feature = "measure")]
+        report.tick(&mut board.usb);
         delay.delay_millis(POLL_MS);
     }
 }

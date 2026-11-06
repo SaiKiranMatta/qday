@@ -1,18 +1,31 @@
 //! The wallet's rules, on top of the counter, key slots and passcode.
 
+use alloc::boxed::Box;
+
+use qday_mldsa::{
+    KeySeed, PublicKey as MlPublicKey, Signature as MlSignature, Signer as _, StandardSigner,
+};
 use qday_xmss::{Hash, KeySet, LEAVES, PublicKey, SIG_BYTES, Tree};
+use zeroize::Zeroize as _;
 
 use crate::counter::OneWayCounter;
 use crate::flash::Flash;
-use crate::frame::{Action, FrameTx};
+use crate::frame::{Action, FrameTx, MlFrameTx};
 use crate::keystore::{ActiveKey, KeyStore, PreparedKey, Slots, StoreError};
+use crate::mlkey::MlKeyStore;
 use crate::passcode::{Attempt, Code, MAX_FAILURES, Passcode, Proof};
 use crate::rng::Rng;
+use crate::settings::{Scheme, Settings};
+use crate::stealth::{
+    MetaAddress, StealthSpend, meta_address_for, signer_for, spend_hash, view_seed_for,
+};
 
 /// From this key on, the device builds the next tree without being asked.
 pub const PREPARE_FROM: u32 = 900;
 /// From this key on, only rotations can be signed.
 pub const RESERVED_FROM: u32 = 1008;
+/// The main wallet's ML-DSA account.
+pub const MAIN_ACCOUNT: u32 = 0;
 /// Keys a restored device skips past the chain's `nextIndex`.
 pub const RESTORE_SKIP: u32 = 64;
 
@@ -33,12 +46,49 @@ pub enum WalletError {
     NothingPending,
     /// Flash failed.
     StorageFailure,
+    /// The request doesn't fit the active scheme.
+    WrongScheme,
+    /// ML-DSA signing gave up, or its result failed the check before release.
+    SigningFailed,
 }
 
 impl From<StoreError> for WalletError {
     fn from(_: StoreError) -> Self {
         Self::StorageFailure
     }
+}
+
+/// A two-frame transaction, as decoded by the device itself. Only `Wallet::check_transaction` makes
+/// one, so `ml_sign` can't be handed a transaction that skipped its rules.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MlReview {
+    tx: MlFrameTx,
+    message: Hash,
+}
+
+impl MlReview {
+    /// The decoded transaction.
+    #[must_use]
+    pub fn tx(&self) -> &MlFrameTx {
+        &self.tx
+    }
+
+    /// The hash the signature will cover.
+    #[must_use]
+    pub fn message(&self) -> &Hash {
+        &self.message
+    }
+}
+
+/// A transaction ready to show, in whichever form the active scheme uses.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Pending {
+    /// A spend of a stealth note.
+    Stealth(Box<StealthSpend>),
+    /// An XMSS transaction.
+    Xmss(Review),
+    /// An ML-DSA transaction.
+    MlDsa(MlReview),
 }
 
 /// What a transaction really does, as decoded by the device itself. Only `Wallet::review` makes
@@ -68,6 +118,9 @@ pub struct Wallet<F, C> {
     keys: KeyStore<F>,
     passcode: Passcode<F>,
     counter: C,
+    settings: Settings<F>,
+    ml_keys: MlKeyStore<F>,
+    scheme: Scheme,
     slots: Slots,
 }
 
@@ -81,18 +134,24 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
         keys: KeyStore<F>,
         passcode: Passcode<F>,
         counter: C,
+        settings: Settings<F>,
+        ml_keys: MlKeyStore<F>,
         now_ms: u64,
     ) -> Result<Self, WalletError> {
         let mut wallet = Self {
             keys,
             passcode,
             counter,
+            settings,
+            ml_keys,
+            scheme: Scheme::Xmss,
             slots: Slots::default(),
         };
         if wallet.passcode.failures()? >= MAX_FAILURES {
             wallet.erase()?;
         }
         wallet.passcode.on_boot(now_ms)?;
+        wallet.scheme = wallet.settings.scheme()?;
         wallet.slots = wallet.keys.scan()?;
         if let (None, Some(prepared)) = (wallet.slots.active, wallet.slots.prepared) {
             wallet.switch_to(prepared.slot)?;
@@ -155,6 +214,9 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
     fn erase(&mut self) -> Result<(), WalletError> {
         self.keys.wipe()?;
         self.slots = Slots::default();
+        self.ml_keys.wipe()?;
+        self.settings.set_scheme(Scheme::Xmss)?;
+        self.scheme = Scheme::Xmss;
         self.passcode.wipe()?;
         Ok(())
     }
@@ -191,7 +253,9 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
     ///
     /// Fails if the counter can't be read.
     pub fn should_prepare(&mut self) -> Result<bool, WalletError> {
-        Ok(self.next_key_ready().is_none() && self.next_index()? >= PREPARE_FROM)
+        Ok(self.scheme == Scheme::Xmss
+            && self.next_key_ready().is_none()
+            && self.next_index()? >= PREPARE_FROM)
     }
 
     /// The prepared tree, if it is the one that follows the active tree.
@@ -209,6 +273,7 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
     ///
     /// Fails if there is no key, or if storage fails.
     pub fn prepare(&mut self, progress: impl FnMut(u32)) -> Result<PublicKey, WalletError> {
+        self.require_xmss()?;
         if let Some(prepared) = self.next_key_ready() {
             return Ok(prepared.key);
         }
@@ -229,6 +294,7 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
     ///
     /// Fails with `NothingPending` unless tree `tree` is prepared.
     pub fn activate(&mut self, tree: u32) -> Result<(), WalletError> {
+        self.require_xmss()?;
         let prepared = self
             .next_key_ready()
             .filter(|prepared| prepared.tree == tree)
@@ -255,6 +321,7 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
     ///
     /// Fails with the code the laptop should get.
     pub fn review(&mut self, raw: &[u8]) -> Result<Review, WalletError> {
+        self.require_xmss()?;
         let tx = FrameTx::decode_unsigned(raw).map_err(|_| WalletError::BadRequest)?;
         let next = self.next_index()?;
         if next >= LEAVES {
@@ -292,7 +359,10 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
                     return Err(WalletError::RotationNeeded);
                 }
             }
-            Action::Transfer { .. } | Action::TokenTransfer { .. } | Action::Other { .. } => {
+            Action::Transfer { .. }
+            | Action::TokenTransfer { .. }
+            | Action::StealthPay { .. }
+            | Action::Other { .. } => {
                 if next >= RESERVED_FROM {
                     return Err(WalletError::RotationNeeded);
                 }
@@ -308,6 +378,7 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
     ///
     /// Fails, without signing, if the counter doesn't move or the state has changed.
     pub fn sign(&mut self, review: &Review, _proof: Proof) -> Result<[u8; SIG_BYTES], WalletError> {
+        self.require_xmss()?;
         let active = self.slots.active.ok_or(WalletError::StorageFailure)?;
         let index = review.tx.index;
         if self.next_index()? != index {
@@ -358,11 +429,199 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
             .checked_add(RESTORE_SKIP)
             .filter(|&index| index < LEAVES)
             .ok_or(WalletError::KeysExhausted)?;
+        // The stored public key goes first, so a cut can't leave the old seed's key on show.
+        self.ml_keys.wipe()?;
         let built = Tree::build(&KeySet::derive(seed, tree), progress);
         let slot = self.slots.free_slot();
         self.keys
             .write_tree(slot, seed, tree, first_index, &built)?;
-        self.switch_to(slot)
+        self.switch_to(slot)?;
+        if self.scheme == Scheme::MlDsa44 {
+            self.store_public_key(seed)?;
+        }
+        Ok(())
+    }
+}
+
+impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
+    /// The active scheme.
+    #[must_use]
+    pub fn scheme(&self) -> Scheme {
+        self.scheme
+    }
+
+    /// Fails unless XMSS is active. The counter, key trees and rotation belong to XMSS alone.
+    ///
+    /// # Errors
+    ///
+    /// Fails with `WrongScheme` in ML-DSA mode.
+    pub fn require_xmss(&self) -> Result<(), WalletError> {
+        if self.scheme == Scheme::Xmss {
+            Ok(())
+        } else {
+            Err(WalletError::WrongScheme)
+        }
+    }
+
+    /// Derives the main account's public key and stores it.
+    fn store_public_key(&mut self, seed: &Hash) -> Result<(), WalletError> {
+        let key_seed = KeySeed::derive(seed, MAIN_ACCOUNT);
+        let public = StandardSigner::from_key_seed(&key_seed).public_key();
+        self.ml_keys.store(MAIN_ACCOUNT, &public)?;
+        Ok(())
+    }
+
+    /// Reads the master seed, which lives with the active key. This reads the slot's header and
+    /// changes nothing.
+    fn master_seed(&mut self) -> Result<Hash, WalletError> {
+        let active = self.slots.active.ok_or(WalletError::StorageFailure)?;
+        Ok(self.keys.seed(active.slot)?)
+    }
+
+    /// Switches scheme. Funds don't move, but the account changes. Needs a fresh passcode proof.
+    /// The key is stored before the scheme changes, so a cut can't leave ML-DSA with no key.
+    ///
+    /// # Errors
+    ///
+    /// Fails if there is no key, or if storage fails.
+    pub fn set_scheme(&mut self, scheme: Scheme, _proof: Proof) -> Result<(), WalletError> {
+        let mut seed = self.master_seed()?;
+        let stored = if scheme == Scheme::MlDsa44 {
+            self.store_public_key(&seed)
+        } else {
+            Ok(())
+        };
+        seed.zeroize();
+        stored?;
+        self.settings.set_scheme(scheme)?;
+        self.scheme = scheme;
+        Ok(())
+    }
+
+    /// The stealth address to publish. Asking for one writes nothing.
+    ///
+    /// # Errors
+    ///
+    /// Fails if there is no key, or if storage fails.
+    pub fn meta_address(&mut self, account: u32) -> Result<MetaAddress, WalletError> {
+        let mut seed = self.master_seed()?;
+        let meta = meta_address_for(&seed, account);
+        seed.zeroize();
+        Ok(meta)
+    }
+
+    /// The seed that finds stealth payments and can't spend them. Needs a fresh passcode proof.
+    ///
+    /// # Errors
+    ///
+    /// Fails if there is no key, or if storage fails.
+    pub fn view_seed(&mut self, account: u32, _proof: Proof) -> Result<Hash, WalletError> {
+        let mut seed = self.master_seed()?;
+        let view = view_seed_for(&seed, account);
+        seed.zeroize();
+        Ok(view)
+    }
+
+    /// Signs a spend of a stealth note. Needs a fresh passcode proof.
+    ///
+    /// # Errors
+    ///
+    /// Fails, without a signature, if the ciphertext isn't for that key or signing fails.
+    pub fn sign_stealth(
+        &mut self,
+        spend: &StealthSpend,
+        account: u32,
+        _proof: Proof,
+        rng: &mut impl Rng,
+    ) -> Result<MlSignature, WalletError> {
+        if spend.to == [0; 20] || spend.pool == [0; 20] {
+            return Err(WalletError::BadRequest);
+        }
+        let mut seed = self.master_seed()?;
+        let signer = signer_for(&seed, account, &spend.ciphertext, &spend.key_hash);
+        seed.zeroize();
+        let signer = signer.ok_or(WalletError::BadRequest)?;
+
+        let message = spend_hash(&spend.pool, &spend.key_hash, &spend.to, spend.fee);
+        let mut rnd = [0; 32];
+        rng.fill(&mut rnd);
+        let signature = signer.sign(&message, &rnd);
+        rnd.zeroize();
+        signature.map_err(|_| WalletError::SigningFailed)
+    }
+
+    /// The stored ML-DSA public key, which needs no passcode to show.
+    ///
+    /// # Errors
+    ///
+    /// Fails with `NothingPending` if it hasn't been derived yet, or if storage fails.
+    pub fn ml_public_key(&mut self, account: u32) -> Result<MlPublicKey, WalletError> {
+        self.ml_keys
+            .load(account)?
+            .ok_or(WalletError::NothingPending)
+    }
+
+    /// Decides whether a raw unsigned transaction may be shown, by the active scheme's rules.
+    ///
+    /// # Errors
+    ///
+    /// Fails with the code the laptop should get.
+    pub fn check_transaction(&mut self, raw: &[u8]) -> Result<Pending, WalletError> {
+        match self.scheme {
+            Scheme::Xmss => match self.review(raw) {
+                Err(WalletError::BadRequest) if MlFrameTx::decode_unsigned(raw).is_ok() => {
+                    Err(WalletError::WrongScheme)
+                }
+                result => result.map(Pending::Xmss),
+            },
+            Scheme::MlDsa44 => match MlFrameTx::decode_unsigned(raw) {
+                Ok(tx) => {
+                    let message = tx.sig_hash();
+                    Ok(Pending::MlDsa(MlReview { tx, message }))
+                }
+                Err(_) if FrameTx::decode_unsigned(raw).is_ok() => Err(WalletError::WrongScheme),
+                Err(_) => Err(WalletError::BadRequest),
+            },
+        }
+    }
+
+    /// Signs with ML-DSA. The secret key is derived here, used, and wiped: it's never stored. The
+    /// signature is verified before it's released. Needs a fresh passcode proof.
+    ///
+    /// # Errors
+    ///
+    /// Fails, without a signature, if signing or storage fails.
+    pub fn ml_sign(
+        &mut self,
+        review: &MlReview,
+        account: u32,
+        _proof: Proof,
+        rng: &mut impl Rng,
+    ) -> Result<MlSignature, WalletError> {
+        if self.scheme != Scheme::MlDsa44 {
+            return Err(WalletError::WrongScheme);
+        }
+        let mut seed = self.master_seed()?;
+        let key_seed = KeySeed::derive(&seed, account);
+        seed.zeroize();
+        let signer = StandardSigner::from_key_seed(&key_seed);
+        drop(key_seed);
+
+        if account == MAIN_ACCOUNT {
+            let public = signer.public_key();
+            match self.ml_keys.load(account)? {
+                Some(stored) if stored != public => return Err(WalletError::StorageFailure),
+                Some(_) => {}
+                None => self.ml_keys.store(account, &public)?,
+            }
+        }
+
+        let mut rnd = [0; 32];
+        rng.fill(&mut rnd);
+        // The hash comes from the decoded transaction, so only what was reviewed can be signed.
+        let signature = signer.sign(&review.tx.sig_hash(), &rnd);
+        rnd.zeroize();
+        signature.map_err(|_| WalletError::SigningFailed)
     }
 }
 

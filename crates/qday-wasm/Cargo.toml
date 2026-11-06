@@ -10,6 +10,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+qday-mldsa = { path = "../qday-mldsa" }
 qday-wallet = { path = "../qday-wallet" }
 wasm-bindgen = "=0.2.130"
 

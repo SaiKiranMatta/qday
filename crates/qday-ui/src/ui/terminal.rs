@@ -5,6 +5,8 @@
 use embedded_graphics::mono_font::MonoFont;
 use embedded_graphics::mono_font::ascii::{FONT_8X13, FONT_9X18_BOLD, FONT_10X20};
 
+use qday_wallet::settings::Scheme;
+
 use crate::canvas::{Canvas, Color, Rect};
 use crate::nav::{self, Keys, Kind, Setting};
 use crate::screens::*;
@@ -178,13 +180,11 @@ fn prompt(c: &mut Canvas, y: i32, text: &str) {
 // --- tabs ------------------------------------------------------------------
 
 fn status_text(s: &Status) -> Text<24> {
-    text!(
-        24,
-        "TREE {}  #{:04} {}",
-        s.tree,
-        s.next_index,
-        if s.connected { "USB" } else { "---" }
-    )
+    let usb = if s.connected { "USB" } else { "---" };
+    match s.scheme {
+        Scheme::Xmss => text!(24, "TREE {}  #{:04} {usb}", s.tree, s.next_index),
+        Scheme::MlDsa44 => text!(24, "{}  {usb}", scheme_label(s.scheme)),
+    }
 }
 
 pub fn home(
@@ -198,7 +198,12 @@ pub fn home(
     c.clear(crt.bg);
     // Key usage and the tree are the Keys screen's; home only says whether it's connected.
     title_bar(c, "QDAY/OS 0.7", if s.connected { "USB" } else { "---" });
-    tt(c, 8, 22, "QUANTUM-SAFE WALLET (XMSS/KECCAK)", crt.dim);
+    let subtitle = if s.scheme == Scheme::MlDsa44 {
+        "QUANTUM-SAFE WALLET (ML-DSA-44)"
+    } else {
+        "QUANTUM-SAFE WALLET (XMSS/KECCAK)"
+    };
+    tt(c, 8, 22, subtitle, crt.dim);
     let (head, tail) = hex_parts(root);
     let account = upper(text!(20, "{}..{}", head.as_str(), tail.as_str()).as_str());
     let status = if s.connected { "READY" } else { "NO USB" };
@@ -400,6 +405,10 @@ pub fn device(
         (Setting::Theme, dots("THEME", name.as_str(), COLS - 2)),
         (Setting::Passcode, dots("PASSCODE", "6 DIGITS", COLS - 2)),
         (Setting::Backup, dots("BACK UP SEED", "24 WORDS", COLS - 2)),
+        (
+            Setting::Signing,
+            dots("SIGNING", scheme_label(s.scheme), COLS - 2),
+        ),
     ];
     for (i, (which, line)) in rows.iter().enumerate() {
         let y = 102 + i as i32 * 16;
@@ -541,13 +550,16 @@ pub fn review(c: &mut Canvas, info: &ReviewInfo, pressed: Option<usize>) {
         dots("MAX FEE", upper(info.fee).as_str(), COLS).as_str(),
         crt.fg,
     );
-    tt(
-        c,
-        8,
-        136,
-        dots("ONE-TIME KEY", key.as_str(), COLS).as_str(),
-        crt.fg,
-    );
+    let key_row = match info.scheme {
+        _ if info.signature.is_some() => dots(
+            "SIGNATURE",
+            upper(info.signature.unwrap_or("")).as_str(),
+            COLS,
+        ),
+        Scheme::Xmss => dots("ONE-TIME KEY", key.as_str(), COLS),
+        Scheme::MlDsa44 => dots("SIGNATURE", scheme_label(info.scheme), COLS),
+    };
+    tt(c, 8, 136, key_row.as_str(), crt.fg);
     let left = (info.seconds_left * 20 / info.timeout.max(1)) as usize;
     let mut bar = Text::<48>::new();
     let _ = core::fmt::Write::write_str(&mut bar, "TIMEOUT [");
@@ -774,5 +786,116 @@ pub fn notice(c: &mut Canvas, title: &str, detail: &str) {
     title_bar(c, "QDAY/OS 0.7", "");
     big(c, 8, 70, upper(title).as_str(), crt.bright);
     tt(c, 8, 104, upper(detail).as_str(), crt.fg);
+    crt_effects(c);
+}
+
+pub fn keys_ml(c: &mut Canvas, s: &Status, fingerprint: &[u8; 32], pressed: Option<usize>) {
+    let crt = k();
+    c.clear(crt.bg);
+    title_bar(c, "SIGNING KEY", status_text(s).as_str());
+    let (head, tail) = hex_parts(fingerprint);
+    let key = upper(text!(20, "{}..{}", head.as_str(), tail.as_str()).as_str());
+    tt(
+        c,
+        8,
+        22,
+        dots("FINGERPRINT", key.as_str(), COLS).as_str(),
+        crt.bright,
+    );
+    tt(
+        c,
+        8,
+        38,
+        dots("SCHEME", scheme_label(s.scheme), COLS).as_str(),
+        crt.fg,
+    );
+    tt(c, 8, 54, dots("KEY LIMIT", "NONE", COLS).as_str(), crt.fg);
+    tt(c, 8, 86, "ONE KEY SIGNS EVERY TRANSFER.", crt.dim);
+    fkeys(c, &nav::tab_keys(Tab::Keys, false, Setting::Theme), pressed);
+    crt_effects(c);
+}
+
+pub fn scheme_confirm(
+    c: &mut Canvas,
+    target: Scheme,
+    seconds_left: u32,
+    _timeout: u32,
+    pressed: Option<usize>,
+) {
+    let crt = k();
+    c.clear(crt.bg);
+    title_bar(c, "!!! CHECK CAREFULLY !!!", "");
+    big(
+        c,
+        8,
+        28,
+        text!(32, "SWITCH TO {}?", scheme_label(target)).as_str(),
+        crt.bright,
+    );
+    tt(c, 8, 64, "YOUR ACCOUNT CHANGES.", crt.fg);
+    tt(c, 8, 80, "FUNDS DON'T MOVE.", crt.fg);
+    tt(
+        c,
+        8,
+        104,
+        dots("SIGNING NOW", scheme_label(other_scheme(target)), COLS).as_str(),
+        crt.fg,
+    );
+    tt(
+        c,
+        8,
+        120,
+        dots("SIGNING NEXT", scheme_label(target), COLS).as_str(),
+        crt.fg,
+    );
+    tt(
+        c,
+        8,
+        176,
+        text!(32, "TIMEOUT {seconds_left}S").as_str(),
+        crt.dim,
+    );
+    fkeys(c, &nav::review_keys(), pressed);
+    crt_effects(c);
+}
+
+pub fn share_confirm(c: &mut Canvas, info: &ShareInfo, pressed: Option<usize>) {
+    let crt = k();
+    c.clear(crt.bg);
+    title_bar(c, "*** SHARE WITH LAPTOP ***", "");
+    big(c, 8, 28, upper(info.title).as_str(), crt.bright);
+    tt(c, 8, 64, upper(info.detail).as_str(), crt.fg);
+    tt(c, 8, 80, "FUNDS DON'T MOVE.", crt.fg);
+    tt(
+        c,
+        8,
+        104,
+        dots("GIVES", upper(info.gives).as_str(), COLS).as_str(),
+        crt.fg,
+    );
+    tt(
+        c,
+        8,
+        120,
+        dots(
+            "PASSCODE",
+            if info.passcode {
+                "NEEDED"
+            } else {
+                "NOT NEEDED"
+            },
+            COLS,
+        )
+        .as_str(),
+        crt.fg,
+    );
+    tt(
+        c,
+        8,
+        176,
+        text!(32, "TIMEOUT {}S", info.seconds_left).as_str(),
+        crt.dim,
+    );
+    fkeys(c, &nav::review_keys(), pressed);
     crt_effects(c);
 }
