@@ -34,6 +34,7 @@ Built at ETHGlobal Mumbai (November 2026). A prototype: not audited, not for rea
 | An ML-DSA account accepts only a valid signature from its key, and re-checks its verifier and key by code hash | `contracts/src/QDayMlDsaAccount.sol`, `QDayMlDsaFactory.sol` | `forge test --match-contract 'QDayMlDsa(Account|Factory)Test'` |
 | Private payments: a one-time key per payment from X-Wing; the view key finds payments and can't spend them | `crates/qday-wallet/src/stealth.rs`, `crates/qday-mldsa/src/stealth.rs` | `cargo test -p qday-mldsa --test stealth`, `cargo test -p qday-wallet --test stealth --test stealth_pay` |
 | The pool pays a note once, for the whole note, to the address the device signed for | `contracts/src/QDayLatticePool.sol`, its verifier `contracts/mldsa/src/MLDSA44InlineVerifier.sol` | `forge test --match-contract QDayLatticePoolTest` |
+| Anyone can try it without a device: a demo signer in the browser that never signs below the chain's `nextIndex` | `packages/frame/src/demo.ts` (`DemoSigner`), `web/src/lib/demo.ts`, `crates/qday-wasm` | `pnpm --filter @qday/frame test` (`test/demo.test.ts`) |
 | It works end to end on a real chain | Hosted devnet (`deploy/coolify`), wallet (`web/`), demos (`scripts/mldsa-demo.sh`, `scripts/stealth-demo.sh`) | Open [qday.unitlabs.xyz](https://qday.unitlabs.xyz); measured transactions are in `docs/devnet.md` |
 
 ## Map
@@ -87,6 +88,9 @@ needs the ESP toolchain (`firmware/README.md`) and is built separately.
   note). The device shows a private payment's amount and pool, not its recipient.
 - The vendored verifier's formal check C16 no longer anchors after the GAS patch
   (`contracts/mldsa/NOTICE.md`).
+- The demo wallet (**Try without a device**) keeps its seed unencrypted in browser storage and approves
+  in a page dialog. It shows the flow; it has none of the device's protection, and two browsers with one
+  seed could reuse a key. Test ETH only.
 - Not audited.
 
 See `docs/ROADMAP.md` for what comes next and `docs/fact-check.md` for every external claim checked

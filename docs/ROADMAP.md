@@ -66,6 +66,9 @@ hold real funds. Everything under **Built** runs now; each line points at where 
   live progress: signed, submitted, confirmed in block N.
 - **Activity read from the chain** and a **built-in explorer** that decodes frame transactions frame by
   frame, which standard explorers can't (`web/src/TxPage.tsx`, `web/src/lib/explorer.ts`).
+- **A demo wallet in the browser**, so anyone can try QDay without a device: the same wallet, with its
+  XMSS keys in browser storage and a page dialog for approval, which never signs below the chain's
+  `nextIndex` (`packages/frame/src/demo.ts`, [its limits](devnet.md#demo-wallet)).
 - **One codec for browser, laptop and device**: the web wallet builds transactions with the device's
   own Rust code compiled to WebAssembly (`crates/qday-wasm`, `packages/frame`).
 

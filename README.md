@@ -23,7 +23,7 @@ can spend it.
   payment depends on an elliptic curve; X-Wing keeps X25519 only as a backstop beside ML-KEM. Post-quantum stealth-address proposals so far protect only the
   finding (item 23).
 
-**[Open the wallet](https://qday.unitlabs.xyz)** · [Roadmap](docs/ROADMAP.md) · [Signature spec](docs/xmss-spec.md) · [Measured on-chain](docs/devnet.md) · [For AI reviewers](AGENTS.md)
+**[Open the wallet](https://qday.unitlabs.xyz)** (no device? select **Try without a device**) · [Roadmap](docs/ROADMAP.md) · [Signature spec](docs/xmss-spec.md) · [Measured on-chain](docs/devnet.md) · [For AI reviewers](AGENTS.md)
 
 ![QDay: the web wallet and the device's review screen](docs/images/hero.png)
 
@@ -79,7 +79,7 @@ weakness: the stealth-address scheme in ERC-5564 is built on secp256k1 too.
 
 | | |
 |---|---|
-| **Works today** | XMSS and its Solidity verifier; the EIP-8141 account with both locks and rotation; self-deploying accounts; ML-DSA-44 signing on the device, its account and factory; private payments (pay, find, claim); the device (decoding, approval, passcode, backup and restore, scheme switching, five themes); the web wallet (connect, create, send ETH and ERC-20, private payments, activity, explorer); the hosted devnet and wallet |
+| **Works today** | XMSS and its Solidity verifier; the EIP-8141 account with both locks and rotation; self-deploying accounts; ML-DSA-44 signing on the device, its account and factory; private payments (pay, find, claim); the device (decoding, approval, passcode, backup and restore, scheme switching, five themes); the web wallet (connect, create, send ETH and ERC-20, private payments, activity, explorer); a demo wallet in the browser, so anyone can try it without a device; the hosted devnet and wallet |
 | **Partly** | ML-DSA accounts send ETH only, and the devnet's dev key pays for deploying them, because the key is too large for the account to deploy itself. Private payments carry ETH only, the dev key relays claims (repaid from the note), and the one-time signer is an unreviewed variant, so test networks only. Key refresh and restore run from the device and the [CLI](crates/qday-cli), not yet from the web wallet |
 | **Simulated** | The quantum attacker in the demo |
 | **Not built** | Hardware rollback protection (eFuse or secure element), connecting other dApps, private token payments, an audit, mainnet |
@@ -251,9 +251,15 @@ QDay's own keccak256 variant of XMSS, not RFC 8391, and nothing here is audited.
 
 ## Try it
 
-**In the browser:** open **[qday.unitlabs.xyz](https://qday.unitlabs.xyz)** in Chrome, Edge or Brave
-with a QDay plugged in. Select **Connect device**, then **Get test ETH** and **Create account**, and
-send. Without a device, run the wallet locally with `?mock` to look around.
+**Without a device, in a minute:** open **[qday.unitlabs.xyz](https://qday.unitlabs.xyz)** and select
+**Try without a device**, then **Start demo wallet**. It's the same wallet on the same chain, with its
+keys in the browser and a page dialog standing in for the device's screen: get test ETH, create the
+account, send, and try a private payment to your own private address and claim it. It signs XMSS
+only, for test ETH, and its keys aren't protected, so it is a demo, not a wallet
+([its limits](docs/devnet.md#demo-wallet)).
+
+**With a device:** open the same page in Chrome, Edge or Brave with a QDay plugged in. Select
+**Connect device**, then **Get test ETH** and **Create account**, and send.
 
 - **ML-DSA-44:** on the device, open **Device**, select **Signing**, press **Change** and approve. The wallet shows the ML-DSA
   account; **Create account** has the devnet's dev key deploy it, with no approval on the device.
@@ -282,7 +288,7 @@ failure.
 ```bash
 cargo test --workspace --locked          # 654 tests: both schemes, stealth keys, device logic, screens, CLI
 cd contracts && forge test               # 124 tests: verifiers, accounts, factories and the pool, on real signatures
-pnpm -r test                             # 34 tests: Web Serial protocol, WebAssembly codec against the CLI
+pnpm -r test                             # 67 tests: Web Serial protocol, WebAssembly codec against the CLI, demo signer
 tools/devnet/smoke.sh                    # 14 checks with real transactions on a devnet
 scripts/mldsa-demo.sh deploy             # an ML-DSA account on a devnet, then `send <to> <wei>`
 scripts/stealth-demo.sh address          # a private payment on a devnet: then pay, scan, spend

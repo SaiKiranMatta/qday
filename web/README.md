@@ -17,6 +17,7 @@ VITE_QDAY_NETWORK=hosted pnpm dev         # QDay's hosted devnet, no setup neede
 ```
 
 Open `http://localhost:5173` in Chrome, Edge or Brave on desktop (Web Serial needs one of them).
+**Try without a device** on the connect screen opens a demo wallet with its keys in the browser (below).
 `?mock` shows sample data without a device, and `?gallery` shows every state of the send dialog,
 including a button that plays the whole flow.
 
@@ -52,6 +53,12 @@ ML-DSA accounts and submits claims: `local` and `hosted`, not `public`.
   scans the pool every block with the view key, lists what it finds under **Private payments**, and
   **Claim** sends a whole note to any address: the device signs, the dev key submits and is repaid
   from the note. ETH only.
+- **Try it without a device.** The demo wallet signs XMSS in the browser with the same code, through
+  `DemoSigner` (`packages/frame/src/demo.ts`). Before each signature it takes the later of the chain's
+  `nextIndex` and its own stored counter, and saves the new counter before it signs; a Web Lock makes
+  tabs take turns, and it refuses any chain but 1337. A page dialog copies the device's review screen.
+  The seed sits unencrypted in browser storage and can be exported from the Device page, so it is for
+  test ETH only.
 - **See activity.** Read from the chain, with no indexer: own transactions, incoming ETH and ERC-20
   transfers.
 - **Explore any transaction.** `/tx/<hash>` decodes a frame transaction frame by frame (verify, spend a
@@ -80,7 +87,8 @@ ML-DSA accounts and submits claims: `local` and `hosted`, not `public`.
 | `src/lib/chain.ts` | Networks, balances, the faucet, submission and receipts |
 | `src/lib/activity.ts` | Activity from blocks and logs |
 | `src/lib/useSend.ts`, `src/lib/useCreateAccount.ts` | The send and account-creation flows |
-| `src/lib/useDevice.ts` | The device connection |
+| `src/lib/useDevice.ts` | The device connection, or the demo wallet in its place |
+| `src/lib/demo.ts`, `src/components/DemoIntro.tsx`, `src/components/DemoApproval.tsx` | The demo wallet: storage, signing lock, and the approval dialog |
 | `src/lib/schemes.ts` | Signature schemes as data, so screens don't assume XMSS |
 | `src/lib/mlAccount.ts` | Where an ML-DSA account will be, and deploying it with the dev key |
 | `src/lib/useStealth.ts`, `src/lib/stealth.ts`, `src/components/ClaimModal.tsx` | Private payments: setup, scanning and claiming |
@@ -89,7 +97,7 @@ ML-DSA accounts and submits claims: `local` and `hosted`, not `public`.
 
 ```bash
 pnpm -r typecheck        # web, packages/device, packages/frame
-pnpm -r test             # device protocol, and the wasm checked against the CLI byte for byte
+pnpm -r test             # device protocol, the wasm checked against the CLI byte for byte, the demo signer
 pnpm --filter @qday/web build
 ```
 
