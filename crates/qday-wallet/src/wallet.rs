@@ -58,13 +58,26 @@ impl From<StoreError> for WalletError {
     }
 }
 
-/// A two-frame transaction, as decoded by the device itself.
+/// A two-frame transaction, as decoded by the device itself. Only `Wallet::check_transaction` makes
+/// one, so `ml_sign` can't be handed a transaction that skipped its rules.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MlReview {
+    tx: MlFrameTx,
+    message: Hash,
+}
+
+impl MlReview {
     /// The decoded transaction.
-    pub tx: MlFrameTx,
+    #[must_use]
+    pub fn tx(&self) -> &MlFrameTx {
+        &self.tx
+    }
+
     /// The hash the signature will cover.
-    pub message: Hash,
+    #[must_use]
+    pub fn message(&self) -> &Hash {
+        &self.message
+    }
 }
 
 /// A transaction ready to show, in whichever form the active scheme uses.
@@ -78,13 +91,26 @@ pub enum Pending {
     MlDsa(MlReview),
 }
 
-/// What a transaction really does, as decoded by the device itself.
+/// What a transaction really does, as decoded by the device itself. Only `Wallet::review` makes
+/// one, so `sign` can't be handed a transaction that skipped its rules.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Review {
+    tx: FrameTx,
+    message: Hash,
+}
+
+impl Review {
     /// The decoded transaction.
-    pub tx: FrameTx,
+    #[must_use]
+    pub fn tx(&self) -> &FrameTx {
+        &self.tx
+    }
+
     /// The hash the signature will cover.
-    pub message: Hash,
+    #[must_use]
+    pub fn message(&self) -> &Hash {
+        &self.message
+    }
 }
 
 /// The wallet.
@@ -320,7 +346,20 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
                     return Err(WalletError::NothingPending);
                 }
             }
-            Action::Transfer { .. } | Action::Other { .. } => {
+            Action::Create { root, pub_seed, .. } => {
+                // Only create the account that belongs to this device's active key.
+                let mine = PublicKey {
+                    root: *root,
+                    pub_seed: *pub_seed,
+                };
+                if self.active().is_none_or(|active| active.key != mine) {
+                    return Err(WalletError::BadRequest);
+                }
+                if next >= RESERVED_FROM {
+                    return Err(WalletError::RotationNeeded);
+                }
+            }
+            Action::Transfer { .. } | Action::TokenTransfer { .. } | Action::Other { .. } => {
                 if next >= RESERVED_FROM {
                     return Err(WalletError::RotationNeeded);
                 }

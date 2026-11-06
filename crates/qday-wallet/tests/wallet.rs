@@ -79,7 +79,7 @@ fn sign_next(wallet: &mut TestWallet) -> (u32, [u8; 2500], Hash) {
         .expect("the transaction is fine");
     let proof = proof(wallet);
     let signature = wallet.sign(&review, proof).expect("the flash is healthy");
-    (index, signature, review.message)
+    (index, signature, *review.message())
 }
 
 /// Moves the counter so the next key is `index`.
@@ -218,13 +218,13 @@ fn the_device_reports_what_the_transaction_really_does() {
         .review(&transfer(0))
         .expect("the transaction is fine");
     assert_eq!(
-        review.tx.action,
+        review.tx().action,
         Action::Transfer {
             to: TO,
             value: 1000
         }
     );
-    assert_eq!(review.message, review.tx.sig_hash());
+    assert_eq!(*review.message(), review.tx().sig_hash());
 }
 
 #[test]
@@ -461,11 +461,11 @@ fn a_rotation_to_the_prepared_key_signs_the_rotation_message() {
     let next = wallet.prepare(|_| {}).expect("the flash is healthy");
     let raw = rotation(&mut wallet, 1008, &next);
     let review = wallet.review(&raw).expect("the rotation is fine");
-    assert_ne!(review.message, review.tx.sig_hash());
-    assert_eq!(review.message, review.tx.signing_message());
+    assert_ne!(*review.message(), review.tx().sig_hash());
+    assert_eq!(*review.message(), review.tx().signing_message());
     let proof = proof(&mut wallet);
     let signature = wallet.sign(&review, proof).expect("the flash is healthy");
-    assert!(verify(&active, &review.message, &signature));
+    assert!(verify(&active, review.message(), &signature));
 }
 
 #[test]
@@ -507,7 +507,7 @@ fn transfers_keep_signing_the_plain_hash_while_a_tree_is_prepared() {
     let review = wallet
         .review(&transfer(0))
         .expect("the transaction is fine");
-    assert_eq!(review.message, review.tx.sig_hash());
+    assert_eq!(*review.message(), review.tx().sig_hash());
 }
 
 #[test]
@@ -741,4 +741,19 @@ fn a_review_type_is_not_enough_to_sign_without_proof() {
     // This is a compile-time rule: `sign` takes a `Proof`, which only a correct code produces.
     fn takes_proof(_: fn(&mut TestWallet, &Review, Proof) -> Result<[u8; 2500], WalletError>) {}
     takes_proof(TestWallet::sign);
+}
+
+const FACTORY: [u8; 20] = [0x33; 20];
+
+#[test]
+fn the_device_creates_only_its_own_account() {
+    let mut wallet = open(&fresh());
+    let key = wallet.active().expect("the wallet has a key").key;
+    let own = FrameTx::create(SENDER, 0, FACTORY, key.root, key.pub_seed).encode(&[]);
+    let review = wallet.review(&own).expect("its own account");
+    assert!(matches!(review.tx().action, Action::Create { .. }));
+    assert_eq!(*review.message(), review.tx().sig_hash());
+
+    let other = FrameTx::create(SENDER, 0, FACTORY, [0xaa; 32], key.pub_seed).encode(&[]);
+    assert_eq!(wallet.review(&other), Err(WalletError::BadRequest));
 }

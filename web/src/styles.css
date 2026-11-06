@@ -1,0 +1,186 @@
+@import "tailwindcss";
+
+/* Obsidian Chrome, from the brand file. */
+@theme {
+  --color-onyx: #0a0a0a;
+  --color-slate: #536878;
+  --color-alabaster: #e5e4e2;
+
+  /* Surfaces and text on Onyx, stepped like the device's dark theme. */
+  --color-surface: #141517;
+  --color-surface-2: #1c1e21;
+  --color-line: #2a2d31;
+  --color-muted: #8b9198;
+
+  /* Status colours, toned to sit with the palette. */
+  --color-ok: #4cc38a;
+  --color-bad: #e5534b;
+  --color-warn: #d9a23b;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Motion: one confident deceleration everywhere, short enough never to feel like waiting. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Entrances fill backwards only: a finished one leaves no transform behind to trap fixed dialogs. */
+  --animate-enter: enter 360ms var(--ease-out) backwards;
+  --animate-pop: pop 260ms var(--ease-out) both;
+  --animate-pop-out: pop-out 150ms ease-in both;
+  --animate-fade: fade 200ms ease-out both;
+  --animate-fade-out: fade-out 150ms ease-in both;
+  --animate-drop: drop 180ms var(--ease-out) both;
+  --animate-tick: tick 420ms var(--ease-out) backwards;
+  --animate-breathe: breathe 2.8s ease-in-out infinite;
+  --animate-grow: grow 900ms var(--ease-out) 120ms backwards;
+  /* The send ring closing into a full circle; 233 is its circumference (r = 37). */
+  --animate-draw: draw 700ms var(--ease-out) both;
+
+  @keyframes enter {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  }
+  @keyframes pop {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.97);
+    }
+  }
+  @keyframes pop-out {
+    to {
+      opacity: 0;
+      transform: translateY(4px) scale(0.98);
+    }
+  }
+  @keyframes fade {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes fade-out {
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes drop {
+    from {
+      opacity: 0;
+      transform: translateY(-4px) scale(0.98);
+    }
+  }
+  @keyframes tick {
+    from {
+      opacity: 0.35;
+      transform: translateY(5px);
+    }
+  }
+  @keyframes draw {
+    from {
+      stroke-dashoffset: 233;
+    }
+  }
+  @keyframes grow {
+    from {
+      transform: scaleX(0);
+    }
+  }
+  @keyframes breathe {
+    50% {
+      opacity: 0.45;
+    }
+  }
+}
+
+/* Smooth scrolling for jumps the app makes, never for the wheel itself. */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Reduced motion keeps the fades that carry meaning and drops the movement. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --animate-enter: fade 160ms ease-out backwards;
+    --animate-pop: fade 160ms ease-out both;
+    --animate-pop-out: fade-out 120ms ease-in both;
+    --animate-drop: fade 120ms ease-out both;
+    --animate-tick: fade 200ms ease-out backwards;
+    --animate-breathe: none;
+    --animate-grow: fade 200ms ease-out backwards;
+    --animate-draw: fade 200ms ease-out both;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-onyx);
+  color: var(--color-alabaster);
+  font-family: var(--font-sans);
+  font-feature-settings: "tnum" 1, "cv11" 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The chrome gradient: Onyx top right, Blue Slate through the middle, Alabaster bottom left. */
+.chrome {
+  background:
+    radial-gradient(70% 60% at 85% 0%, #0a0a0a 0%, rgb(10 10 10 / 0) 70%),
+    radial-gradient(80% 70% at 62% 42%, #536878 0%, rgb(83 104 120 / 0) 72%),
+    radial-gradient(85% 80% at 0% 100%, #e5e4e2 0%, rgb(229 228 226 / 0) 62%),
+    radial-gradient(60% 50% at 100% 100%, #c9ccd0 0%, rgb(201 204 208 / 0) 70%),
+    linear-gradient(180deg, #1d242b 0%, #3b4a56 55%, #a9b1b8 100%);
+}
+
+/* Fine film grain over the gradient, like the brand frames. */
+.grain {
+  position: relative;
+  isolation: isolate;
+}
+.grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.22;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+/* Wide, short cards: Onyx under the text on the left, the light corner kept bottom right. */
+.chrome-wide {
+  background:
+    radial-gradient(45% 140% at 100% 110%, #e5e4e2 0%, rgb(229 228 226 / 0) 62%),
+    radial-gradient(60% 160% at 62% 70%, #536878 0%, rgb(83 104 120 / 0) 72%),
+    linear-gradient(90deg, #0a0a0a 0%, #161b20 38%, #2f3b45 100%);
+}
+
+/* Browser surfaces, themed from the palette rather than left at defaults. */
+::selection {
+  background: rgb(83 104 120 / 0.55);
+  color: var(--color-alabaster);
+}
+@layer base {
+  /* Keyboard focus on controls. Text fields don't get this: their container shows one quiet ring. */
+  :where(button, a, [role="button"], summary, input[type="checkbox"]):focus-visible {
+    outline: 2px solid var(--color-alabaster);
+    outline-offset: 2px;
+  }
+  :where(input, textarea, select):focus {
+    outline: none;
+  }
+}
+input,
+textarea {
+  caret-color: var(--color-alabaster);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}

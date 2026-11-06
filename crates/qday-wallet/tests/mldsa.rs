@@ -305,8 +305,8 @@ fn a_signature_verifies_against_the_stored_key() {
     let signature = wallet
         .ml_sign(&review, MAIN_ACCOUNT, proof, &mut TestRng(3))
         .expect("signing works");
-    assert_eq!(review.message, review.tx.sig_hash());
-    assert!(verify(&key, &review.message, &signature));
+    assert_eq!(*review.message(), review.tx().sig_hash());
+    assert!(verify(&key, review.message(), &signature));
 }
 
 #[test]
@@ -330,7 +330,7 @@ fn each_signature_uses_fresh_randomness() {
 fn the_device_shows_what_the_transaction_really_does() {
     let flash = ml_flash();
     let review = ml_review(&mut open(&flash));
-    assert_eq!((review.tx.to, review.tx.value), (TO, 1000));
+    assert_eq!((review.tx().to, review.tx().value), (TO, 1000));
 }
 
 #[test]
@@ -389,7 +389,7 @@ fn a_missing_stored_key_is_rebuilt_when_signing() {
     let key = wallet
         .ml_public_key(MAIN_ACCOUNT)
         .expect("it's stored again");
-    assert!(verify(&key, &review.message, &signature));
+    assert!(verify(&key, review.message(), &signature));
 }
 
 #[test]
@@ -415,8 +415,12 @@ fn accounts_sign_with_their_own_keys() {
     let signature = wallet
         .ml_sign(&review, 1, proof, &mut TestRng(3))
         .expect("it signs");
-    assert!(verify(&derived_key(&seed, 1), &review.message, &signature));
-    assert!(!verify(&derived_key(&seed, 0), &review.message, &signature));
+    assert!(verify(&derived_key(&seed, 1), review.message(), &signature));
+    assert!(!verify(
+        &derived_key(&seed, 0),
+        review.message(),
+        &signature
+    ));
 }
 
 #[test]
@@ -587,7 +591,7 @@ fn a_restored_device_signs_for_the_restored_seed() {
         .expect("it signs");
     assert!(verify(
         &derived_key(&new_seed, 0),
-        &review.message,
+        review.message(),
         &signature
     ));
 }

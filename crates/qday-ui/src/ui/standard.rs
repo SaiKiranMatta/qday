@@ -573,8 +573,12 @@ pub fn review(c: &mut Canvas, info: &ReviewInfo, pressed: Option<usize>) {
     match &info.review {
         Review::Send { amount, unit, to } => {
             let amount = text!(40, "{amount} {unit}");
-            hero(c, amount.as_str(), p.text, 250);
-            eth_coin(c, 286.0, 46.0, 16.0, p.eth);
+            // The coin is ETH's own; a token send leaves it out and gives the amount its room.
+            let eth = *unit == "ETH";
+            hero(c, amount.as_str(), p.text, if eth { 250 } else { 290 });
+            if eth {
+                eth_coin(c, 286.0, 46.0, 16.0, p.eth);
+            }
             c.text(16, 77, "Send", &ts(&BODY, p.muted));
             card_rows(c, 88.0, &[Row::Address("To", to), fee, key_row]);
         }

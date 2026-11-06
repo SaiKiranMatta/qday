@@ -57,28 +57,19 @@ enum Command {
     FrameRotateJson(SignedRotation),
     /// Print a signed rotation as wire bytes
     FrameRotateRaw(SignedRotation),
-    /// Print an ML-DSA public key
-    MldsaPubkey {
-        seed: String,
-        #[arg(long, default_value_t = 0)]
-        account: u32,
+    #[command(flatten)]
+    Ml(MlCommand),
+    /// Print the sig hash of an account's first transaction, which deploys it
+    FrameCreateHash(Create),
+    /// Print a signed account creation as submission JSON
+    FrameCreateJson(SignedCreate),
+    /// Create the device's account: sign its deploying transaction on the device and print submission JSON
+    DeviceCreate {
+        port: String,
+        /// The account's address, from the factory's accountAddress(root, pubSeed)
+        sender: String,
+        factory: String,
     },
-    /// Sign a 32-byte message with an ML-DSA laptop key
-    MldsaSign {
-        seed: String,
-        message: String,
-        rnd: String,
-        #[arg(long, default_value_t = 0)]
-        account: u32,
-    },
-    /// Check an ML-DSA public key and print the blob to deploy
-    MldsaBlob { pk: String },
-    /// Print a two-frame transfer's sig hash
-    MlFrameHash(MlTransfer),
-    /// Print a signed two-frame transfer as submission JSON
-    MlFrameJson(SignedMlTransfer),
-    /// Print a signed two-frame transfer as wire bytes
-    MlFrameRaw(SignedMlTransfer),
     /// Print the device's keys, then any prepared next key
     DevicePubkey { port: String },
     #[command(flatten)]
@@ -110,6 +101,65 @@ enum Command {
         tree: u32,
         chain_next_index: u32,
     },
+}
+
+/// ML-DSA keys and transfers.
+#[derive(Subcommand)]
+enum MlCommand {
+    /// Print an ML-DSA public key
+    MldsaPubkey {
+        seed: String,
+        #[arg(long, default_value_t = 0)]
+        account: u32,
+    },
+    /// Sign a 32-byte message with an ML-DSA laptop key
+    MldsaSign {
+        seed: String,
+        message: String,
+        rnd: String,
+        #[arg(long, default_value_t = 0)]
+        account: u32,
+    },
+    /// Check an ML-DSA public key and print the blob to deploy
+    MldsaBlob { pk: String },
+    /// Print a two-frame transfer's sig hash
+    MlFrameHash(MlTransfer),
+    /// Print a signed two-frame transfer as submission JSON
+    MlFrameJson(SignedMlTransfer),
+    /// Print a signed two-frame transfer as wire bytes
+    MlFrameRaw(SignedMlTransfer),
+}
+
+fn run_ml(command: MlCommand) -> Result<String> {
+    match command {
+        MlCommand::MldsaPubkey { seed, account } => {
+            let key_seed = KeySeed::derive(&hash(&seed)?, account);
+            Ok(hex::encode(
+                &StandardSigner::from_key_seed(&key_seed).public_key(),
+            ))
+        }
+        MlCommand::MldsaSign {
+            seed,
+            message,
+            rnd,
+            account,
+        } => {
+            let key_seed = KeySeed::derive(&hash(&seed)?, account);
+            let signature = StandardSigner::from_key_seed(&key_seed)
+                .sign(&hash(&message)?, &hash(&rnd)?)
+                .map_err(|error| anyhow!("signing failed: {error:?}"))?;
+            Ok(hex::encode(&signature))
+        }
+        MlCommand::MldsaBlob { pk } => mldsa_blob(&pk),
+        MlCommand::MlFrameHash(transfer) => Ok(hex::encode(&transfer.tx()?.sig_hash())),
+        MlCommand::MlFrameJson(args) => {
+            let tx = args.transfer.tx()?;
+            Ok(json::ml_submission(&tx, &signature(&args.signature)?).to_string())
+        }
+        MlCommand::MlFrameRaw(args) => Ok(hex::encode(
+            &args.transfer.tx()?.encode(&signature(&args.signature)?),
+        )),
+    }
 }
 
 /// Stealth payments through the lattice pool.
@@ -306,6 +356,35 @@ struct SignedTransfer {
 }
 
 #[derive(Args)]
+struct Create {
+    /// The account's address, from the factory's accountAddress(root, pubSeed)
+    sender: String,
+    index: u32,
+    factory: String,
+    root: String,
+    pub_seed: String,
+}
+
+#[derive(Args)]
+struct SignedCreate {
+    #[command(flatten)]
+    create: Create,
+    signature: String,
+}
+
+impl Create {
+    fn tx(&self) -> Result<FrameTx> {
+        Ok(FrameTx::create(
+            address(&self.sender)?,
+            self.index,
+            address(&self.factory)?,
+            hash(&self.root)?,
+            hash(&self.pub_seed)?,
+        ))
+    }
+}
+
+#[derive(Args)]
 struct Rotation {
     sender: String,
     nonce: u64,
@@ -446,33 +525,19 @@ fn run(command: Command) -> Result<String> {
             let tx = args.rotation.tx()?;
             Ok(json::submission(&tx, &signature(&args.signature)?).to_string())
         }
-        Command::MldsaPubkey { seed, account } => {
-            let key_seed = KeySeed::derive(&hash(&seed)?, account);
-            Ok(hex::encode(
-                &StandardSigner::from_key_seed(&key_seed).public_key(),
-            ))
+        Command::Ml(ml) => run_ml(ml),
+        Command::FrameCreateHash(create) => Ok(hex::encode(&create.tx()?.sig_hash())),
+        Command::FrameCreateJson(args) => {
+            let tx = args.create.tx()?;
+            Ok(json::submission(&tx, &signature(&args.signature)?).to_string())
         }
-        Command::MldsaSign {
-            seed,
-            message,
-            rnd,
-            account,
-        } => {
-            let key_seed = KeySeed::derive(&hash(&seed)?, account);
-            let signature = StandardSigner::from_key_seed(&key_seed)
-                .sign(&hash(&message)?, &hash(&rnd)?)
-                .map_err(|error| anyhow!("signing failed: {error:?}"))?;
-            Ok(hex::encode(&signature))
-        }
-        Command::MldsaBlob { pk } => mldsa_blob(&pk),
-        Command::MlFrameHash(transfer) => Ok(hex::encode(&transfer.tx()?.sig_hash())),
-        Command::MlFrameJson(args) => {
-            let tx = args.transfer.tx()?;
-            Ok(json::ml_submission(&tx, &signature(&args.signature)?).to_string())
-        }
-        Command::MlFrameRaw(args) => Ok(hex::encode(
-            &args.transfer.tx()?.encode(&signature(&args.signature)?),
-        )),
+        Command::DeviceCreate {
+            port,
+            sender,
+            factory,
+        } => Ok(device::open(&port)?
+            .create(address(&sender)?, address(&factory)?)?
+            .to_string()),
         Command::DevicePubkey { port } => Ok(device::open(&port)?.status()?.line()),
         Command::Stealth(stealth) => run_stealth(stealth),
         Command::DeviceScheme { port } => {

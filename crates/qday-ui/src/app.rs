@@ -14,6 +14,7 @@ use qday_wallet::protocol::{Line, NextKey, Request, Response, parse_request, res
 use qday_wallet::rng::Rng;
 use qday_wallet::settings::{CROSSES, Calibration, Scheme, Settings};
 use qday_wallet::stealth::StealthSpend;
+use qday_wallet::tokens;
 use qday_wallet::wallet::{
     MAIN_ACCOUNT, MlReview, Pending, RESTORE_SKIP, Review, Wallet, WalletError,
 };
@@ -21,7 +22,7 @@ use qday_xmss::{Hash, LEAVES, keccak256};
 
 use crate::canvas::Canvas;
 use crate::fb::Framebuffer;
-use crate::format::{checksum_address, eth, short_address, wait_text};
+use crate::format::{checksum_address, eth, short_address, token_amount, wait_text};
 use crate::nav::{self, Action, Keys, Scroll, Setting};
 use crate::screens::{
     self, ACTIVITY_ROWS, Activity, DeviceInfo, Passcode, ReviewInfo, ShareInfo, Status,
@@ -122,9 +123,9 @@ pub struct Shown {
     b: String,
     c: String,
     fee: String,
-    rotation: bool,
-    /// What the amount is counted in.
+    /// What `a` is counted in, for sends: ETH or a known token's symbol.
     unit: &'static str,
+    rotation: bool,
     /// Short lines for the Activity tab.
     summary: String,
     detail: String,
@@ -133,6 +134,8 @@ pub struct Shown {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShownKind {
     Send,
+    /// A token the device doesn't know: raw units and the contract.
+    Token,
     Call,
     UnknownCall,
 }
@@ -207,18 +210,64 @@ impl Shown {
                     b: checksum_address(to),
                     c: String::new(),
                     fee,
-                    rotation: false,
                     unit: "ETH",
+                    rotation: false,
                 })
             }
+            TxAction::TokenTransfer { token, to, amount } => {
+                // A token on the device's own list reads like a send; any other shows its raw units.
+                if let Some(known) = tokens::known(token) {
+                    let shown = token_amount(*amount, known.decimals, known.symbol);
+                    if shown.len() > LONGEST_AMOUNT {
+                        return None;
+                    }
+                    return Some(Self {
+                        kind: ShownKind::Send,
+                        summary: format!("Sent {shown}"),
+                        detail: format!("to {}", short_address(to)),
+                        a: shown.trim_end_matches(known.symbol).trim_end().to_string(),
+                        b: checksum_address(to),
+                        c: String::new(),
+                        fee,
+                        unit: known.symbol,
+                        rotation: false,
+                    });
+                }
+                let raw = amount.to_string();
+                if raw.len() > LONGEST_AMOUNT {
+                    return None;
+                }
+                Some(Self {
+                    kind: ShownKind::Token,
+                    summary: "Token transfer".to_string(),
+                    detail: format!("to {}", short_address(to)),
+                    a: raw,
+                    b: checksum_address(to),
+                    c: checksum_address(token),
+                    fee,
+                    unit: "",
+                    rotation: false,
+                })
+            }
+            TxAction::Create { factory, .. } => Some(Self {
+                kind: ShownKind::Call,
+                a: checksum_address(factory),
+                b: eth(0),
+                c: "Create account".to_string(),
+                fee,
+                unit: "ETH",
+                rotation: false,
+                summary: "Created account".to_string(),
+                detail: format!("at {}", short_address(&tx.sender)),
+            }),
             TxAction::Rotate { .. } => Some(Self {
                 kind: ShownKind::Call,
                 a: checksum_address(&tx.sender),
                 b: eth(0),
                 c: "Rotate keys".to_string(),
                 fee,
-                rotation: true,
                 unit: "ETH",
+                rotation: true,
                 summary: "Rotated keys".to_string(),
                 detail: "to the next tree".to_string(),
             }),
@@ -242,8 +291,8 @@ impl Shown {
                     b: amount,
                     c: function,
                     fee,
-                    rotation: false,
                     unit: "ETH",
+                    rotation: false,
                 })
             }
         }
@@ -257,6 +306,11 @@ impl Shown {
                 amount: &self.a,
                 unit: self.unit,
                 to: &self.b,
+            },
+            ShownKind::Token => screens::Review::Token {
+                amount: &self.a,
+                to: &self.b,
+                token: &self.c,
             },
             ShownKind::Call => screens::Review::Call {
                 contract: &self.a,
@@ -306,7 +360,7 @@ impl Purpose {
         match self {
             Self::Create | Self::ChangeNew(_) => "6 digits".to_string(),
             Self::CreateConfirm(_) | Self::ChangeConfirm(..) => "to confirm".to_string(),
-            Self::Sign(Pending::Xmss(review), _) => format!("for key #{:04}", review.tx.index),
+            Self::Sign(Pending::Xmss(review), _) => format!("for key #{:04}", review.tx().index),
             Self::Sign(_, _) => "to sign".to_string(),
             Self::ViewKey => "to share the view key".to_string(),
             Self::Scheme(_) => "to switch signing".to_string(),
@@ -484,7 +538,7 @@ fn draw(
             approval,
         } => {
             let (scheme, index) = match review {
-                Pending::Xmss(review) => (Scheme::Xmss, review.tx.index),
+                Pending::Xmss(review) => (Scheme::Xmss, review.tx().index),
                 Pending::MlDsa(_) => (Scheme::MlDsa44, 0),
                 Pending::Stealth(_) => (Scheme::Xmss, 0),
             };
@@ -802,7 +856,10 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         Self::respond(host, &Response::Err(WalletError::Rejected));
         let detail = match pending {
             Pending::Xmss(review) => {
-                format!("No signature. Key #{:04} is still unused.", review.tx.index)
+                format!(
+                    "No signature. Key #{:04} is still unused.",
+                    review.tx().index
+                )
             }
             Pending::MlDsa(_) | Pending::Stealth(_) => "No signature was made.".to_string(),
         };
@@ -954,7 +1011,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
     }
 
     fn sign(&mut self, host: &mut impl Host, review: &Review, shown: &Shown, proof: Proof) {
-        let index = review.tx.index;
+        let index = review.tx().index;
         match self.wallet.sign(review, proof) {
             Ok(signature) => {
                 let response = Response::Sig {
@@ -1620,8 +1677,8 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
 
     fn show_review(&mut self, host: &mut impl Host, review: Pending, now_ms: u64) {
         let shown = match &review {
-            Pending::Xmss(review) => Shown::from_tx(&review.tx),
-            Pending::MlDsa(review) => Shown::from_ml_tx(&review.tx),
+            Pending::Xmss(review) => Shown::from_tx(review.tx()),
+            Pending::MlDsa(review) => Shown::from_ml_tx(review.tx()),
             Pending::Stealth(spend) => Shown::from_stealth(spend),
         };
         let Some(shown) = shown else {

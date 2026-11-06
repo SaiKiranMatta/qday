@@ -23,6 +23,7 @@ use qday_wallet::passcode::{Attempt, Code, Passcode};
 use qday_wallet::protocol::{Line, Request, Response, parse_response, request_line};
 use qday_wallet::settings::{CROSSES, Calibration, Scheme, Settings};
 use qday_wallet::stealth::{StealthSpend, pay_to, view_seed_for};
+use qday_wallet::tokens;
 use qday_wallet::wallet::{MAIN_ACCOUNT, Wallet, WalletError};
 use qday_xmss::{PublicKey, keccak256, verify};
 
@@ -1454,6 +1455,43 @@ fn a_transfer_shows_the_exact_amount_and_checksummed_address() {
     assert_eq!((amount, unit), ("1.234567890123456789", "ETH"));
     assert_eq!(to.len(), 42);
     assert_eq!(to.to_lowercase(), format!("0x{}", "22".repeat(20)));
+}
+
+#[test]
+fn a_known_token_transfer_reads_like_a_send_in_that_token() {
+    let usdc = tokens::KNOWN[0].address;
+    let tx = FrameTx::token_transfer(SENDER, 1, 0, usdc, TO, 125_500_000);
+    let shown = Shown::from_tx(&tx).expect("this fits");
+    let Review::Send { amount, unit, to } = shown.review() else {
+        panic!("a known token shows as Send");
+    };
+    assert_eq!((amount, unit), ("125.5", "USDC"));
+    assert_eq!(to.to_lowercase(), format!("0x{}", "22".repeat(20)));
+}
+
+#[test]
+fn an_unknown_token_transfer_shows_raw_units_and_the_contract() {
+    let tx = FrameTx::token_transfer(SENDER, 1, 0, [0x5c; 20], TO, 125_500_000);
+    let shown = Shown::from_tx(&tx).expect("this fits");
+    let Review::Token { amount, token, .. } = shown.review() else {
+        panic!("an unknown token shows as Token");
+    };
+    assert_eq!(amount, "125500000");
+    assert_eq!(token.to_lowercase(), format!("0x{}", "5c".repeat(20)));
+}
+
+#[test]
+fn creating_the_account_shows_as_a_call_to_the_factory() {
+    let tx = FrameTx::create(SENDER, 0, [0x33; 20], [1; 32], [2; 32]);
+    let shown = Shown::from_tx(&tx).expect("this fits");
+    let Review::Call {
+        contract, function, ..
+    } = shown.review()
+    else {
+        panic!("creation shows as Call");
+    };
+    assert_eq!(function, "Create account");
+    assert_eq!(contract.to_lowercase(), format!("0x{}", "33".repeat(20)));
 }
 
 #[test]

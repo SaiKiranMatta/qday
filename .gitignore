@@ -16,3 +16,8 @@ mnemonic*.txt
 .DS_Store
 .idea/
 .vscode/
+
+# JavaScript
+node_modules/
+dist/
+*.tsbuildinfo
