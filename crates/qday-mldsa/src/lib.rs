@@ -3,6 +3,10 @@
 
 #![no_std]
 
+extern crate alloc;
+
+pub mod blob;
+
 use fips204::ml_dsa_44;
 use fips204::traits::{KeyGen, SerDes, Signer as _, Verifier as _};
 use qday_xmss::{Hash, keccak256};

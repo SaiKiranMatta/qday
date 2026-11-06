@@ -5,6 +5,7 @@ mod json;
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
+use qday_mldsa::blob::{BlobError, prepare_checked};
 use qday_wallet::backup::words_to_seed;
 use qday_wallet::frame::{Address, FrameTx};
 use qday_wallet::hex;
@@ -49,6 +50,8 @@ enum Command {
     FrameRotateJson(SignedRotation),
     /// Print a signed rotation as wire bytes
     FrameRotateRaw(SignedRotation),
+    /// Check an ML-DSA public key and print the blob to deploy
+    MldsaBlob { pk: String },
     /// Print the device's keys, then any prepared next key
     DevicePubkey { port: String },
     /// Print what the device logs
@@ -175,6 +178,16 @@ fn sign(seed: &str, index: u32, message: &str, tree: u32) -> Result<String> {
     Ok(hex::encode(&signature))
 }
 
+fn mldsa_blob(pk: &str) -> Result<String> {
+    let key = hex::decode(pk).context("the key is not hex")?;
+    let blob = prepare_checked(&key).map_err(|error| match error {
+        BlobError::WrongLength => anyhow!("a key must be exactly 1,312 bytes, not {}", key.len()),
+        BlobError::Degenerate => anyhow!("this is a degenerate key, so anyone could forge for it"),
+        BlobError::Mismatch => anyhow!("the blob doesn't match the key"),
+    })?;
+    Ok(hex::encode(&blob))
+}
+
 fn run(command: Command) -> Result<String> {
     match command {
         Command::Pubkey { seed, tree } => pubkey(&seed, tree),
@@ -201,6 +214,7 @@ fn run(command: Command) -> Result<String> {
             let tx = args.rotation.tx()?;
             Ok(json::submission(&tx, &signature(&args.signature)?).to_string())
         }
+        Command::MldsaBlob { pk } => mldsa_blob(&pk),
         Command::DevicePubkey { port } => Ok(device::open(&port)?.status()?.line()),
         Command::DeviceLog { port, seconds } => {
             device::open(&port)?.log(seconds)?;

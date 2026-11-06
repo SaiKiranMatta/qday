@@ -2,6 +2,8 @@
 
 use std::process::{Command, Output};
 
+use qday_mldsa::blob::prepare;
+use qday_mldsa::{KeySeed, Signer, StandardSigner};
 use qday_wallet::hex;
 use qday_xmss::keccak256;
 
@@ -210,6 +212,38 @@ fn frame_rotate_json_targets_the_sender_with_the_rotate_call() {
             .expect("data is text")
             .starts_with("0xed296e9c")
     );
+}
+
+fn mldsa_key() -> String {
+    let seed = hex::decode_array(SEED).expect("the seed is hex");
+    let signer = StandardSigner::from_key_seed(&KeySeed::derive(&seed, 0));
+    hex::encode(&signer.public_key())
+}
+
+#[test]
+fn mldsa_blob_prints_the_prepared_blob() {
+    let blob = stdout(&["mldsa-blob", &mldsa_key()]);
+    let bytes = hex::decode(&blob).expect("the output is hex");
+    assert_eq!(bytes.len(), 20_545);
+    assert_eq!(bytes[0], 0);
+    let public: [u8; 1312] = hex::decode_array(&mldsa_key()).expect("the key is hex");
+    assert_eq!(bytes, prepare(&public));
+}
+
+#[test]
+fn mldsa_blob_refuses_a_key_of_the_wrong_length() {
+    let longer = format!("{}00", mldsa_key());
+    let output = run(&["mldsa-blob", &longer]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("1,312"));
+}
+
+#[test]
+fn mldsa_blob_refuses_a_degenerate_key() {
+    let degenerate = format!("0x{}", "ff".repeat(1312));
+    let output = run(&["mldsa-blob", &degenerate]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("degenerate"));
 }
 
 #[test]
