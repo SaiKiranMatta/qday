@@ -743,7 +743,10 @@ fn an_unknown_token_transfer_shows_raw_units_and_the_contract() {
 fn creating_the_account_shows_as_a_call_to_the_factory() {
     let tx = FrameTx::create(SENDER, 0, [0x33; 20], [1; 32], [2; 32]);
     let shown = Shown::from_tx(&tx).expect("this fits");
-    let Review::Call { contract, function, .. } = shown.review() else {
+    let Review::Call {
+        contract, function, ..
+    } = shown.review()
+    else {
         panic!("creation shows as Call");
     };
     assert_eq!(function, "Create account");

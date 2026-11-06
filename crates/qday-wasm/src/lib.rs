@@ -9,19 +9,23 @@ use qday_wallet::tokens;
 use wasm_bindgen::prelude::*;
 
 fn address(text: &str) -> Result<Address, JsError> {
-    hex::decode_array(text).ok_or_else(|| JsError::new(&format!("{text} is not a 20-byte 0x address")))
+    hex::decode_array(text)
+        .ok_or_else(|| JsError::new(&format!("{text} is not a 20-byte 0x address")))
 }
 
 fn hash(text: &str) -> Result<[u8; 32], JsError> {
-    hex::decode_array(text).ok_or_else(|| JsError::new(&format!("{text} is not 32 bytes of 0x hex")))
+    hex::decode_array(text)
+        .ok_or_else(|| JsError::new(&format!("{text} is not 32 bytes of 0x hex")))
 }
 
 fn wei(text: &str) -> Result<u128, JsError> {
-    text.parse().map_err(|_| JsError::new(&format!("{text} is not an amount in wei")))
+    text.parse()
+        .map_err(|_| JsError::new(&format!("{text} is not an amount in wei")))
 }
 
 fn units(text: &str) -> Result<u128, JsError> {
-    text.parse().map_err(|_| JsError::new(&format!("{text} is not a whole number of token units")))
+    text.parse()
+        .map_err(|_| JsError::new(&format!("{text} is not a whole number of token units")))
 }
 
 fn decode(raw: &[u8]) -> Result<FrameTx, JsError> {
@@ -34,8 +38,21 @@ fn decode(raw: &[u8]) -> Result<FrameTx, JsError> {
 ///
 /// Fails on malformed addresses or keys.
 #[wasm_bindgen(js_name = createTx)]
-pub fn create_tx(sender: &str, index: u32, factory: &str, root: &str, pub_seed: &str) -> Result<Vec<u8>, JsError> {
-    Ok(FrameTx::create(address(sender)?, index, address(factory)?, hash(root)?, hash(pub_seed)?).encode(&[]))
+pub fn create_tx(
+    sender: &str,
+    index: u32,
+    factory: &str,
+    root: &str,
+    pub_seed: &str,
+) -> Result<Vec<u8>, JsError> {
+    Ok(FrameTx::create(
+        address(sender)?,
+        index,
+        address(factory)?,
+        hash(root)?,
+        hash(pub_seed)?,
+    )
+    .encode(&[]))
 }
 
 /// An ETH transfer. `value_wei` is a decimal string. Returns the unsigned bytes.
@@ -44,8 +61,21 @@ pub fn create_tx(sender: &str, index: u32, factory: &str, root: &str, pub_seed: 
 ///
 /// Fails on malformed addresses or amounts.
 #[wasm_bindgen(js_name = transferTx)]
-pub fn transfer_tx(sender: &str, nonce: u64, index: u32, to: &str, value_wei: &str) -> Result<Vec<u8>, JsError> {
-    Ok(FrameTx::transfer(address(sender)?, nonce, index, address(to)?, wei(value_wei)?).encode(&[]))
+pub fn transfer_tx(
+    sender: &str,
+    nonce: u64,
+    index: u32,
+    to: &str,
+    value_wei: &str,
+) -> Result<Vec<u8>, JsError> {
+    Ok(FrameTx::transfer(
+        address(sender)?,
+        nonce,
+        index,
+        address(to)?,
+        wei(value_wei)?,
+    )
+    .encode(&[]))
 }
 
 /// An ERC-20 transfer of `amount` (a decimal string, in the token's smallest unit). Returns the unsigned bytes.
@@ -54,15 +84,30 @@ pub fn transfer_tx(sender: &str, nonce: u64, index: u32, to: &str, value_wei: &s
 ///
 /// Fails on malformed addresses or amounts.
 #[wasm_bindgen(js_name = tokenTransferTx)]
-pub fn token_transfer_tx(sender: &str, nonce: u64, index: u32, token: &str, to: &str, amount: &str) -> Result<Vec<u8>, JsError> {
-    Ok(FrameTx::token_transfer(address(sender)?, nonce, index, address(token)?, address(to)?, units(amount)?).encode(&[]))
+pub fn token_transfer_tx(
+    sender: &str,
+    nonce: u64,
+    index: u32,
+    token: &str,
+    to: &str,
+    amount: &str,
+) -> Result<Vec<u8>, JsError> {
+    Ok(FrameTx::token_transfer(
+        address(sender)?,
+        nonce,
+        index,
+        address(token)?,
+        address(to)?,
+        units(amount)?,
+    )
+    .encode(&[]))
 }
 
 /// The hash the device signs for an unsigned transaction, as 0x hex.
 ///
 /// # Errors
 ///
-/// Fails unless `raw` is an unsigned QDay transaction.
+/// Fails unless `raw` is an unsigned `QDay` transaction.
 #[wasm_bindgen(js_name = signingMessage)]
 pub fn signing_message(raw: &[u8]) -> Result<String, JsError> {
     Ok(hex::encode(&decode(raw)?.signing_message()))
@@ -72,7 +117,7 @@ pub fn signing_message(raw: &[u8]) -> Result<String, JsError> {
 ///
 /// # Errors
 ///
-/// Fails unless `raw` is an unsigned QDay transaction.
+/// Fails unless `raw` is an unsigned `QDay` transaction.
 #[wasm_bindgen]
 pub fn submission(raw: &[u8], signature: &[u8]) -> Result<String, JsError> {
     Ok(submission_json(&decode(raw)?, signature))
@@ -82,13 +127,16 @@ pub fn submission(raw: &[u8], signature: &[u8]) -> Result<String, JsError> {
 ///
 /// # Errors
 ///
-/// Fails unless `raw` is an unsigned QDay transaction.
+/// Fails unless `raw` is an unsigned `QDay` transaction.
 #[wasm_bindgen]
 pub fn describe(raw: &[u8]) -> Result<String, JsError> {
     let tx = decode(raw)?;
     let action = match &tx.action {
         Action::Transfer { to, value } => {
-            format!("{{\"kind\":\"transfer\",\"to\":\"{}\",\"valueWei\":\"{value}\"}}", hex::encode(to))
+            format!(
+                "{{\"kind\":\"transfer\",\"to\":\"{}\",\"valueWei\":\"{value}\"}}",
+                hex::encode(to)
+            )
         }
         Action::TokenTransfer { token, to, amount } => {
             // The device's own token list decides what its screen shows, so the page can show the same.
@@ -102,7 +150,10 @@ pub fn describe(raw: &[u8]) -> Result<String, JsError> {
                 hex::encode(to)
             )
         }
-        Action::Rotate { next_root, .. } => format!("{{\"kind\":\"rotate\",\"nextRoot\":\"{}\"}}", hex::encode(next_root)),
+        Action::Rotate { next_root, .. } => format!(
+            "{{\"kind\":\"rotate\",\"nextRoot\":\"{}\"}}",
+            hex::encode(next_root)
+        ),
         Action::Create { factory, root, .. } => format!(
             "{{\"kind\":\"create\",\"factory\":\"{}\",\"root\":\"{}\"}}",
             hex::encode(factory),
@@ -110,7 +161,10 @@ pub fn describe(raw: &[u8]) -> Result<String, JsError> {
         ),
         Action::Other { target, value, .. } => format!(
             "{{\"kind\":\"other\",\"target\":{},\"valueWei\":\"{value}\"}}",
-            target.map_or_else(|| "null".to_string(), |t| format!("\"{}\"", hex::encode(&t)))
+            target.map_or_else(
+                || "null".to_string(),
+                |t| format!("\"{}\"", hex::encode(&t))
+            )
         ),
     };
     Ok(format!(
