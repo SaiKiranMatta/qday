@@ -175,7 +175,7 @@ impl Rig {
     fn request(&mut self, request: &Request) {
         let line = request_line(request);
         self.app
-            .on_line(&mut self.host, Line::Text(line.trim_end()));
+            .on_line(&mut self.host, &Line::Text(line.trim_end()));
     }
 
     fn last_response(&self) -> Response {
@@ -542,9 +542,9 @@ fn a_second_request_during_a_review_is_refused_and_the_review_stands() {
 fn log_lines_and_overlong_lines_are_handled() {
     let mut rig = rig();
     rig.app
-        .on_line(&mut rig.host, Line::Text("I (20) boot: something"));
+        .on_line(&mut rig.host, &Line::Text("I (20) boot: something"));
     assert!(rig.host.sent.is_empty());
-    rig.app.on_line(&mut rig.host, Line::Bad);
+    rig.app.on_line(&mut rig.host, &Line::Bad);
     assert_eq!(rig.last_response(), Response::Err(WalletError::BadRequest));
 }
 

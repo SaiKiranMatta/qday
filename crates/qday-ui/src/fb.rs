@@ -217,7 +217,7 @@ mod tests {
     fn changes(fb: &mut Framebuffer) -> Vec<(i32, i32)> {
         let mut runs = Vec::new();
         fb.send_changes(|first, rows, pixels| {
-            assert_eq!(pixels.len(), (rows * WIDTH) as usize);
+            assert_eq!(i32::try_from(pixels.len()), Ok(rows * WIDTH));
             runs.push((first, rows));
         });
         runs

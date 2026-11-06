@@ -477,15 +477,12 @@ fn draw_review(fb: &mut Framebuffer, theme: &Theme, tx: &FrameTx) {
                 theme.warning,
             );
             draw_amount(fb, theme, &eth(*value));
-            match target {
-                Some(target) => {
-                    draw_address(fb, theme, y, "Target", target);
-                    y += 15 + ROW_STEP;
-                }
-                None => {
-                    labelled(fb, theme, y, "Target", "This account");
-                    y += ROW_STEP;
-                }
+            if let Some(target) = target {
+                draw_address(fb, theme, y, "Target", target);
+                y += 15 + ROW_STEP;
+            } else {
+                labelled(fb, theme, y, "Target", "This account");
+                y += ROW_STEP;
             }
             let selector = data
                 .get(..4)

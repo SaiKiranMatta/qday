@@ -12,7 +12,7 @@ mod tree;
 mod wots;
 
 pub use adrs::Adrs;
-pub use hash::{Hash, keccak256};
+pub use hash::{Hash, Hasher, keccak256};
 pub use keys::KeySet;
 pub use sign::{PublicKey, SIG_BYTES, SignError, verify};
 pub use tree::{HEIGHT, LEAVES, NODES, Tree, node_slot};

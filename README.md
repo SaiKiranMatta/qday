@@ -22,8 +22,11 @@ and skips ahead 64 keys. Keys 1008-1023 are reserved for rotating to a new tree 
 
 ## Status
 
-Step 2 of 8: the signature scheme and the contracts are done, with their tests passing. The contracts
-have only run in Foundry so far, against stand-ins for the frame opcodes.
+Steps 1 to 6 of 8 are built and tested on the laptop, and the firmware compiles.
+
+Nothing has run on the device yet, and the contracts have only run in Foundry and a plain EVM. Still to
+do: a laptop-key transfer and rotation on a local EIP-8141 chain, then the on-device runs in steps 7
+and 8.
 
 ## Repository layout
 
@@ -45,17 +48,40 @@ have only run in Foundry so far, against stand-ins for the frame opcodes.
 - [Fact-check](docs/fact-check.md): what in the original pitch holds, and what to correct
 - [Risks and blockers](docs/risks-and-blockers.md): ranked
 - [Devnet notes](docs/devnet.md)
+- [Screens](docs/screens): every screen in both themes
 - [Original design spec](docs/superpowers/specs/2026-11-05-qday-design.md) and
   [plans](docs/superpowers/plans/README.md), kept for history. The build has moved on from them.
 
 ## Quick start
 
+Run the laptop tests from the repository root:
+
 ```bash
-cargo test -p qday-xmss
+cargo test --workspace
 ```
+
+Run the contract tests:
 
 ```bash
 cd contracts && forge test
+```
+
+Build the firmware:
+
+```bash
+cd firmware && source ~/export-esp.sh && cargo build --release
+```
+
+Render every screen in both themes to PNG:
+
+```bash
+cargo run -p qday-ui --example preview docs/screens
+```
+
+Deploy an account and send from it. `scripts/frame-demo.sh` explains its settings at the top:
+
+```bash
+scripts/frame-demo.sh deploy
 ```
 
 The contract tests check real signatures from `contracts/test/fixtures/signatures.json`. To regenerate
@@ -64,6 +90,8 @@ them, run this from the repository root:
 ```bash
 cargo run -p qday-xmss --example contract_fixtures > contracts/test/fixtures/signatures.json
 ```
+
+To rebuild the font atlases from Inter, pass the font file to `scripts/build-fonts.py`.
 
 ## Key derivation note
 

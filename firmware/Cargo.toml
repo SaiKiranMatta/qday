@@ -7,12 +7,18 @@ publish = false
 
 [dependencies]
 embedded-graphics = "0.8.2"
+embedded-hal = "1.0"
 embedded-hal-bus = "0.3.0"
+esp-alloc = { version = "0.11.0", features = ["esp32s3"] }
 esp-backtrace = { version = "0.20.0", features = ["esp32s3", "panic-handler", "println"] }
 esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
-esp-hal = { version = "~1.2.2", features = ["esp32s3"] }
+esp-hal = { version = "~1.2.2", features = ["esp32s3", "unstable"] }
 esp-println = { version = "0.18.0", features = ["esp32s3"] }
+esp-storage = { version = "0.10.0", features = ["esp32s3"] }
 mipidsi = "0.10.0"
+qday-ui = { path = "../crates/qday-ui" }
+qday-wallet = { path = "../crates/qday-wallet" }
+qday-xmss = { path = "../crates/qday-xmss" }
 
 [profile.dev]
 opt-level = "s"
@@ -22,3 +28,13 @@ codegen-units = 1
 debug = 2
 lto = "fat"
 opt-level = "s"
+
+# Building a tree is about a million hashes, so hashing is worth the extra size.
+[profile.release.package.keccak]
+opt-level = 3
+
+[profile.release.package.sha3]
+opt-level = 3
+
+[profile.release.package.qday-xmss]
+opt-level = 3

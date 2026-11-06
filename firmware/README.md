@@ -1,8 +1,11 @@
 # QDay firmware
 
-Touch and button test for the YD-ESP32-S3 N16R8 and the MSP2807 2.8" display (ILI9341, 240x320,
-XPT2046 touch). It starts the screen in landscape, draws a dot wherever you press, and lights a box
-on screen while each of the four buttons is held.
+The QDay wallet for the YD-ESP32-S3 N16R8 and the MSP2807 2.8" display (ILI9341, XPT2046 touch), with
+four keys and the board's WS2812 as a status light.
+
+This crate only connects hardware to the shared crates. Every decision is made in `qday-ui` and
+`qday-wallet`, where it's tested on the laptop. It's kept out of the host workspace because it needs
+the Xtensa toolchain.
 
 ## Wiring
 
@@ -83,27 +86,40 @@ source ~/export-esp.sh
 cargo run --release
 ```
 
-To build without flashing, use `cargo build --release`.
+To build without flashing, use `cargo build --release`. Run both from this folder, so the custom
+partition table in `partitions.csv` is used.
 
-## Expected result
+The `qday` partition at 0x310000 holds the keys, the counter and the passcode. Reflashing the app
+leaves it alone.
 
-The firmware turns the backlight on once the screen has started. The screen shows
-`Touch or press a button` in white on black, with four grey boxes labelled K1-K4 along the bottom.
-Each touch draws a yellow dot, and a box turns yellow while its button is held.
+## First start
 
-The serial monitor prints a `touch:` line for each reading, with the raw position, the pressure and
-the pixel position. It also prints a `key:` line each time a button goes down or up.
+1. Touch the three crosses to calibrate the screen. Hold K1 at start to do this again later.
+2. The device makes a seed from the hardware random number generator and builds tree 0, with a
+   progress bar. This is expected to take about 3 minutes.
+3. It restarts and asks you to choose a 6-digit passcode, twice.
+
+Later starts should take about a second.
+
+## Status light
+
+| Colour | Meaning |
+|---|---|
+| Amber | Waiting for your decision |
+| Green | Signed |
+| Red | Refused |
+
+## Problems
 
 | Problem | Likely cause |
 |---|---|
 | White screen | CS, RESET, DC, MOSI or SCK wiring |
 | Dark screen | VCC, GND or LED wiring, or no firmware running |
+| Picture turns to noise | The LCD clock is too fast for the wires: lower `LCD_MHZ` in `src/main.rs` |
 | Flashing cannot connect | GPIO46 is a boot pin: unplug the e9 to f9 jumper, flash, then replace it |
 | Red and blue swapped | Change `ColorOrder::Bgr` to `ColorOrder::Rgb` in `src/main.rs` |
 | Text mirrored | Remove `.flip_horizontal()` in `src/main.rs` |
 | Text upside down | Change `.flip_horizontal()` to `.flip_vertical()` in `src/main.rs` |
-| No dots and no `touch:` lines | T_CLK, T_CS, T_DIN or T_DO wiring |
-| Dots away from your finger | Adjust the `RAW_X_*` and `RAW_Y_*` values in `src/main.rs` |
-| One box never lights | That button's signal wire, or its solder joints |
-| No box lights | The ground wires: c1 to the minus rail, or the ground rail to the minus rail |
-| A box stays lit | That button's signal wire is touching ground |
+| Touches land in the wrong place | Hold K1 while starting, then redo the calibration |
+| One key never works | That button's signal wire, or its solder joints |
+| No key works | The ground wires: c1 to the minus rail, or the ground rail to the minus rail |

@@ -109,6 +109,7 @@ impl Purpose {
 }
 
 /// What the device is doing.
+#[allow(clippy::large_enum_variant, reason = "there is only ever one of these")]
 enum Mode {
     Calibrate {
         step: usize,
@@ -872,8 +873,8 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
     }
 
     /// Takes a line from the laptop.
-    pub fn on_line(&mut self, host: &mut impl Host, line: Line<'_>) {
-        let Line::Text(text) = line else {
+    pub fn on_line(&mut self, host: &mut impl Host, line: &Line<'_>) {
+        let Line::Text(text) = *line else {
             Self::respond(host, &Response::Err(WalletError::BadRequest));
             return;
         };
@@ -978,70 +979,8 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
 
     /// The screen for the current mode.
     fn screen(&self, now_ms: u64) -> Screen<'_> {
-        match &self.mode {
-            Mode::Calibrate { step, .. } => Screen::Calibrate {
-                step: (*step).min(2),
-            },
-            Mode::Home(tab) => Screen::Tab(*tab, &self.home, &self.activity),
-            Mode::ActivityList { top } => Screen::ActivityList(&self.activity, *top),
-            Mode::DeviceMenu { selected } => Screen::DeviceMenu(&self.home, *selected),
-            Mode::Review { review, approval } => {
-                Screen::Review(&review.tx, seconds_left(approval, now_ms))
-            }
-            Mode::RestoreConfirm {
-                job,
-                first_index,
-                approval,
-            } => Screen::RestoreConfirm {
-                tree: job.tree,
-                first_index: *first_index,
-                seconds: seconds_left(approval, now_ms),
-            },
-            Mode::Passcode {
-                purpose,
-                count,
-                digits,
-                hint,
-                ..
-            } => Screen::Passcode {
-                title: purpose.title(),
-                hint: hint.as_deref().unwrap_or_else(|| purpose.hint()),
-                entered: *count,
-                digits,
-            },
-            Mode::Result {
-                success,
-                title,
-                detail,
-                ..
-            } => Screen::Result {
-                success: *success,
-                title,
-                detail,
-            },
-            Mode::SeedWords { words, page, .. } => Screen::SeedWords { words, page: *page },
-            Mode::BackupCheck { check, .. } => {
-                let question = check.question();
-                Screen::BackupCheck {
-                    number: check.number(),
-                    position: question.position,
-                    choices: question.choices,
-                }
-            }
-            Mode::Locked { tries_left } => Screen::Locked {
-                wait_ms: self.wallet_lock(now_ms),
-                tries_left: *tries_left,
-            },
-            Mode::Notice {
-                title,
-                first,
-                second,
-            } => Screen::Notice {
-                title,
-                first,
-                second,
-            },
-        }
+        let lock_ms = self.wallet_lock(now_ms);
+        screen_for(&self.mode, &self.home, &self.activity, lock_ms, now_ms)
     }
 
     fn wallet_lock(&self, now_ms: u64) -> u64 {
@@ -1067,9 +1006,9 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
         }
         self.dirty = false;
         self.drawn_tick = tick;
-        let mut fb = core::mem::take(&mut self.fb);
-        self.screen(now_ms).draw(&mut fb, theme_for(self.choice));
-        self.fb = fb;
+        let lock_ms = self.wallet_lock(now_ms);
+        let screen = screen_for(&self.mode, &self.home, &self.activity, lock_ms, now_ms);
+        screen.draw(&mut self.fb, theme_for(self.choice));
         host.present(&mut self.fb);
     }
 
@@ -1131,6 +1070,80 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
     /// The wallet.
     pub fn wallet(&mut self) -> &mut Wallet<F, C> {
         &mut self.wallet
+    }
+}
+
+/// The screen for a mode. A free function, so drawing can borrow the framebuffer alongside it.
+fn screen_for<'a>(
+    mode: &'a Mode,
+    home: &'a Home,
+    activity: &'a Activity,
+    lock_ms: u64,
+    now_ms: u64,
+) -> Screen<'a> {
+    match mode {
+        Mode::Calibrate { step, .. } => Screen::Calibrate {
+            step: (*step).min(2),
+        },
+        Mode::Home(tab) => Screen::Tab(*tab, home, activity),
+        Mode::ActivityList { top } => Screen::ActivityList(activity, *top),
+        Mode::DeviceMenu { selected } => Screen::DeviceMenu(home, *selected),
+        Mode::Review { review, approval } => {
+            Screen::Review(&review.tx, seconds_left(approval, now_ms))
+        }
+        Mode::RestoreConfirm {
+            job,
+            first_index,
+            approval,
+        } => Screen::RestoreConfirm {
+            tree: job.tree,
+            first_index: *first_index,
+            seconds: seconds_left(approval, now_ms),
+        },
+        Mode::Passcode {
+            purpose,
+            count,
+            digits,
+            hint,
+            ..
+        } => Screen::Passcode {
+            title: purpose.title(),
+            hint: hint.as_deref().unwrap_or_else(|| purpose.hint()),
+            entered: *count,
+            digits,
+        },
+        Mode::Result {
+            success,
+            title,
+            detail,
+            ..
+        } => Screen::Result {
+            success: *success,
+            title,
+            detail,
+        },
+        Mode::SeedWords { words, page, .. } => Screen::SeedWords { words, page: *page },
+        Mode::BackupCheck { check, .. } => {
+            let question = check.question();
+            Screen::BackupCheck {
+                number: check.number(),
+                position: question.position,
+                choices: question.choices,
+            }
+        }
+        Mode::Locked { tries_left } => Screen::Locked {
+            wait_ms: lock_ms,
+            tries_left: *tries_left,
+        },
+        Mode::Notice {
+            title,
+            first,
+            second,
+        } => Screen::Notice {
+            title,
+            first,
+            second,
+        },
     }
 }
 

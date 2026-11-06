@@ -1,8 +1,8 @@
 //! The two key slots. Each holds a tree and a header, so a power cut always leaves one working.
 
-use alloc::vec;
-
-use qday_xmss::{HEIGHT, Hash, KeySet, LEAVES, NODES, PublicKey, Tree, keccak256, node_slot};
+use qday_xmss::{
+    HEIGHT, Hash, Hasher, KeySet, LEAVES, NODES, PublicKey, Tree, keccak256, node_slot,
+};
 
 use crate::flash::{Flash, SECTOR, layout};
 
@@ -18,6 +18,8 @@ const ACTIVATIONS: u32 = 8;
 /// Where the nodes start in a slot, after the header sector.
 const NODES_AT: u32 = SECTOR;
 const NODE_BYTES: usize = NODES * 32;
+/// Bytes of nodes hashed at a time. A whole number of nodes, so the root ends a chunk.
+const NODE_CHUNK: usize = 1024;
 const SECTORS_PER_SLOT: u32 = layout::KEY_SLOT_SIZE / SECTOR;
 
 /// A checked header.
@@ -217,11 +219,22 @@ impl<F: Flash> KeyStore<F> {
         let Some(header) = self.header(slot)? else {
             return Ok(None);
         };
-        let mut nodes = vec![0; NODE_BYTES];
-        self.read(slot_at(slot) + NODES_AT, &mut nodes)?;
-        let root_at = NODE_BYTES - 32;
-        let whole =
-            keccak256(&[&nodes]) == header.nodes_hash() && nodes[root_at..] == header.key().root;
+        // Hashed in pieces, because the device has no room for a second copy of the tree.
+        let start = slot_at(slot) + NODES_AT;
+        let mut hasher = Hasher::default();
+        let mut chunk = [0; NODE_CHUNK];
+        let mut last = [0; 32];
+        let mut left = NODE_BYTES;
+        let mut offset = start;
+        while left > 0 {
+            let size = left.min(NODE_CHUNK);
+            self.read(offset, &mut chunk[..size])?;
+            hasher.update(&chunk[..size]);
+            last.copy_from_slice(&chunk[size - 32..size]);
+            offset += u32::try_from(size).map_err(|_| StoreError)?;
+            left -= size;
+        }
+        let whole = hasher.finish() == header.nodes_hash() && last == header.key().root;
         Ok(whole.then_some(header))
     }
 

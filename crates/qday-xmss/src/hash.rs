@@ -15,9 +15,26 @@ pub fn keccak256(parts: &[&[u8]]) -> Hash {
     hasher.finalize().into()
 }
 
+/// Hashes data that arrives in pieces, for input too large to hold at once.
+#[derive(Default)]
+pub struct Hasher(Keccak256);
+
+impl Hasher {
+    /// Adds a piece.
+    pub fn update(&mut self, data: &[u8]) {
+        Digest::update(&mut self.0, data);
+    }
+
+    /// Finishes the hash.
+    #[must_use]
+    pub fn finish(self) -> Hash {
+        self.0.finalize().into()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::keccak256;
+    use super::{Hasher, keccak256};
 
     #[test]
     fn empty_input_gives_the_known_keccak_digest() {
@@ -27,6 +44,15 @@ mod tests {
             0x5d, 0x85, 0xa4, 0x70,
         ];
         assert_eq!(keccak256(&[]), expected);
+    }
+
+    #[test]
+    fn a_hasher_matches_the_one_shot_hash() {
+        let mut hasher = Hasher::default();
+        hasher.update(b"ab");
+        hasher.update(b"");
+        hasher.update(b"c");
+        assert_eq!(hasher.finish(), keccak256(&[b"abc"]));
     }
 
     #[test]
