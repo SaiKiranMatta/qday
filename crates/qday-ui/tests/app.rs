@@ -113,7 +113,8 @@ fn boot(flash: &SimFlash, seed: u64, hold_k1: bool) -> (FakeHost, TestApp) {
     )
     .expect("the flash is healthy");
     let settings = Settings::new(flash.clone());
-    let app = App::start(wallet, settings, TestRng(seed), hold_k1, &mut host);
+    let fb = Framebuffer::new();
+    let app = App::start(wallet, settings, fb, TestRng(seed), hold_k1, &mut host);
     (host, app)
 }
 

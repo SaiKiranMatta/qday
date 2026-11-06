@@ -7,6 +7,8 @@
 extern crate alloc;
 
 mod hardware;
+#[cfg(feature = "measure")]
+mod measure;
 
 use core::cell::RefCell;
 
@@ -34,6 +36,7 @@ use mipidsi::{
     options::{ColorOrder, Orientation, Rotation},
 };
 use qday_ui::app::{App, Light};
+use qday_ui::fb::Framebuffer;
 use qday_wallet::counter::FlashCounter;
 use qday_wallet::flash::{Aligned, layout};
 use qday_wallet::keystore::KeyStore;
@@ -61,6 +64,8 @@ const POLL_MS: u32 = 5;
 
 #[main]
 fn main() -> ! {
+    #[cfg(feature = "measure")]
+    measure::paint_stack();
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
     // The RAM the bootloader used is free now, and using it costs the stack nothing.
@@ -144,7 +149,14 @@ fn main() -> ! {
     };
 
     let hold_k1 = keys[0].is_low();
-    let mut app = App::start(wallet, settings, rng, hold_k1, &mut board);
+    #[allow(
+        unused_mut,
+        reason = "only the measuring build draws before the app starts"
+    )]
+    let mut fb = Framebuffer::new();
+    #[cfg(feature = "measure")]
+    let mut report = measure::Report::run(&mut fb, &mut board);
+    let mut app = App::start(wallet, settings, fb, rng, hold_k1, &mut board);
 
     let mut lines = LineBuffer::default();
     let mut watch = UsbWatch::default();
@@ -162,6 +174,8 @@ fn main() -> ! {
             keys[3].is_low(),
         ];
         app.poll(&mut board, held, touch.read());
+        #[cfg(feature = "measure")]
+        report.tick(&mut board.usb);
         delay.delay_millis(POLL_MS);
     }
 }

@@ -1,5 +1,6 @@
-//! The device has 256 KB of heap, and running out would crash it after a long tree build. This
-//! measures the real peak through the heaviest flows.
+//! Running out of heap would crash the device after a long tree build. This measures the real
+//! peak through the heaviest flows of both schemes. The framebuffer isn't in it, because on the
+//! device it lives in PSRAM, so the firmware's heap only has to cover what's counted here.
 
 // A counting allocator can't be written without this. It's the only place in the project.
 #![allow(unsafe_code)]
@@ -12,19 +13,20 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::{SimFlash, TestRng};
 use qday_ui::app::{App, Host, Light};
-use qday_ui::fb::Framebuffer;
+use qday_ui::fb::{Framebuffer, PIXELS};
 use qday_wallet::counter::FlashCounter;
 use qday_wallet::flash::layout;
-use qday_wallet::frame::FrameTx;
+use qday_wallet::frame::{FrameTx, MlFrameTx};
 use qday_wallet::keystore::KeyStore;
 use qday_wallet::mlkey::MlKeyStore;
-use qday_wallet::passcode::Passcode;
+use qday_wallet::passcode::{Attempt, Passcode};
 use qday_wallet::protocol::{Line, LineBuffer, Request, request_line};
-use qday_wallet::settings::{Calibration, Settings};
-use qday_wallet::wallet::Wallet;
+use qday_wallet::settings::{Calibration, Scheme, Settings};
+use qday_wallet::wallet::{MAIN_ACCOUNT, Pending, Wallet};
 
-/// What the firmware gives the heap, less room for fragmentation.
-const LIMIT: usize = 240 * 1024;
+/// The firmware's main heap region. The reclaimed region on top of it is the room for
+/// fragmentation, and the peak has to fit in this one alone.
+const LIMIT: usize = 96 * 1024;
 
 static CURRENT: AtomicUsize = AtomicUsize::new(0);
 static PEAK: AtomicUsize = AtomicUsize::new(0);
@@ -70,7 +72,14 @@ impl Host for NullHost {
     fn restart(&mut self) {}
 }
 
-fn start(flash: &SimFlash, host: &mut NullHost) -> App<SimFlash, FlashCounter<SimFlash>, TestRng> {
+const CODE: [u8; 6] = [1, 2, 3, 4, 5, 6];
+
+fn start(
+    flash: &SimFlash,
+    host: &mut NullHost,
+    screen: &'static mut [u16],
+) -> App<SimFlash, FlashCounter<SimFlash>, TestRng> {
+    let fb = Framebuffer::placed(screen);
     let wallet = Wallet::open(
         KeyStore::new(flash.clone()),
         Passcode::new(flash.clone(), layout::PASSCODE),
@@ -83,6 +92,7 @@ fn start(flash: &SimFlash, host: &mut NullHost) -> App<SimFlash, FlashCounter<Si
     App::start(
         wallet,
         Settings::new(flash.clone()),
+        fb,
         TestRng(3),
         false,
         host,
@@ -97,12 +107,14 @@ fn the_heaviest_flows_fit_in_the_heap() {
         .set_calibration(&Calibration::factory())
         .expect("the flash is healthy");
 
-    // The simulated flash holds a 256 KB buffer of its own, which the device doesn't need.
+    // The simulated flash holds a 256 KB buffer of its own, which the device doesn't need, and the
+    // screens stand in for PSRAM.
+    let [first_screen, second_screen, third_screen] = [(); 3].map(|()| vec![0_u16; PIXELS].leak());
     let baseline = CURRENT.load(Ordering::SeqCst);
     PEAK.store(baseline, Ordering::SeqCst);
 
     let mut host = NullHost(0);
-    let mut app = start(&flash, &mut host);
+    let mut app = start(&flash, &mut host, first_screen);
     assert!(app.wallet().has_key(), "first boot builds the keys");
     let first_boot = PEAK.load(Ordering::SeqCst) - baseline;
 
@@ -119,7 +131,39 @@ fn the_heaviest_flows_fit_in_the_heap() {
     let sign = request_line(&Request::SignFrame(raw));
     app.on_line(&mut host, &Line::Text(sign.trim_end()));
 
+    let xmss = PEAK.load(Ordering::SeqCst) - baseline;
+
+    // The same device after a restart, switched to ML-DSA and signing.
+    drop(app);
+    let mut app = start(&flash, &mut host, second_screen);
+    let wallet = app.wallet();
+    wallet
+        .passcode()
+        .create(&CODE, &mut TestRng(4))
+        .expect("the flash is healthy");
+    let Ok(Attempt::Correct(proof)) = wallet.enter_passcode(&CODE, 0) else {
+        panic!("the code is right");
+    };
+    wallet
+        .set_scheme(Scheme::MlDsa44, proof)
+        .expect("the switch works");
+    let raw = MlFrameTx::transfer([0x11; 20], 0, [0x22; 20], 1).encode(&[]);
+    let Ok(Pending::MlDsa(review)) = wallet.check_transaction(&raw) else {
+        panic!("this is an ML-DSA transfer");
+    };
+    let Ok(Attempt::Correct(proof)) = wallet.enter_passcode(&CODE, 0) else {
+        panic!("the code is right");
+    };
+    wallet
+        .ml_sign(&review, MAIN_ACCOUNT, proof, &mut TestRng(5))
+        .expect("it signs");
+    drop(app);
+    let mut app = start(&flash, &mut host, third_screen);
+    let sign = request_line(&Request::SignFrame(raw));
+    app.on_line(&mut host, &Line::Text(sign.trim_end()));
+    assert_eq!(app.screen_name(), "review");
+
     let peak = PEAK.load(Ordering::SeqCst) - baseline;
-    println!("first boot {first_boot} bytes, all flows {peak} bytes");
+    println!("first boot {first_boot} bytes, XMSS flows {xmss} bytes, all flows {peak} bytes");
     assert!(peak < LIMIT, "peak heap was {peak} bytes");
 }

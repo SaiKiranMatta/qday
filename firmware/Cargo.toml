@@ -5,6 +5,10 @@ edition = "2024"
 rust-version = "1.95"
 publish = false
 
+[features]
+# Paints the stack, times screen redraws, and reports both as log lines.
+measure = ["esp-alloc/internal-heap-stats"]
+
 [dependencies]
 embedded-graphics = "0.8.2"
 embedded-hal = "1.0"

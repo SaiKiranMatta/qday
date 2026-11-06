@@ -544,6 +544,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
     pub fn start(
         wallet: Wallet<F, C>,
         mut settings: Settings<F>,
+        fb: Framebuffer,
         rng: R,
         calibrate: bool,
         host: &mut impl Host,
@@ -555,7 +556,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             wallet,
             settings,
             rng,
-            fb: Framebuffer::new(),
+            fb,
             view: View {
                 status: Status {
                     tree: 0,
