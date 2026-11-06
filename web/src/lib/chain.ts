@@ -73,6 +73,8 @@ export interface OnChainAccount {
   balanceWei: bigint;
   /** Formatted balances by token id. */
   balances: Record<string, string>;
+  /** Exact balances by token id, in each token's smallest unit. */
+  units: Record<string, bigint>;
 }
 
 export function formatAmount(value: bigint, decimals: number): string {
@@ -111,6 +113,7 @@ export async function readAccount(address: Address, tokens: Token[]): Promise<On
     nextIndex: nextIndex === null ? null : Number(nextIndex),
     balanceWei: native >= 0 ? (balances[native] ?? 0n) : 0n,
     balances: Object.fromEntries(tokens.map((token, i) => [token.id, formatAmount(balances[i] ?? 0n, token.decimals)])),
+    units: Object.fromEntries(tokens.map((token, i) => [token.id, balances[i] ?? 0n])),
   };
 }
 

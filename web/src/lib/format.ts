@@ -23,9 +23,24 @@ export function addressLines(address: string): [string, string] {
   return [`0x${groups(digits.slice(0, 20))}`, groups(digits.slice(20))];
 }
 
-/** An exact ETH amount with trailing zeros trimmed, as the device shows it (no rounding). */
-export function exactEth(wei: bigint): string {
-  const whole = (wei / 10n ** 18n).toLocaleString("en-US");
-  const fraction = (wei % 10n ** 18n).toString().padStart(18, "0").replace(/0+$/, "");
+/** An exact amount of a token with `decimals` places, trailing zeros trimmed, as the device shows it. */
+export function exactUnits(value: bigint, decimals: number): string {
+  const unit = 10n ** BigInt(decimals);
+  const whole = (value / unit).toLocaleString("en-US");
+  const fraction = decimals ? (value % unit).toString().padStart(decimals, "0").replace(/0+$/, "") : "";
   return fraction ? `${whole}.${fraction}` : whole;
+}
+
+/** An exact ETH amount (no rounding). */
+export function exactEth(wei: bigint): string {
+  return exactUnits(wei, 18);
+}
+
+/** Reads a typed amount in a token's units. Null unless it is a plain decimal with at most `decimals` places. */
+export function parseAmount(text: string, decimals: number): bigint | null {
+  const match = /^(\d*)(?:\.(\d*))?$/.exec(text);
+  if (!match || text === "" || text === ".") return null;
+  const [, whole = "", fraction = ""] = match;
+  if (fraction.length > decimals) return null;
+  return BigInt(whole || "0") * 10n ** BigInt(decimals) + BigInt(fraction.padEnd(decimals, "0") || "0");
 }

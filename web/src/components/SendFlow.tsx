@@ -1,10 +1,10 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { parseEther } from "viem";
-import { addressLines, exactEth, shortHex } from "../lib/format";
-import type { Token } from "../lib/tokens";
-import { isAddress } from "../lib/tokens";
-import type { Draft, SendStep } from "../lib/useSend";
+import { formatAmount } from "../lib/chain";
+import { addressLines, exactEth, exactUnits, parseAmount, shortHex } from "../lib/format";
+import { KNOWN_TOKENS, NATIVE_ID, type Token, isAddress } from "../lib/tokens";
+import { type Draft, type SendFees, type SendStep, feeFor } from "../lib/useSend";
 import { TokenLogo } from "./TokenLogo";
+import { TokenPicker } from "./TokenPicker";
 import { Button } from "./ui";
 
 /** What the device's review screen prints for the network line. */
@@ -21,9 +21,9 @@ export const SEND_TITLES: Record<SendStep["kind"], string> = {
 /** The send flow's content: details, then a summary that stays put from review to done. */
 export function SendFlow({
   step,
-  eth,
-  balanceWei,
-  feeWei,
+  tokens,
+  balances,
+  fees,
   ownAddress,
   onReview,
   onConfirm,
@@ -31,22 +31,28 @@ export function SendFlow({
   onClose,
   initialTo = "",
   initialAmount = "",
+  initialToken = NATIVE_ID,
 }: {
   step: SendStep;
-  eth: Token | undefined;
-  balanceWei: bigint;
-  feeWei: bigint | null;
+  /** Tokens that can be picked. ETH comes first. */
+  tokens: Token[];
+  /** Exact balance per token id. */
+  balances: Record<string, bigint>;
+  fees: SendFees | null;
   ownAddress: string;
-  onReview: (to: `0x${string}`, amountEth: string) => void;
+  onReview: (token: Token, to: `0x${string}`, amount: string) => void;
   onConfirm: () => void;
   onEdit: () => void;
   onClose: () => void;
   /** Prefill, for the dev gallery. */
   initialTo?: string;
   initialAmount?: string;
+  initialToken?: string;
 }) {
   const [to, setTo] = useState(initialTo);
   const [amount, setAmount] = useState(initialAmount);
+  const [tokenId, setTokenId] = useState(initialToken);
+  const token = tokens.find((t) => t.id === tokenId) ?? tokens[0] ?? KNOWN_TOKENS[0]!;
 
   return (
     <div>
@@ -55,17 +61,22 @@ export function SendFlow({
         <DetailsForm
           to={to}
           amount={amount}
+          token={token}
+          tokens={tokens}
           onTo={setTo}
           onAmount={setAmount}
-          eth={eth}
-          balanceWei={balanceWei}
-          feeWei={feeWei}
+          onToken={(t) => {
+            setTokenId(t.id);
+            setAmount("");
+          }}
+          balances={balances}
+          fees={fees}
           ownAddress={ownAddress}
           error={step.error}
           onReview={onReview}
         />
       ) : (
-        <Summary step={step} eth={eth} onConfirm={onConfirm} onEdit={onEdit} onClose={onClose} />
+        <Summary step={step} onConfirm={onConfirm} onEdit={onEdit} onClose={onClose} />
       )}
     </div>
   );
@@ -91,40 +102,55 @@ function Progress({ step }: { step: SendStep["kind"] }) {
 function DetailsForm({
   to,
   amount,
+  token,
+  tokens,
   onTo,
   onAmount,
-  eth,
-  balanceWei,
-  feeWei,
+  onToken,
+  balances,
+  fees,
   ownAddress,
   error,
   onReview,
 }: {
   to: string;
   amount: string;
+  token: Token;
+  tokens: Token[];
   onTo: (v: string) => void;
   onAmount: (v: string) => void;
-  eth: Token | undefined;
-  balanceWei: bigint;
-  feeWei: bigint | null;
+  onToken: (token: Token) => void;
+  balances: Record<string, bigint>;
+  fees: SendFees | null;
   ownAddress: string;
   error?: string;
-  onReview: (to: `0x${string}`, amountEth: string) => void;
+  onReview: (token: Token, to: `0x${string}`, amount: string) => void;
 }) {
   const amountRef = useRef<HTMLInputElement>(null);
-  useEffect(() => amountRef.current?.focus(), []);
+  useEffect(() => amountRef.current?.focus(), [token.id]);
 
   const validTo = isAddress(to);
   const toSelf = validTo && to.toLowerCase() === ownAddress.toLowerCase();
-  let value: bigint | null = null;
-  try {
-    value = /^\d*\.?\d+$/.test(amount) ? parseEther(amount) : null;
-  } catch {
-    value = null;
-  }
-  const tooMuch = value !== null && feeWei !== null && value + feeWei > balanceWei;
-  const maxWei = feeWei !== null && balanceWei > feeWei ? balanceWei - feeWei : 0n;
-  const ready = validTo && !toSelf && value !== null && value > 0n && !tooMuch;
+  const native = token.address === null;
+  const balance = balances[token.id] ?? 0n;
+  const ethBalance = balances[NATIVE_ID] ?? 0n;
+  const fee = fees ? feeFor(fees, token) : null;
+  const value = parseAmount(amount, token.decimals);
+  // A well-formed number that has more decimal places than the token.
+  const tooPrecise = value === null && /^\d*\.\d+$/.test(amount);
+  const tooMuch = value !== null && (native ? fee !== null && value + fee > balance : value > balance);
+  const noFee = !native && fee !== null && fee > ethBalance;
+  const max = native ? (fee !== null && balance > fee ? balance - fee : 0n) : balance;
+  const ready = validTo && !toSelf && value !== null && value > 0n && !tooMuch && !noFee;
+  const pickerBalances = Object.fromEntries(tokens.map((t) => [t.id, formatAmount(balances[t.id] ?? 0n, t.decimals)]));
+
+  const note = tooPrecise
+    ? { bad: true, text: `${token.symbol} has at most ${token.decimals} decimal places` }
+    : tooMuch
+      ? { bad: true, text: native ? "More than your balance after the fee" : `More than your ${token.symbol} balance` }
+      : noFee
+        ? { bad: true, text: "Not enough ETH for the network fee" }
+        : { bad: false, text: fee !== null ? `Network fee up to ${exactEth(fee)} ETH` : "Working out the fee…" };
 
   const paste = async () => {
     try {
@@ -138,12 +164,14 @@ function DetailsForm({
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        if (ready) onReview(to as `0x${string}`, amount);
+        if (ready) onReview(token, to as `0x${string}`, amount);
       }}
     >
       <label htmlFor="send-amount" className="flex items-center justify-between text-xs text-muted">
         <span>Amount</span>
-        <span className="tabular-nums">Balance {exactEth(balanceWei)} ETH</span>
+        <span className="tabular-nums">
+          Balance {exactUnits(balance, token.decimals)} {token.symbol}
+        </span>
       </label>
       <div className="mt-2 flex items-center gap-3 rounded-2xl bg-surface-2 px-4 py-3 focus-within:ring-1 focus-within:ring-alabaster/25">
         <input
@@ -156,26 +184,18 @@ function DetailsForm({
           autoComplete="off"
           className="min-w-0 flex-1 bg-transparent text-4xl font-semibold tracking-tight tabular-nums outline-none placeholder:text-muted"
         />
-        <span className="flex shrink-0 items-center gap-2 rounded-full bg-surface py-1 pr-3 pl-1 text-sm font-medium">
-          <TokenLogo token={eth} size={24} /> ETH
-        </span>
+        <TokenPicker tokens={tokens} selected={token} balances={pickerBalances} onSelect={onToken} />
       </div>
       <div className="mt-2 flex items-center justify-between text-xs">
         <button
           type="button"
-          onClick={() => maxWei > 0n && onAmount(exactEth(maxWei).replace(/,/g, ""))}
-          disabled={maxWei === 0n}
+          onClick={() => max > 0n && onAmount(exactUnits(max, token.decimals).replace(/,/g, ""))}
+          disabled={max === 0n}
           className="rounded-full px-2.5 py-1 font-medium text-alabaster/80 ring-1 ring-line hover:text-alabaster hover:ring-slate disabled:opacity-40"
         >
           Max
         </button>
-        <span className={tooMuch ? "text-bad" : "text-muted"}>
-          {tooMuch
-            ? "More than your balance after the fee"
-            : feeWei !== null
-              ? `Network fee up to ${exactEth(feeWei)} ETH`
-              : "Working out the fee…"}
-        </span>
+        <span className={note.bad ? "text-bad" : "text-muted"}>{note.text}</span>
       </div>
 
       <label htmlFor="send-to" className="mt-6 block text-xs text-muted">
@@ -218,16 +238,24 @@ function DetailsForm({
   );
 }
 
+/** What a draft sends, read back from the bytes the device will see. */
+function sending(draft: Draft) {
+  const { action } = draft.tx;
+  if (action.kind === "transfer") return { value: BigInt(action.valueWei), to: action.to, contract: null, deviceKnows: true };
+  if (action.kind === "token") {
+    return { value: BigInt(action.amount), to: action.to, contract: action.token, deviceKnows: action.symbol !== null };
+  }
+  return null;
+}
+
 /** The transfer as the device will show it. Stays on screen while you approve and while it sends. */
 function Summary({
   step,
-  eth,
   onConfirm,
   onEdit,
   onClose,
 }: {
   step: Exclude<SendStep, { kind: "edit" }>;
-  eth: Token | undefined;
   onConfirm: () => void;
   onEdit: () => void;
   onClose: () => void;
@@ -237,40 +265,41 @@ function Summary({
     if (step.kind === "review") confirmRef.current?.focus();
   }, [step.kind]);
 
-  const { tx } = step.draft;
-  if (tx.action.kind !== "transfer") return null;
-  const value = BigInt(tx.action.valueWei);
+  const { tx, token } = step.draft;
+  const send = sending(step.draft);
+  if (!send) return null;
   const fee = BigInt(tx.maxFeeWei);
-  const [line1, line2] = addressLines(tx.action.to);
 
   if (step.kind === "done") {
-    return <Sent draft={step.draft} block={step.block} hash={step.hash} eth={eth} onClose={onClose} />;
+    return <Sent draft={step.draft} block={step.block} hash={step.hash} onClose={onClose} />;
   }
 
   return (
     <div>
       <div className="flex items-center gap-3">
-        <TokenLogo token={eth} size={36} />
+        <TokenLogo token={token} size={36} />
         <div className="text-4xl font-semibold tracking-tight tabular-nums">
-          {exactEth(value)} <span className="text-muted">ETH</span>
+          {exactUnits(send.value, token.decimals)} <span className="text-muted">{token.symbol}</span>
         </div>
       </div>
 
+      {!send.deviceKnows && (
+        <Notice tone="warn">
+          Your QDay doesn't know this token. It shows the token contract and the amount in the token's smallest
+          unit: {send.value.toLocaleString("en-US")}. Check both before you approve.
+        </Notice>
+      )}
+
       <dl className="mt-6 divide-y divide-line/60 rounded-2xl bg-surface-2 px-4 text-sm">
-        <div className="flex flex-col gap-1 py-3 sm:flex-row sm:gap-4">
-          <dt className="w-20 shrink-0 leading-6 text-muted">To</dt>
-          {/* Two whole lines, never rewrapped: they have to match the device's lines group for group. */}
-          <dd className="font-mono text-[13px] leading-6 whitespace-nowrap tabular-nums">
-            {line1}
-            <br />
-            {line2}
-          </dd>
-        </div>
+        {send.contract && !send.deviceKnows && <AddressRow label="Token" address={send.contract} />}
+        <AddressRow label="To" address={send.to} />
         <Row label="Network">{DEVICE_NETWORK}</Row>
         <Row label="Fee">Up to {exactEth(fee)} ETH</Row>
-        <Row label="Total" strong>
-          Up to {exactEth(value + fee)} ETH
-        </Row>
+        {!send.contract && (
+          <Row label="Total" strong>
+            Up to {exactEth(send.value + fee)} ETH
+          </Row>
+        )}
       </dl>
 
       {step.kind === "review" && (
@@ -319,22 +348,10 @@ function Summary({
   );
 }
 
-function Sent({
-  draft,
-  block,
-  hash,
-  eth,
-  onClose,
-}: {
-  draft: Draft;
-  block: number;
-  hash: string;
-  eth: Token | undefined;
-  onClose: () => void;
-}) {
+function Sent({ draft, block, hash, onClose }: { draft: Draft; block: number; hash: string; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
-  const { action } = draft.tx;
-  if (action.kind !== "transfer") return null;
+  const send = sending(draft);
+  if (!send) return null;
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(hash);
@@ -354,10 +371,10 @@ function Sent({
           </svg>
         </span>
         <div className="mt-4 flex items-center gap-2 text-3xl font-semibold tracking-tight tabular-nums">
-          <TokenLogo token={eth} size={28} />
-          {exactEth(BigInt(action.valueWei))} <span className="text-muted">ETH</span>
+          <TokenLogo token={draft.token} size={28} />
+          {exactUnits(send.value, draft.token.decimals)} <span className="text-muted">{draft.token.symbol}</span>
         </div>
-        <div className="mt-1 text-sm text-muted">sent to {shortHex(action.to, 6, 4)}</div>
+        <div className="mt-1 text-sm text-muted">sent to {shortHex(send.to, 6, 4)}</div>
       </div>
       <dl className="mt-6 divide-y divide-line/60 rounded-2xl bg-surface-2 px-4 text-sm">
         <Row label="Status">
@@ -391,9 +408,24 @@ function Row({ label, strong, children }: { label: string; strong?: boolean; chi
   );
 }
 
-function Notice({ tone, children }: { tone: "bad"; children: ReactNode }) {
+/** An address in the device's two lines. Never rewrapped: they have to match group for group. */
+function AddressRow({ label, address }: { label: string; address: string }) {
+  const [line1, line2] = addressLines(address);
   return (
-    <div role="alert" className={`mt-4 rounded-xl px-3.5 py-3 text-xs leading-relaxed ${tone === "bad" ? "bg-bad/10 text-bad" : ""}`}>
+    <div className="flex flex-col gap-1 py-3 sm:flex-row sm:gap-4">
+      <dt className="w-20 shrink-0 leading-6 text-muted">{label}</dt>
+      <dd className="font-mono text-[13px] leading-6 whitespace-nowrap tabular-nums">
+        {line1}
+        <br />
+        {line2}
+      </dd>
+    </div>
+  );
+}
+
+function Notice({ tone, children }: { tone: "bad" | "warn"; children: ReactNode }) {
+  return (
+    <div role="alert" className={`mt-4 rounded-xl px-3.5 py-3 text-xs leading-relaxed ${tone === "bad" ? "bg-bad/10 text-bad" : "bg-warn/10 text-warn"}`}>
       {children}
     </div>
   );

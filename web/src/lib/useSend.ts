@@ -1,15 +1,26 @@
 import type { DeviceStatus } from "@qday/device";
 import { type TxDescription, loadFrame } from "@qday/frame";
 import { useCallback, useEffect, useState } from "react";
-import { hexToBytes, parseEther } from "viem";
+import { hexToBytes } from "viem";
 import { submitFrameTx } from "./chain";
-import type { Address } from "./tokens";
+import { parseAmount } from "./format";
+import { type Address, NATIVE_ID, type Token } from "./tokens";
 
 /** A built transaction, kept on screen from review to done so it can be compared with the device. */
 export interface Draft {
   raw: Uint8Array;
   tx: TxDescription;
+  /** What is being sent. */
+  token: Token;
 }
+
+/** The most a send can pay in fees, in wei. ETH and token transfers have different gas limits. */
+export interface SendFees {
+  eth: bigint;
+  token: bigint;
+}
+
+export const feeFor = (fees: SendFees, token: Token) => (token.address ? fees.token : fees.eth);
 
 export type SendStep =
   | { kind: "edit"; error?: string }
@@ -25,39 +36,50 @@ function message(error: unknown): string {
   return text;
 }
 
-/** Sending ETH: build with the device's frame code, review, approve on the device, submit. */
+/** Sending ETH or a token: build with the device's frame code, review, approve on the device, submit. */
 export function useSend(
   status: DeviceStatus,
-  account: { address: Address; nonce: number; balanceWei: bigint } | null,
+  account: { address: Address; nonce: number; units: Record<string, bigint> } | null,
   signFrame: (raw: Uint8Array) => Promise<`0x${string}`>,
   onSent: () => void,
 ) {
   const [step, setStep] = useState<SendStep>({ kind: "edit" });
-  const [feeWei, setFeeWei] = useState<bigint | null>(null);
+  const [fees, setFees] = useState<SendFees | null>(null);
 
-  // The fee limit is fixed by the frame layout, so build one throwaway transfer to learn it.
+  // Fee limits are fixed by the frame layout, so build one throwaway transaction of each kind to learn them.
   useEffect(() => {
     if (!account) return;
     void loadFrame().then((frame) => {
-      const probe = frame.transferTx(account.address, 0n, 0, account.address, 1n);
-      setFeeWei(BigInt(frame.describe(probe).maxFeeWei));
+      const self = account.address;
+      const eth = frame.describe(frame.transferTx(self, 0n, 0, self, 1n)).maxFeeWei;
+      const token = frame.describe(frame.tokenTransferTx(self, 0n, 0, self, self, 1n)).maxFeeWei;
+      setFees({ eth: BigInt(eth), token: BigInt(token) });
     });
   }, [account?.address]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Builds the transaction and shows it for review. Nothing goes to the device yet. */
   const review = useCallback(
-    async (to: Address, amountEth: string) => {
+    async (token: Token, to: Address, amount: string) => {
       if (!account) return;
       try {
-        const value = parseEther(amountEth);
-        if (value <= 0n) throw new Error("Enter an amount above zero.");
+        const value = parseAmount(amount, token.decimals);
+        if (value === null || value <= 0n) throw new Error("Enter an amount above zero.");
         const frame = await loadFrame();
-        const raw = frame.transferTx(account.address, BigInt(account.nonce), status.nextIndex, to, value);
+        const nonce = BigInt(account.nonce);
+        const raw = token.address
+          ? frame.tokenTransferTx(account.address, nonce, status.nextIndex, token.address, to, value)
+          : frame.transferTx(account.address, nonce, status.nextIndex, to, value);
         const tx = frame.describe(raw);
-        if (value + BigInt(tx.maxFeeWei) > account.balanceWei) {
+        const fee = BigInt(tx.maxFeeWei);
+        const eth = account.units[NATIVE_ID] ?? 0n;
+        if (!token.address && value + fee > eth) {
           throw new Error("Not enough ETH for this amount plus the network fee. Lower the amount, or use Max.");
         }
-        setStep({ kind: "review", draft: { raw, tx } });
+        if (token.address && value > (account.units[token.id] ?? 0n)) {
+          throw new Error(`Not enough ${token.symbol}. Lower the amount, or use Max.`);
+        }
+        if (token.address && fee > eth) throw new Error("Not enough ETH to pay the network fee.");
+        setStep({ kind: "review", draft: { raw, tx, token } });
       } catch (e) {
         setStep({ kind: "edit", error: message(e) });
       }
@@ -93,5 +115,5 @@ export function useSend(
     }
   }, [step, signFrame, onSent]);
 
-  return { step, feeWei, review, confirm, edit: () => setStep({ kind: "edit" }), reset: () => setStep({ kind: "edit" }) };
+  return { step, fees, review, confirm, edit: () => setStep({ kind: "edit" }), reset: () => setStep({ kind: "edit" }) };
 }

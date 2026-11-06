@@ -1,16 +1,16 @@
 import type { Token } from "../lib/tokens";
-import type { SendStep } from "../lib/useSend";
+import type { SendFees, SendStep } from "../lib/useSend";
 import { Modal } from "./Modal";
 import { SEND_TITLES, SendFlow } from "./SendFlow";
 
-/** Send ETH in a dialog. It can't be dismissed while the device or the network is working. */
+/** Send ETH or a token in a dialog. It can't be dismissed while the device or the network is working. */
 export function SendModal(props: {
   step: SendStep;
-  eth: Token | undefined;
-  balanceWei: bigint;
-  feeWei: bigint | null;
+  tokens: Token[];
+  balances: Record<string, bigint>;
+  fees: SendFees | null;
   ownAddress: string;
-  onReview: (to: `0x${string}`, amountEth: string) => void;
+  onReview: (token: Token, to: `0x${string}`, amount: string) => void;
   onConfirm: () => void;
   onEdit: () => void;
   onClose: () => void;
