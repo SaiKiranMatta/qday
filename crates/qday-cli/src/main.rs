@@ -6,8 +6,9 @@ mod json;
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
 use qday_mldsa::blob::{BlobError, prepare_checked};
+use qday_mldsa::{KeySeed, Signer, StandardSigner};
 use qday_wallet::backup::words_to_seed;
-use qday_wallet::frame::{Address, FrameTx};
+use qday_wallet::frame::{Address, FrameTx, MlFrameTx};
 use qday_wallet::hex;
 use qday_xmss::{Hash, KeySet, Tree};
 
@@ -50,8 +51,28 @@ enum Command {
     FrameRotateJson(SignedRotation),
     /// Print a signed rotation as wire bytes
     FrameRotateRaw(SignedRotation),
+    /// Print an ML-DSA public key
+    MldsaPubkey {
+        seed: String,
+        #[arg(long, default_value_t = 0)]
+        account: u32,
+    },
+    /// Sign a 32-byte message with an ML-DSA laptop key
+    MldsaSign {
+        seed: String,
+        message: String,
+        rnd: String,
+        #[arg(long, default_value_t = 0)]
+        account: u32,
+    },
     /// Check an ML-DSA public key and print the blob to deploy
     MldsaBlob { pk: String },
+    /// Print a two-frame transfer's sig hash
+    MlFrameHash(MlTransfer),
+    /// Print a signed two-frame transfer as submission JSON
+    MlFrameJson(SignedMlTransfer),
+    /// Print a signed two-frame transfer as wire bytes
+    MlFrameRaw(SignedMlTransfer),
     /// Print the device's keys, then any prepared next key
     DevicePubkey { port: String },
     /// Print what the device logs
@@ -113,6 +134,32 @@ struct SignedRotation {
     #[command(flatten)]
     rotation: Rotation,
     signature: String,
+}
+
+#[derive(Args)]
+struct MlTransfer {
+    sender: String,
+    nonce: u64,
+    to: String,
+    value_wei: u128,
+}
+
+#[derive(Args)]
+struct SignedMlTransfer {
+    #[command(flatten)]
+    transfer: MlTransfer,
+    signature: String,
+}
+
+impl MlTransfer {
+    fn tx(&self) -> Result<MlFrameTx> {
+        Ok(MlFrameTx::transfer(
+            address(&self.sender)?,
+            self.nonce,
+            address(&self.to)?,
+            self.value_wei,
+        ))
+    }
 }
 
 impl Transfer {
@@ -214,7 +261,33 @@ fn run(command: Command) -> Result<String> {
             let tx = args.rotation.tx()?;
             Ok(json::submission(&tx, &signature(&args.signature)?).to_string())
         }
+        Command::MldsaPubkey { seed, account } => {
+            let key_seed = KeySeed::derive(&hash(&seed)?, account);
+            Ok(hex::encode(
+                &StandardSigner::from_key_seed(&key_seed).public_key(),
+            ))
+        }
+        Command::MldsaSign {
+            seed,
+            message,
+            rnd,
+            account,
+        } => {
+            let key_seed = KeySeed::derive(&hash(&seed)?, account);
+            let signature = StandardSigner::from_key_seed(&key_seed)
+                .sign(&hash(&message)?, &hash(&rnd)?)
+                .map_err(|error| anyhow!("signing failed: {error:?}"))?;
+            Ok(hex::encode(&signature))
+        }
         Command::MldsaBlob { pk } => mldsa_blob(&pk),
+        Command::MlFrameHash(transfer) => Ok(hex::encode(&transfer.tx()?.sig_hash())),
+        Command::MlFrameJson(args) => {
+            let tx = args.transfer.tx()?;
+            Ok(json::ml_submission(&tx, &signature(&args.signature)?).to_string())
+        }
+        Command::MlFrameRaw(args) => Ok(hex::encode(
+            &args.transfer.tx()?.encode(&signature(&args.signature)?),
+        )),
         Command::DevicePubkey { port } => Ok(device::open(&port)?.status()?.line()),
         Command::DeviceLog { port, seconds } => {
             device::open(&port)?.log(seconds)?;

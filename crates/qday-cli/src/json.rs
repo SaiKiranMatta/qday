@@ -1,6 +1,6 @@
 //! The object `eth_sendFrameTransaction` takes.
 
-use qday_wallet::frame::{CHAIN_ID, FrameTx};
+use qday_wallet::frame::{Address, CHAIN_ID, FrameTx, FrameView, MlFrameTx};
 use qday_wallet::hex;
 use serde_json::{Value, json};
 
@@ -10,8 +10,24 @@ fn quantity(value: impl Into<u128>) -> String {
 
 /// Builds the submission object for a signed transaction.
 pub fn submission(tx: &FrameTx, signature: &[u8]) -> Value {
-    let frames: Vec<Value> = tx
-        .frame_views()
+    let fees = (tx.max_priority_fee, tx.max_fee);
+    build(&tx.frame_views(), &tx.sender, tx.nonce, fees, signature)
+}
+
+/// Builds the submission object for a signed two-frame transaction.
+pub fn ml_submission(tx: &MlFrameTx, signature: &[u8]) -> Value {
+    let fees = (tx.max_priority_fee, tx.max_fee);
+    build(&tx.frame_views(), &tx.sender, tx.nonce, fees, signature)
+}
+
+fn build(
+    frame_views: &[FrameView],
+    sender: &Address,
+    nonce: u64,
+    (max_priority_fee, max_fee): (u128, u128),
+    signature: &[u8],
+) -> Value {
+    let frames: Vec<Value> = frame_views
         .iter()
         .map(|frame| {
             json!({
@@ -31,8 +47,8 @@ pub fn submission(tx: &FrameTx, signature: &[u8]) -> Value {
     json!({
         "chainId": quantity(CHAIN_ID),
         "nonceKeys": [quantity(0_u64)],
-        "nonceSeq": quantity(tx.nonce),
-        "sender": hex::encode(&tx.sender),
+        "nonceSeq": quantity(nonce),
+        "sender": hex::encode(sender),
         "frames": frames,
         "signatures": [{
             "scheme": 0,
@@ -41,8 +57,8 @@ pub fn submission(tx: &FrameTx, signature: &[u8]) -> Value {
             "signature": hex::encode(signature),
         }],
         "fees": {
-            "maxPriorityFeePerGas": quantity(tx.max_priority_fee),
-            "maxFeePerGas": quantity(tx.max_fee),
+            "maxPriorityFeePerGas": quantity(max_priority_fee),
+            "maxFeePerGas": quantity(max_fee),
             "maxFeePerBlobGas": "0x0",
         },
         "blobVersionedHashes": [],

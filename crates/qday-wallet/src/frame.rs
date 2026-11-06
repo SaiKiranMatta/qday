@@ -32,6 +32,8 @@ const ROTATE_DATA_BYTES: usize = 68;
 const VERIFY_LIMITS: (u64, u64) = (300_000, 0);
 const SPEND_LIMITS: (u64, u64) = (50_000, 100_000);
 const TRANSFER_LIMITS: (u64, u64) = (50_000, 200_000);
+/// The ML-DSA verify frame's limits: its verifier costs about 1.23M.
+const ML_VERIFY_LIMITS: (u64, u64) = (1_500_000, 0);
 const ROTATE_LIMITS: (u64, u64) = (80_000, 200_000);
 
 /// "QDAY-ROTATE-V1", right-padded with zeros.
@@ -131,41 +133,8 @@ impl FrameTx {
     /// The wire bytes with `signature` in place. An empty signature gives the unsigned form.
     #[must_use]
     pub fn encode(&self, signature: &[u8]) -> Vec<u8> {
-        let mut payload = Vec::new();
-        put_uint(&mut payload, u128::from(CHAIN_ID));
-        let mut keys = Vec::new();
-        put_uint(&mut keys, u128::from(NONCE_KEY));
-        put_list(&mut payload, &keys);
-        put_uint(&mut payload, u128::from(self.nonce));
-        put_bytes(&mut payload, &self.sender);
-
-        let mut frames = Vec::new();
-        for frame in self.frames() {
-            frame.encode(&mut frames);
-        }
-        put_list(&mut payload, &frames);
-
-        let mut entry = Vec::new();
-        put_uint(&mut entry, u128::from(SCHEME_ARBITRARY));
-        put_bytes(&mut entry, &[]);
-        put_bytes(&mut entry, &[]);
-        put_bytes(&mut entry, signature);
-        let mut entries = Vec::new();
-        put_list(&mut entries, &entry);
-        put_list(&mut payload, &entries);
-
-        let mut fees = Vec::new();
-        put_uint(&mut fees, self.max_priority_fee);
-        put_uint(&mut fees, self.max_fee);
-        put_uint(&mut fees, 0);
-        put_list(&mut payload, &fees);
-        put_list(&mut payload, &[]);
-        put_list(&mut payload, &[]);
-
-        let mut raw = Vec::with_capacity(payload.len() + 4);
-        raw.push(TX_TYPE);
-        put_list(&mut raw, &payload);
-        raw
+        let fees = (self.max_priority_fee, self.max_fee);
+        encode_tx(self.nonce, &self.sender, &self.frames(), fees, signature)
     }
 
     /// The hash of the unsigned form.
@@ -315,15 +284,188 @@ impl FrameTx {
     /// The frames in the form the submission JSON needs.
     #[must_use]
     pub fn frame_views(&self) -> [FrameView; 3] {
-        self.frames().map(|frame| FrameView {
-            mode: frame.mode,
-            flags: frame.flags,
-            target: frame.target,
-            execution: frame.limits.0,
-            state: frame.limits.1,
-            value: frame.value,
-            data: frame.data,
+        self.frames().map(Frame::view)
+    }
+}
+
+/// The wire bytes of any frame transaction.
+fn encode_tx(
+    nonce: u64,
+    sender: &Address,
+    frame_list: &[Frame],
+    (max_priority_fee, max_fee): (u128, u128),
+    signature: &[u8],
+) -> Vec<u8> {
+    let mut payload = Vec::new();
+    put_uint(&mut payload, u128::from(CHAIN_ID));
+    let mut keys = Vec::new();
+    put_uint(&mut keys, u128::from(NONCE_KEY));
+    put_list(&mut payload, &keys);
+    put_uint(&mut payload, u128::from(nonce));
+    put_bytes(&mut payload, sender);
+
+    let mut frames = Vec::new();
+    for frame in frame_list {
+        frame.encode(&mut frames);
+    }
+    put_list(&mut payload, &frames);
+
+    let mut entry = Vec::new();
+    put_uint(&mut entry, u128::from(SCHEME_ARBITRARY));
+    put_bytes(&mut entry, &[]);
+    put_bytes(&mut entry, &[]);
+    put_bytes(&mut entry, signature);
+    let mut entries = Vec::new();
+    put_list(&mut entries, &entry);
+    put_list(&mut payload, &entries);
+
+    let mut fees = Vec::new();
+    put_uint(&mut fees, max_priority_fee);
+    put_uint(&mut fees, max_fee);
+    put_uint(&mut fees, 0);
+    put_list(&mut payload, &fees);
+    put_list(&mut payload, &[]);
+    put_list(&mut payload, &[]);
+
+    let mut raw = Vec::with_capacity(payload.len() + 4);
+    raw.push(TX_TYPE);
+    put_list(&mut raw, &payload);
+    raw
+}
+
+/// A transaction for the ML-DSA account: two frames, because no key can be used up.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MlFrameTx {
+    /// The account.
+    pub sender: Address,
+    /// The transaction nonce.
+    pub nonce: u64,
+    /// The recipient.
+    pub to: Address,
+    /// The amount in wei.
+    pub value: u128,
+    /// The priority fee per gas.
+    pub max_priority_fee: u128,
+    /// The fee cap per gas.
+    pub max_fee: u128,
+}
+
+impl MlFrameTx {
+    /// A transfer with the default fees.
+    #[must_use]
+    pub fn transfer(sender: Address, nonce: u64, to: Address, value: u128) -> Self {
+        Self {
+            sender,
+            nonce,
+            to,
+            value,
+            max_priority_fee: DEFAULT_FEE,
+            max_fee: DEFAULT_FEE,
+        }
+    }
+
+    /// The wire bytes with `signature` in place. An empty signature gives the unsigned form.
+    #[must_use]
+    pub fn encode(&self, signature: &[u8]) -> Vec<u8> {
+        let fees = (self.max_priority_fee, self.max_fee);
+        encode_tx(self.nonce, &self.sender, &self.frames(), fees, signature)
+    }
+
+    /// The hash of the unsigned form, which is also what gets signed.
+    #[must_use]
+    pub fn sig_hash(&self) -> Hash {
+        keccak256(&[&self.encode(&[])])
+    }
+
+    /// Reads an unsigned transaction, refusing everything but the exact two-frame shape. As with
+    /// `FrameTx`, re-encoding must give back the input byte for byte.
+    ///
+    /// # Errors
+    ///
+    /// Fails unless the bytes are the canonical encoding of an unsigned two-frame transaction.
+    pub fn decode_unsigned(raw: &[u8]) -> Result<Self, DecodeError> {
+        let tx = Self::parse(raw).ok_or(DecodeError)?;
+        if tx.encode(&[]) == raw {
+            Ok(tx)
+        } else {
+            Err(DecodeError)
+        }
+    }
+
+    fn parse(raw: &[u8]) -> Option<Self> {
+        let (&first, body) = raw.split_first()?;
+        if first != TX_TYPE {
+            return None;
+        }
+        let mut outer = Reader::new(body);
+        let mut payload = outer.list().ok()?;
+        outer.finish().ok()?;
+
+        payload.uint().ok()?;
+        payload.list().ok()?;
+        let nonce = u64::try_from(payload.uint().ok()?).ok()?;
+        let sender = Address::try_from(payload.bytes().ok()?).ok()?;
+
+        let mut frames = payload.list().ok()?;
+        ParsedFrame::read(&mut frames)?;
+        let transfer = ParsedFrame::read(&mut frames)?;
+        frames.finish().ok()?;
+
+        payload.list().ok()?;
+        let mut fees = payload.list().ok()?;
+        let max_priority_fee = fees.uint().ok()?;
+        let max_fee = fees.uint().ok()?;
+
+        Some(Self {
+            sender,
+            nonce,
+            to: transfer.target?,
+            value: transfer.value,
+            max_priority_fee,
+            max_fee,
         })
+    }
+
+    /// The total gas limit of both frames.
+    #[must_use]
+    pub fn gas_limit(&self) -> u128 {
+        self.frames()
+            .iter()
+            .map(|frame| u128::from(frame.limits.0) + u128::from(frame.limits.1))
+            .sum()
+    }
+
+    /// The most this transaction can pay in fees: `max_fee` times all frame limits.
+    #[must_use]
+    pub fn max_fee_wei(&self) -> u128 {
+        self.max_fee.saturating_mul(self.gas_limit())
+    }
+
+    fn frames(&self) -> [Frame; 2] {
+        [
+            Frame {
+                mode: MODE_VERIFY,
+                flags: VERIFY_FLAGS,
+                target: None,
+                limits: ML_VERIFY_LIMITS,
+                value: 0,
+                data: VALIDATE_SELECTOR.to_vec(),
+            },
+            Frame {
+                mode: MODE_SENDER,
+                flags: 0,
+                target: Some(self.to),
+                limits: TRANSFER_LIMITS,
+                value: self.value,
+                data: Vec::new(),
+            },
+        ]
+    }
+
+    /// The frames in the form the submission JSON needs.
+    #[must_use]
+    pub fn frame_views(&self) -> [FrameView; 2] {
+        self.frames().map(Frame::view)
     }
 }
 
@@ -356,6 +498,18 @@ struct Frame {
 }
 
 impl Frame {
+    fn view(self) -> FrameView {
+        FrameView {
+            mode: self.mode,
+            flags: self.flags,
+            target: self.target,
+            execution: self.limits.0,
+            state: self.limits.1,
+            value: self.value,
+            data: self.data,
+        }
+    }
+
     fn encode(&self, out: &mut Vec<u8>) {
         let mut limits = Vec::new();
         put_uint(&mut limits, u128::from(self.limits.0));
