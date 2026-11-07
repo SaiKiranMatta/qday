@@ -23,7 +23,7 @@ can spend it.
   payment depends on an elliptic curve; X-Wing keeps X25519 only as a backstop beside ML-KEM. Post-quantum stealth-address proposals so far protect only the
   finding (item 23).
 
-**[Open the wallet](https://qday.unitlabs.xyz)** (no device? select **Try without a device**) · [Roadmap](docs/ROADMAP.md) · [Signature spec](docs/xmss-spec.md) · [Measured on-chain](docs/devnet.md) · [For AI reviewers](AGENTS.md)
+**[See QDay](https://qday.unitlabs.xyz)** · [Open the wallet](https://qday.unitlabs.xyz/app) (no device? select **Try without a device**) · [Roadmap](docs/ROADMAP.md) · [Signature spec](docs/xmss-spec.md) · [Measured on-chain](docs/devnet.md) · [For AI reviewers](AGENTS.md)
 
 ![QDay: the web wallet and the device's review screen](docs/images/hero.png)
 
@@ -255,7 +255,7 @@ QDay's own keccak256 variant of XMSS, not RFC 8391, and nothing here is audited.
 
 ## Try it
 
-**Without a device, in a minute:** open **[qday.unitlabs.xyz](https://qday.unitlabs.xyz)** and select
+**Without a device, in a minute:** open the wallet at **[qday.unitlabs.xyz/app](https://qday.unitlabs.xyz/app)** and select
 **Try without a device**, then **Start demo wallet**. It's the same wallet on the same chain, with its
 keys in the browser and a page dialog standing in for the device's screen: get test ETH, create the
 account, send, and try a private payment to your own private address and claim it. It signs XMSS

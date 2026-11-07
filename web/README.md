@@ -1,7 +1,7 @@
 # QDay web wallet
 
 The browser side of QDay: connect the device over USB, create the account (XMSS or ML-DSA-44), send
-ETH and tokens, pay and claim private payments, and read what happened. Live at **[qday.unitlabs.xyz](https://qday.unitlabs.xyz)** on QDay's hosted
+ETH and tokens, pay and claim private payments, and read what happened. Live at **[qday.unitlabs.xyz/app](https://qday.unitlabs.xyz/app)** on QDay's hosted
 devnet.
 
 ![The wallet](../docs/images/web-wallet.png)
@@ -16,10 +16,19 @@ pnpm dev                                  # local devnet (tools/devnet/local/up.
 VITE_QDAY_NETWORK=hosted pnpm dev         # QDay's hosted devnet, no setup needed
 ```
 
-Open `http://localhost:5173` in Chrome, Edge or Brave on desktop (Web Serial needs one of them).
+Open `http://localhost:5173/app` in Chrome, Edge or Brave on desktop (Web Serial needs one of them).
 **Try without a device** on the connect screen opens a demo wallet with its keys in the browser (below).
-`?mock` shows sample data without a device, and `?gallery` shows every state of the send dialog,
-including a button that plays the whole flow.
+`/app?mock` shows sample data without a device, and `/app?gallery` shows every state of the send
+dialog, including a button that plays the whole flow.
+
+| Path | Page |
+|---|---|
+| `/` | The landing page (`src/landing`): the device assembled in 3D from the repo's STL files, how it signs, and the measurements |
+| `/app` | The wallet |
+| `/tx/<hash>` | The built-in explorer |
+
+Each page loads as its own chunk, so the wallet never downloads the 3D scene. The landing page's
+models and screen images live in `public/landing`.
 
 | Network | RPC | Gateway | Test funds |
 |---|---|---|---|

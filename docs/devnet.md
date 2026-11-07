@@ -6,7 +6,7 @@ QDay runs on its own EIP-8141 devnet. The same chain setup runs in two places:
 |---|---|---|
 | Node RPC | `https://rpc-qday.unitlabs.xyz` | `http://127.0.0.1:8545` |
 | Gateway (frame transactions) | `https://gateway-qday.unitlabs.xyz/rpc` | `http://127.0.0.1:14337/rpc` |
-| Wallet | [qday.unitlabs.xyz](https://qday.unitlabs.xyz) | `pnpm dev` |
+| Wallet | [qday.unitlabs.xyz/app](https://qday.unitlabs.xyz/app), with the landing page at [qday.unitlabs.xyz](https://qday.unitlabs.xyz) | `pnpm dev`, then `/app` |
 | Start it | Always on ([deploy/coolify](../deploy/coolify)) | `tools/devnet/local/up.sh` |
 
 | Field | Value |

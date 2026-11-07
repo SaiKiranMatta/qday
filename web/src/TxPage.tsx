@@ -46,11 +46,11 @@ export function TxPage({ hash }: { hash: Hex }) {
   return (
     <div className="min-h-full">
       <header className="mx-auto flex w-full max-w-4xl items-center justify-between gap-4 px-5 py-6 sm:px-8">
-        <a href="/" className="flex items-baseline gap-3 rounded-lg" aria-label="QDay wallet">
+        <a href="/app" className="flex items-baseline gap-3 rounded-lg" aria-label="QDay wallet">
           <Wordmark className="text-3xl" />
           <span className="text-sm text-muted">Explorer</span>
         </a>
-        <a href="/" className="text-sm text-muted transition-colors hover:text-alabaster">
+        <a href="/app" className="text-sm text-muted transition-colors hover:text-alabaster">
           Open wallet
         </a>
       </header>
