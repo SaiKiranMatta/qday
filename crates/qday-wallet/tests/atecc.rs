@@ -1,6 +1,6 @@
 //! The ATECC608A driver and the counter built on it, against a model of the chip.
 //!
-//! The packets and CRCs are checked against values worked out from Microchip's CryptoAuthLib. The
+//! The packets and CRCs are checked against values worked out from Microchip's `CryptoAuthLib`. The
 //! model is written from the same source, so these tests can't prove the real chip agrees.
 
 mod common;
@@ -44,6 +44,10 @@ enum Power {
     Awake,
 }
 
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "each one is a separate fault a test can switch on"
+)]
 struct Chip {
     present: bool,
     power: Power,
@@ -110,14 +114,14 @@ impl Chip {
         self.commands.push(packet.to_vec());
         let body = &packet[1..];
         let (fields, crc) = body.split_at(body.len() - 2);
-        let result = if crc16(fields) != [crc[0], crc[1]] {
-            Err(CRC_ERROR)
-        } else {
+        let result = if crc16(fields) == [crc[0], crc[1]] {
             self.execute(
                 fields[1],
                 fields[2],
                 u16::from_le_bytes([fields[3], fields[4]]),
             )
+        } else {
+            Err(CRC_ERROR)
         };
         let mut reply = match result {
             Ok(data) => frame(&data),
