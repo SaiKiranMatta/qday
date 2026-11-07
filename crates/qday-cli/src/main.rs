@@ -2,6 +2,7 @@
 
 mod device;
 mod json;
+mod lockdown;
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
@@ -74,6 +75,8 @@ enum Command {
     DevicePubkey { port: String },
     #[command(flatten)]
     Stealth(StealthCommand),
+    #[command(flatten)]
+    Lockdown(LockdownCommand),
     /// Print the device's signing scheme
     DeviceScheme { port: String },
     /// Print the device's stored ML-DSA public key
@@ -104,6 +107,52 @@ enum Command {
 }
 
 /// ML-DSA keys and transfers.
+#[derive(Subcommand)]
+enum LockdownCommand {
+    /// Report the chip's security fuses. This only reads them
+    DeviceLockdown { port: String },
+    /// Print every lockdown command without running any
+    LockdownPlan {
+        #[command(flatten)]
+        inputs: lockdown::Inputs,
+        #[arg(long)]
+        port: String,
+    },
+    /// Make the keys and images. Nothing reaches a chip
+    LockdownPrepare(lockdown::Inputs),
+    /// Run the burn against simulated fuses. Nothing reaches a chip
+    LockdownRehearse {
+        #[command(flatten)]
+        inputs: lockdown::Inputs,
+        /// The file that holds the simulated fuses
+        #[arg(long)]
+        fuses: std::path::PathBuf,
+    },
+    /// Lock a real chip for good. There is no way back
+    LockdownBurn {
+        #[command(flatten)]
+        inputs: lockdown::Inputs,
+        #[arg(long)]
+        port: String,
+        /// The chip's MAC address, so only the chip you mean can be locked
+        #[arg(long)]
+        mac: String,
+    },
+}
+
+fn run_lockdown(command: LockdownCommand) -> Result<String> {
+    match command {
+        LockdownCommand::DeviceLockdown { port } => {
+            let (fuses, sealed) = device::open(&port)?.lockdown()?;
+            Ok(lockdown::report(&fuses, sealed))
+        }
+        LockdownCommand::LockdownPlan { inputs, port } => Ok(lockdown::plan(&inputs, &port)),
+        LockdownCommand::LockdownPrepare(inputs) => lockdown::prepare(&inputs),
+        LockdownCommand::LockdownRehearse { inputs, fuses } => lockdown::rehearse(&inputs, &fuses),
+        LockdownCommand::LockdownBurn { inputs, port, mac } => lockdown::burn(&inputs, &port, &mac),
+    }
+}
+
 #[derive(Subcommand)]
 enum MlCommand {
     /// Print an ML-DSA public key
@@ -536,6 +585,7 @@ fn run(command: Command) -> Result<String> {
             .to_string()),
         Command::DevicePubkey { port } => Ok(device::open(&port)?.status()?.line()),
         Command::Stealth(stealth) => run_stealth(stealth),
+        Command::Lockdown(lockdown) => run_lockdown(lockdown),
         Command::DeviceScheme { port } => {
             Ok(scheme_name(device::open(&port)?.scheme()?).to_string())
         }

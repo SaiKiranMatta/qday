@@ -8,6 +8,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use qday_mldsa::SIGNATURE_BYTES;
 use qday_wallet::frame::{Address, FrameTx, MlFrameTx};
 use qday_wallet::hex;
+use qday_wallet::lockdown::Fuses;
 use qday_wallet::protocol::{
     NextKey, PREFIX, Request, Response, error_code, parse_response, request_line, scheme_name,
 };
@@ -150,6 +151,14 @@ impl<P: Read + Write> Device<P> {
                 tree,
                 next,
             }),
+            _ => bail!("the device gave the wrong response"),
+        }
+    }
+
+    /// Asks for the chip's security fuses, and whether the wallet is using the seal.
+    pub fn lockdown(&mut self) -> Result<(Fuses, bool)> {
+        match self.hello(&Request::Lockdown)? {
+            Response::Lockdown { fuses, sealed } => Ok((fuses, sealed)),
             _ => bail!("the device gave the wrong response"),
         }
     }
@@ -313,6 +322,7 @@ mod tests {
     use std::io::{Error, ErrorKind, Read, Result, Write};
 
     use qday_wallet::frame::{Action, FrameTx, MlFrameTx};
+    use qday_wallet::lockdown::Fuses;
     use qday_wallet::protocol::{Request, Response, parse_request, response_line};
     use qday_wallet::settings::Scheme;
     use qday_wallet::stealth::StealthSpend;
@@ -490,6 +500,23 @@ mod tests {
             crate::json::ml_submission(&want, &vec![9; 2420]),
             "the submission carries the device's signature"
         );
+    }
+
+    #[test]
+    fn lockdown_asks_the_device_and_reads_its_answer() {
+        let fuses = Fuses {
+            secure_boot: true,
+            ..Fuses::default()
+        };
+        let mut fake = FakeDevice::new(vec![Some(Response::Lockdown {
+            fuses,
+            sealed: true,
+        })]);
+        let answer = Device::new(&mut fake)
+            .lockdown()
+            .expect("the device answers");
+        assert_eq!(answer, (fuses, true));
+        assert_eq!(fake.requests, [Request::Lockdown]);
     }
 
     #[test]

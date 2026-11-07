@@ -10,6 +10,7 @@ broadcast/
 # Secrets
 .env
 *.key
+*.pem
 mnemonic*.txt
 
 # OS / editors
