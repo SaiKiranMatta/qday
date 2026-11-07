@@ -96,7 +96,8 @@ In rough order of value for the people who would use it.
 4. **Batch payments.** Several transfers in one frame transaction and one signature, reviewed as a list
    on the device.
 5. **Hardware rollback protection.** A flash counter can be dumped and restored; an eFuse high-water
-   mark or a secure element closes that ([R8](risks-and-blockers.md)).
+   mark or a secure element closes that ([R8](risks-and-blockers.md)). The ATECC608A counter is written,
+   off by default, and still has to be proven on a real chip.
 6. **Tokens for ML-DSA accounts and private payments.** Both carry ETH only today.
 7. **No dev key in the loop.** On the devnet a funded dev key deploys ML-DSA accounts and submits
    private-payment claims. Anyone may already submit a claim and is repaid from the note, so a public

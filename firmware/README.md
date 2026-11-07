@@ -101,6 +101,37 @@ leaves it alone.
 
 Later starts should take about a second.
 
+## Secure element (off by default)
+
+An ATECC608A can hold the XMSS counter outside the flash, so restoring an old flash image can't
+rewind it. A normal build doesn't touch the chip or GPIO 4 and 5. This code has never run on a real
+chip.
+
+| ATECC608A pin | Connects to |
+|---|---|
+| 5, SDA | GPIO 5, with 4.7 kΩ to 3V3 |
+| 6, SCL | GPIO 4, with 4.7 kΩ to 3V3 |
+| 8, VCC | 3V3, with 100 nF to ground |
+| 4, GND | ground |
+
+Build with `--features atecc-probe` first. It only reads, and reports the chip's revision, its lock
+state and its counter as a log line every three seconds. Microchip's own test locks the config zone
+before using the counter, so a chip with an unlocked config may refuse it, and the report shows
+that. Locking can't be undone, and nothing here does it.
+
+`--features atecc-counter` then pairs the chip's counter 1 with the flash counter. They're kept
+level, the wallet uses the larger, and it signs nothing if either fails. Each signature moves the
+chip's counter for good, and it stops at 2,097,151. Both counters move on every signature, so a
+wallet keeps its place when the feature is turned on or off. A gap over 2048 between them stops
+signing, which is what a forged flash value looks like.
+
+Still open:
+
+- The I2C wires are unauthenticated, so someone on the bus can lie about the counter.
+- Someone who restores the flash and also swaps in a chip with a lower count rewinds the counter.
+- Each key's counter base sits in the flash with no secret behind it, so someone who can write the
+  flash can raise it and rewind the key index.
+
 ## Status light
 
 | Colour | Meaning |

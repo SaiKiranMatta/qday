@@ -82,7 +82,7 @@ weakness: the stealth-address scheme in ERC-5564 is built on secp256k1 too.
 | **Works today** | XMSS and its Solidity verifier; the EIP-8141 account with both locks and rotation; self-deploying accounts; ML-DSA-44 signing on the device, its account and factory; private payments (pay, find, claim); the device (decoding, approval, passcode, backup and restore, scheme switching, five themes); the web wallet (connect, create, send ETH and ERC-20, private payments, activity, explorer); a demo wallet in the browser, so anyone can try it without a device; the hosted devnet and wallet |
 | **Partly** | ML-DSA accounts send ETH only, and the devnet's dev key pays for deploying them, because the key is too large for the account to deploy itself. Private payments carry ETH only, the dev key relays claims (repaid from the note), and the one-time signer is an unreviewed variant, so test networks only. Key refresh and restore run from the device and the [CLI](crates/qday-cli), not yet from the web wallet |
 | **Simulated** | The quantum attacker in the demo |
-| **Not built** | Hardware rollback protection (eFuse or secure element), connecting other dApps, private token payments, an audit, mainnet |
+| **Not built** | Hardware rollback protection on a real board (an ATECC608A counter is written but off by default and untested on a chip), connecting other dApps, private token payments, an audit, mainnet |
 
 Details, and where to check each item, are in the [roadmap](docs/ROADMAP.md).
 
@@ -244,7 +244,8 @@ byte on this chain.
 - **The same address forever.** Keys 1008 to 1023 can only switch the account to a new tree.
 
 Not yet: the ESP32-S3 isn't a secure element, so a flash image can be dumped and restored; the chain's
-lock still refuses reuse, and an eFuse or secure-element counter is on the [roadmap](docs/ROADMAP.md).
+lock still refuses reuse. An ATECC608A counter is [written but off by default](firmware/README.md#secure-element-off-by-default),
+and has never run on a chip.
 For a private payment the device shows the amount and the pool, not the recipient, so a page that
 swaps the pasted private address can't be caught on the device. The one-time signer is an unreviewed
 variant of ML-DSA, and hiding who a payment is for rests on ML-KEM ciphertexts not revealing their

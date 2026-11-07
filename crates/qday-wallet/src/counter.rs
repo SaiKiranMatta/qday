@@ -23,6 +23,52 @@ pub trait OneWayCounter {
     fn advance(&mut self) -> Result<u32, CounterError>;
 }
 
+/// The most one counter of a pair may be moved at once. Well past any real gap, which is a wallet's
+/// signatures so far, and it stops a forged flash value from using up the chip's counter.
+pub const MAX_CATCH_UP: u32 = 2048;
+
+/// Two counters kept level, so going back needs both to go back. Reads as the larger, and if either
+/// fails nothing is signed: there's no falling back to the one that still works.
+pub struct PairedCounter<A, B> {
+    first: A,
+    second: B,
+}
+
+impl<A: OneWayCounter, B: OneWayCounter> PairedCounter<A, B> {
+    /// Pairs two counters. The first moves first, so a cut between them only skips a value.
+    pub fn new(first: A, second: B) -> Self {
+        Self { first, second }
+    }
+}
+
+impl<A: OneWayCounter, B: OneWayCounter> OneWayCounter for PairedCounter<A, B> {
+    fn value(&mut self) -> Result<u32, CounterError> {
+        Ok(self.first.value()?.max(self.second.value()?))
+    }
+
+    fn advance(&mut self) -> Result<u32, CounterError> {
+        let (first, second) = (self.first.value()?, self.second.value()?);
+        let value = first.max(second);
+        let target = value.checked_add(1).ok_or(CounterError)?;
+        if target - first.min(second) > MAX_CATCH_UP {
+            return Err(CounterError);
+        }
+        raise(&mut self.first, first, target)?;
+        raise(&mut self.second, second, target)?;
+        Ok(value)
+    }
+}
+
+/// Moves a counter from `from` up to `target`.
+fn raise(counter: &mut impl OneWayCounter, from: u32, target: u32) -> Result<(), CounterError> {
+    for expected in from..target {
+        if counter.advance()? != expected {
+            return Err(CounterError);
+        }
+    }
+    Ok(())
+}
+
 /// Bytes per log entry: the value, then its bitwise inverse.
 const ENTRY: usize = 8;
 /// Entries that fit in one sector.

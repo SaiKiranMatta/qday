@@ -6,6 +6,8 @@
 
 extern crate alloc;
 
+#[cfg(feature = "atecc-probe")]
+mod atecc;
 mod hardware;
 #[cfg(feature = "measure")]
 mod measure;
@@ -38,7 +40,13 @@ use mipidsi::{
 };
 use qday_ui::app::{App, Light};
 use qday_ui::fb::{Framebuffer, PIXELS};
+#[cfg(feature = "atecc-probe")]
+use qday_wallet::atecc::Atecc;
+#[cfg(feature = "atecc-counter")]
+use qday_wallet::atecc::ChipCounter;
 use qday_wallet::counter::FlashCounter;
+#[cfg(feature = "atecc-counter")]
+use qday_wallet::counter::PairedCounter;
 use qday_wallet::flash::{Aligned, layout};
 use qday_wallet::keystore::KeyStore;
 use qday_wallet::mlkey::MlKeyStore;
@@ -150,10 +158,26 @@ fn main() -> ! {
         storage: FlashStorage::new(peripherals.FLASH),
         psram: psram_range,
     }));
+    #[cfg(feature = "atecc-probe")]
+    let mut chip = Atecc::new(atecc::Wires::new(
+        peripherals.I2C0,
+        peripherals.GPIO5,
+        peripherals.GPIO4,
+    ));
+    #[cfg(feature = "atecc-probe")]
+    let mut chip_report = atecc::Report::run(&mut chip);
+    // Off unless built with `atecc-counter`, and then signing stops if the chip stops answering.
+    #[cfg(feature = "atecc-counter")]
+    let counter = PairedCounter::new(
+        ChipCounter::new(chip),
+        FlashCounter::new(&flash, layout::COUNTER),
+    );
+    #[cfg(not(feature = "atecc-counter"))]
+    let counter = FlashCounter::new(&flash, layout::COUNTER);
     let wallet = Wallet::open(
         KeyStore::new(&flash),
         Passcode::new(&flash, layout::PASSCODE),
-        FlashCounter::new(&flash, layout::COUNTER),
+        counter,
         Settings::new(&flash),
         MlKeyStore::new(&flash),
         now_ms(),
@@ -196,6 +220,8 @@ fn main() -> ! {
         app.poll(&mut board, held, touch.read());
         #[cfg(feature = "measure")]
         report.tick(&mut board.usb);
+        #[cfg(feature = "atecc-probe")]
+        chip_report.tick(&mut board.usb);
         delay.delay_millis(POLL_MS);
     }
 }

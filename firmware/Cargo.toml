@@ -8,6 +8,10 @@ publish = false
 [features]
 # Paints the stack, times screen redraws, and reports both as log lines.
 measure = ["esp-alloc/internal-heap-stats"]
+# Reads the ATECC608A once at start and reports it as a log line. Changes nothing on the chip.
+atecc-probe = []
+# Also keeps the XMSS counter on the ATECC608A. Moves the chip's counter for good on each signature.
+atecc-counter = ["atecc-probe"]
 
 [dependencies]
 embedded-graphics = "0.8.2"
