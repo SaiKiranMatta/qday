@@ -21,3 +21,7 @@ mnemonic*.txt
 node_modules/
 dist/
 *.tsbuildinfo
+
+# Impeccable working files: captures, decision rounds, caches. The product record and surface briefs stay.
+web/.impeccable/*
+!web/.impeccable/surfaces/
