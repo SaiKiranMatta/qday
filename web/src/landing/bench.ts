@@ -210,7 +210,7 @@ function partSpecs(): PartSpec[] {
     {
       id: "breadboard",
       build: () => box(0, 43.8, 0, 82.5, 0, 8.5, COLOURS.breadboard, 0.85),
-      bench: { x: -96, y: 22, turn: 0 },
+      bench: { x: -96, y: 30, turn: 0 },
       window: [0.13, 0.22],
       lift: 44,
     },
@@ -318,6 +318,9 @@ const SHOTS: [number, V3, V3][] = [
   [1.0, [54, 42, 10], [150, -262, 236]],
 ];
 
+// How large the bench is drawn, in pixels per mm, when its labels show at full size: a 1440 x 900 window.
+const LABEL_PX_PER_MM = 2.1;
+
 // The screen's story: [progress at which the next image starts fading in, fade length, image].
 const SCREENS: [number, number, number][] = [
   [0.56, 0.03, 1], // review
@@ -412,6 +415,7 @@ export function createBench(options: BenchOptions): Bench {
   glow.position.set(75.8, 59.03, 34);
 
   const placed: Placed[] = [];
+  const crowded = new Set<string>(); // Labels hidden because they'd touch another.
   let cap4: THREE.Object3D | null = null;
   let disposed = false;
 
@@ -517,20 +521,43 @@ export function createBench(options: BenchOptions): Bench {
     camera.lookAt(targetWorld);
     camera.updateMatrixWorld();
 
-    // Part labels follow their parts until the parts leave the bench.
+    // Part labels follow their parts until the parts leave the bench. They shrink with the bench on
+    // smaller windows, and where two would still touch, the one listed later gives way.
     const labelAlpha = 1 - span(p, 0.03, 0.09);
-    for (const { id, element } of labels) {
+    const toScreen = (v: THREE.Vector3) => {
+      const ndc = toWorld(v).project(camera);
+      return { x: ((ndc.x + 1) / 2) * width, y: ((1 - ndc.y) / 2) * height };
+    };
+    const mm0 = toScreen(new THREE.Vector3(40, 22, MAT_Z));
+    const mm10 = toScreen(new THREE.Vector3(50, 22, MAT_Z));
+    const scale = Math.min(1, Math.max(0.8, Math.hypot(mm10.x - mm0.x, mm10.y - mm0.y) / 10 / LABEL_PX_PER_MM));
+    const sizes = labels.map(({ element }) => ({ w: element.offsetWidth, h: element.offsetHeight }));
+    const taken: { left: number; right: number; top: number; bottom: number }[] = [];
+    for (const [i, { id, element }] of labels.entries()) {
       const part = placed.find((entry) => entry.spec.id === id);
       if (!part || labelAlpha <= 0) {
         element.style.opacity = "0";
         continue;
       }
-      const anchor = toWorld(part.label);
-      anchor.project(camera);
-      const x = ((anchor.x + 1) / 2) * canvas.clientWidth;
-      const y = ((1 - anchor.y) / 2) * canvas.clientHeight;
-      element.style.opacity = String(labelAlpha);
-      element.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
+      const { x, y } = toScreen(part.label);
+      const half = (sizes[i]!.w * scale) / 2;
+      // The text alone: the bottom padding is only the gap to the part.
+      const box = { left: x - half, right: x + half, top: y - sizes[i]!.h * scale, bottom: y - 6 * scale };
+      // A label that gave way needs more room to come back, so the bench's drift can't make it flicker.
+      const pad = crowded.has(id) ? 10 : 0;
+      const clear = !taken.some(
+        (t) =>
+          box.left < t.right + 4 + pad &&
+          t.left < box.right + 4 + pad &&
+          box.top < t.bottom + pad / 2 &&
+          t.top < box.bottom + pad / 2,
+      );
+      if (clear) {
+        taken.push(box);
+        crowded.delete(id);
+      } else crowded.add(id);
+      element.style.opacity = clear ? String(labelAlpha) : "0";
+      element.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) scale(${scale.toFixed(3)}) translate(-50%, -100%)`;
     }
   }
 
