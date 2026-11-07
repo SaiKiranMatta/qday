@@ -9,6 +9,7 @@ use qday_mldsa::{PUBLIC_KEY_BYTES, SIGNATURE_BYTES};
 use qday_xmss::{Hash, SIG_BYTES};
 
 use crate::hex;
+use crate::lockdown::Fuses;
 use crate::settings::Scheme;
 use crate::stealth::{META_ADDRESS_BYTES, StealthSpend};
 use crate::wallet::WalletError;
@@ -27,6 +28,8 @@ pub enum Request {
     Scheme,
     /// Report the stored ML-DSA public key.
     MlPubKey,
+    /// Report the chip's security fuses. This only reads them.
+    Lockdown,
     /// Hand over the stealth address, once the person agrees.
     StealthAddress,
     /// Hand over the view seed, once the person agrees and enters the passcode.
@@ -73,6 +76,13 @@ pub enum Response {
     Scheme(Scheme),
     /// The 1,312-byte ML-DSA public key.
     MlPubKey(Vec<u8>),
+    /// The chip's security fuses.
+    Lockdown {
+        /// The fuses as read from the chip.
+        fuses: Fuses,
+        /// Whether the wallet is sealing its secrets with the chip's key.
+        sealed: bool,
+    },
     /// The 4,160-byte stealth address.
     StealthAddress(Vec<u8>),
     /// The view seed.
@@ -132,6 +142,7 @@ fn parse_body(body: &str) -> Option<Request> {
     let request = match words.next()? {
         "PUBKEY" => Request::PubKey,
         "SCHEME" => Request::Scheme,
+        "LOCKDOWN" => Request::Lockdown,
         "MLPUBKEY" => Request::MlPubKey,
         "STEALTHADDRESS" => Request::StealthAddress,
         "VIEWKEY" => Request::ViewKey,
@@ -173,6 +184,7 @@ pub fn request_line(request: &Request) -> String {
     match request {
         Request::PubKey => format!("{PREFIX}PUBKEY\n"),
         Request::Scheme => format!("{PREFIX}SCHEME\n"),
+        Request::Lockdown => format!("{PREFIX}LOCKDOWN\n"),
         Request::MlPubKey => format!("{PREFIX}MLPUBKEY\n"),
         Request::StealthAddress => format!("{PREFIX}STEALTHADDRESS\n"),
         Request::ViewKey => format!("{PREFIX}VIEWKEY\n"),
@@ -229,6 +241,11 @@ pub fn response_line(response: &Response) -> String {
         ),
         Response::Scheme(scheme) => format!("{PREFIX}SCHEME {}\n", scheme_name(*scheme)),
         Response::MlPubKey(key) => format!("{PREFIX}MLPUBKEY {}\n", hex::encode(key)),
+        Response::Lockdown { fuses, sealed } => format!(
+            "{PREFIX}LOCKDOWN {} {}\n",
+            hex::encode(&fuses.to_bytes()),
+            u8::from(*sealed),
+        ),
         Response::StealthAddress(address) => {
             format!("{PREFIX}STEALTHADDRESS {}\n", hex::encode(address))
         }
@@ -271,6 +288,18 @@ pub fn parse_response(line: &str) -> Option<Response> {
                 _ => return None,
             };
             words.next().is_none().then_some(Response::Scheme(scheme))
+        }
+        "LOCKDOWN" => {
+            let fuses = Fuses::from_bytes(&hex::decode_array(words.next()?)?);
+            let sealed = match words.next()? {
+                "0" => false,
+                "1" => true,
+                _ => return None,
+            };
+            words
+                .next()
+                .is_none()
+                .then_some(Response::Lockdown { fuses, sealed })
         }
         "MLPUBKEY" => {
             let key = hex::decode(words.next()?)?;

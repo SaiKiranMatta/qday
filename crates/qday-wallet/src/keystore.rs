@@ -1,12 +1,19 @@
 //! The two key slots. Each holds a tree and a header, so a power cut always leaves one working.
 
+use alloc::boxed::Box;
+
 use qday_xmss::{
     HEIGHT, Hash, Hasher, KeySet, LEAVES, NODES, PublicKey, Tree, keccak256, node_slot,
 };
+use zeroize::Zeroize;
 
 use crate::flash::{Flash, SECTOR, layout};
+use crate::seal::Sealer;
 
 const MAGIC: &[u8; 8] = b"QDAYKEY1";
+/// A header whose seed field holds the seed masked with the chip's key.
+const SEALED_MAGIC: &[u8; 8] = b"QDAYKEY2";
+const SEAL_DOMAIN: &[u8] = b"QDAY-SEAL-V1";
 /// Bytes of a header covered by its check.
 const HEADER_BODY: usize = 144;
 /// A whole header: the body, then the keccak256 of the body.
@@ -29,6 +36,7 @@ struct Header {
 
 impl Header {
     fn new(
+        magic: [u8; 8],
         seed: &Hash,
         tree_number: u32,
         first_index: u32,
@@ -37,7 +45,7 @@ impl Header {
         nodes_hash: &Hash,
     ) -> Self {
         let mut bytes = [0; HEADER];
-        bytes[..8].copy_from_slice(MAGIC);
+        bytes[..8].copy_from_slice(&magic);
         bytes[8..40].copy_from_slice(seed);
         bytes[40..44].copy_from_slice(&tree_number.to_be_bytes());
         bytes[44..48].copy_from_slice(&first_index.to_be_bytes());
@@ -49,8 +57,8 @@ impl Header {
         Self { bytes }
     }
 
-    fn parse(bytes: [u8; HEADER]) -> Option<Self> {
-        let valid = bytes.starts_with(MAGIC)
+    fn parse(bytes: [u8; HEADER], magic: [u8; 8]) -> Option<Self> {
+        let valid = bytes.starts_with(&magic)
             && keccak256(&[&bytes[..HEADER_BODY]])[..] == bytes[HEADER_BODY..];
         valid.then_some(Self { bytes })
     }
@@ -67,6 +75,7 @@ impl Header {
         hash
     }
 
+    /// The seed field, which is masked in a sealed header.
     fn seed(&self) -> Hash {
         self.hash(8)
     }
@@ -171,12 +180,69 @@ impl Slots {
 /// Reads and writes the key slots.
 pub struct KeyStore<F> {
     flash: F,
+    sealer: Option<Box<dyn Sealer>>,
 }
 
 impl<F: Flash> KeyStore<F> {
     /// A store on `flash`.
     pub fn new(flash: F) -> Self {
-        Self { flash }
+        Self {
+            flash,
+            sealer: None,
+        }
+    }
+
+    /// Seals the seed with the chip's key. A sealed store and a plain one ignore each other's
+    /// keys, so a seed can't be swapped in or out of the seal by editing the flash.
+    #[must_use]
+    pub fn sealed_by(mut self, sealer: Box<dyn Sealer>) -> Self {
+        self.sealer = Some(sealer);
+        self
+    }
+
+    /// Whether seeds are sealed.
+    #[must_use]
+    pub fn is_sealed(&self) -> bool {
+        self.sealer.is_some()
+    }
+
+    fn magic(&self) -> [u8; 8] {
+        if self.is_sealed() {
+            *SEALED_MAGIC
+        } else {
+            *MAGIC
+        }
+    }
+
+    /// The mask for one key. The key's public half picks it, so no two seeds share a mask, and
+    /// nothing new has to be stored. A plain store's mask is all zeros.
+    fn mask(&mut self, key: &PublicKey) -> Result<Hash, StoreError> {
+        let Some(sealer) = &mut self.sealer else {
+            return Ok([0; 32]);
+        };
+        let mut message = [0; SEAL_DOMAIN.len() + 64];
+        let (domain, rest) = message.split_at_mut(SEAL_DOMAIN.len());
+        let (root, pub_seed) = rest.split_at_mut(32);
+        domain.copy_from_slice(SEAL_DOMAIN);
+        root.copy_from_slice(&key.root);
+        pub_seed.copy_from_slice(&key.pub_seed);
+        sealer.keyed_hash(&message).map_err(|_| StoreError)
+    }
+
+    /// Whether neither slot has ever finished a header of any kind.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the flash can't be read.
+    pub fn is_blank(&mut self) -> Result<bool, StoreError> {
+        for slot in 0..2 {
+            let mut magic = [0; MAGIC.len()];
+            self.read(slot_at(slot), &mut magic)?;
+            if magic.iter().any(|&byte| byte != 0xFF) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Reads both slots. A slot with any damage is treated as empty.
@@ -241,7 +307,7 @@ impl<F: Flash> KeyStore<F> {
     fn header(&mut self, slot: u8) -> Result<Option<Header>, StoreError> {
         let mut bytes = [0; HEADER];
         self.read(slot_at(slot), &mut bytes)?;
-        Ok(Header::parse(bytes))
+        Ok(Header::parse(bytes, self.magic()))
     }
 
     /// The newest activation record of a slot.
@@ -280,6 +346,15 @@ impl<F: Flash> KeyStore<F> {
         first_index: u32,
         tree: &Tree,
     ) -> Result<(), StoreError> {
+        let keys = KeySet::derive(seed, tree_number);
+        let key = PublicKey {
+            root: tree.root(),
+            pub_seed: *keys.pub_seed(),
+        };
+        // Before anything is erased, so a chip that can't seal changes nothing.
+        let mut stored = self.mask(&key)?;
+        xor_into(&mut stored, seed);
+
         let start = slot_at(slot);
         for sector in 0..SECTORS_PER_SLOT {
             self.flash
@@ -297,15 +372,16 @@ impl<F: Flash> KeyStore<F> {
                 .map_err(|_| StoreError)?;
         }
 
-        let keys = KeySet::derive(seed, tree_number);
         let header = Header::new(
-            seed,
+            self.magic(),
+            &stored,
             tree_number,
             first_index,
-            &tree.root(),
-            keys.pub_seed(),
+            &key.root,
+            &key.pub_seed,
             &keccak256(&[nodes]),
         );
+        stored.zeroize();
         self.flash
             .write(start, &header.bytes)
             .map_err(|_| StoreError)
@@ -335,9 +411,22 @@ impl<F: Flash> KeyStore<F> {
     ///
     /// # Errors
     ///
-    /// Fails if the flash can't be read.
+    /// Fails if the flash can't be read, or if a sealed seed doesn't open with this chip's key. A
+    /// wrong seed never comes back, because keys made from one would sign for nobody.
     pub fn seed(&mut self, slot: u8) -> Result<Hash, StoreError> {
-        Ok(self.header(slot)?.ok_or(StoreError)?.seed())
+        let header = self.header(slot)?.ok_or(StoreError)?;
+        if !self.is_sealed() {
+            return Ok(header.seed());
+        }
+        let key = header.key();
+        let mut seed = self.mask(&key)?;
+        xor_into(&mut seed, &header.seed());
+        if KeySet::derive(&seed, header.tree_number()).pub_seed() == &key.pub_seed {
+            Ok(seed)
+        } else {
+            seed.zeroize();
+            Err(StoreError)
+        }
     }
 
     /// Reads the auth path for key `index` of `slot`.
@@ -375,6 +464,12 @@ impl<F: Flash> KeyStore<F> {
             }
         }
         Ok(())
+    }
+}
+
+fn xor_into(target: &mut Hash, other: &Hash) {
+    for (byte, mask) in target.iter_mut().zip(other) {
+        *byte ^= mask;
     }
 }
 

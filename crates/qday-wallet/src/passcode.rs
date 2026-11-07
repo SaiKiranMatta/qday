@@ -1,10 +1,13 @@
 //! The passcode, with failure counts that a power cut can't dodge.
 
+use alloc::boxed::Box;
+
 use qday_xmss::{Hash, keccak256};
 
 use crate::flash::{Flash, SECTOR};
 use crate::keystore::StoreError;
 use crate::rng::Rng;
+use crate::seal::Sealer;
 
 /// Digits in a passcode.
 pub const CODE_DIGITS: usize = 6;
@@ -15,7 +18,11 @@ pub const MAX_FAILURES: u32 = 10;
 pub type Code = [u8; CODE_DIGITS];
 
 const MAGIC: &[u8; 8] = b"QDAYPIN1";
+/// A record whose hash needs the chip's key, so a copy of the flash can't be tested against
+/// guesses and a record for a known code can't be written in from outside.
+const SEALED_MAGIC: &[u8; 8] = b"QDAYPIN2";
 const DOMAIN: &[u8] = b"QDAY-PIN-V1";
+const SEALED_DOMAIN: &[u8] = b"QDAY-PIN-V2";
 const SALT_BYTES: usize = 16;
 /// Bytes of a record covered by its check.
 const RECORD_BODY: usize = 64;
@@ -52,24 +59,20 @@ struct Loaded {
     next_entry: Option<usize>,
 }
 
-fn hash_code(salt: &[u8; SALT_BYTES], code: Code) -> Hash {
-    let digits = code.map(|digit| b'0' + digit);
-    keccak256(&[DOMAIN, salt, &digits])
-}
-
 fn same_in_constant_time(left: &Hash, right: &Hash) -> bool {
     let difference = left.iter().zip(right).fold(0, |all, (a, b)| all | (a ^ b));
     difference == 0
 }
 
 fn record_bytes(
+    magic: [u8; 8],
     sequence: u32,
     failures: u32,
     salt: &[u8; SALT_BYTES],
     hash: &Hash,
 ) -> [u8; RECORD] {
     let mut bytes = [0; RECORD];
-    bytes[..8].copy_from_slice(MAGIC);
+    bytes[..8].copy_from_slice(&magic);
     bytes[8..12].copy_from_slice(&sequence.to_be_bytes());
     bytes[12..16].copy_from_slice(&failures.to_be_bytes());
     bytes[16..32].copy_from_slice(salt);
@@ -137,6 +140,7 @@ pub struct Passcode<F> {
     flash: F,
     base: u32,
     locked_until: u64,
+    sealer: Option<Box<dyn Sealer>>,
 }
 
 impl<F: Flash> Passcode<F> {
@@ -146,7 +150,48 @@ impl<F: Flash> Passcode<F> {
             flash,
             base,
             locked_until: 0,
+            sealer: None,
         }
+    }
+
+    /// Hashes passcodes with the chip's key. A plain record then doesn't count as a passcode.
+    #[must_use]
+    pub fn sealed_by(mut self, sealer: Box<dyn Sealer>) -> Self {
+        self.sealer = Some(sealer);
+        self
+    }
+
+    fn magic(&self) -> [u8; 8] {
+        if self.sealer.is_some() {
+            *SEALED_MAGIC
+        } else {
+            *MAGIC
+        }
+    }
+
+    fn hash_code(&mut self, salt: &[u8; SALT_BYTES], code: Code) -> Result<Hash, StoreError> {
+        let digits = code.map(|digit| b'0' + digit);
+        let Some(sealer) = &mut self.sealer else {
+            return Ok(keccak256(&[DOMAIN, salt, &digits]));
+        };
+        let mut message = [0; SEALED_DOMAIN.len() + SALT_BYTES + CODE_DIGITS];
+        let (domain, rest) = message.split_at_mut(SEALED_DOMAIN.len());
+        let (salt_part, digit_part) = rest.split_at_mut(SALT_BYTES);
+        domain.copy_from_slice(SEALED_DOMAIN);
+        salt_part.copy_from_slice(salt);
+        digit_part.copy_from_slice(&digits);
+        sealer.keyed_hash(&message).map_err(|_| StoreError)
+    }
+
+    fn fresh_hash(
+        &mut self,
+        code: Code,
+        rng: &mut impl Rng,
+    ) -> Result<([u8; SALT_BYTES], Hash), StoreError> {
+        let mut salt = [0; SALT_BYTES];
+        rng.fill(&mut salt);
+        let hash = self.hash_code(&salt, code)?;
+        Ok((salt, hash))
     }
 
     /// Whether a passcode has been created.
@@ -192,7 +237,7 @@ impl<F: Flash> Passcode<F> {
         if self.exists()? {
             return Err(StoreError);
         }
-        let (salt, hash) = fresh_hash(*code, rng);
+        let (salt, hash) = self.fresh_hash(*code, rng)?;
         self.erase(0)?;
         self.write_record(0, 1, 0, &salt, &hash)
     }
@@ -209,7 +254,7 @@ impl<F: Flash> Passcode<F> {
         rng: &mut impl Rng,
     ) -> Result<(), StoreError> {
         let loaded = self.load()?.ok_or(StoreError)?;
-        let (salt, hash) = fresh_hash(*code, rng);
+        let (salt, hash) = self.fresh_hash(*code, rng)?;
         self.move_to_other_sector(&loaded, 0, &salt, &hash)
     }
 
@@ -238,7 +283,8 @@ impl<F: Flash> Passcode<F> {
         // The failure is on record before anyone can learn whether the code was right.
         self.write_mark(mark_at, FAIL_MARK)?;
 
-        if same_in_constant_time(&hash_code(&loaded.salt, *code), &loaded.hash) {
+        let entered = self.hash_code(&loaded.salt, *code)?;
+        if same_in_constant_time(&entered, &loaded.hash) {
             self.write_mark(mark_at + 1, OK_MARK)?;
             self.locked_until = 0;
             return Ok(Attempt::Correct(Proof::new()));
@@ -308,7 +354,7 @@ impl<F: Flash> Passcode<F> {
         hash: &Hash,
     ) -> Result<(), StoreError> {
         let offset = self.sector_at(sector);
-        let bytes = record_bytes(sequence, failures, salt, hash);
+        let bytes = record_bytes(self.magic(), sequence, failures, salt, hash);
         self.flash.write(offset, &bytes).map_err(|_| StoreError)
     }
 
@@ -335,7 +381,7 @@ impl<F: Flash> Passcode<F> {
             self.flash
                 .read(offset, &mut bytes)
                 .map_err(|_| StoreError)?;
-            let valid = bytes.starts_with(MAGIC)
+            let valid = bytes.starts_with(&self.magic())
                 && keccak256(&[&bytes[..RECORD_BODY]])[..] == bytes[RECORD_BODY..];
             if valid && newest.is_none_or(|(_, best)| sequence_of(&bytes) > sequence_of(&best)) {
                 newest = Some((sector, bytes));
@@ -386,11 +432,4 @@ fn word(bytes: &[u8; RECORD], at: usize) -> [u8; 4] {
 
 fn sequence_of(bytes: &[u8; RECORD]) -> u32 {
     u32::from_be_bytes(word(bytes, 8))
-}
-
-fn fresh_hash(code: Code, rng: &mut impl Rng) -> ([u8; SALT_BYTES], Hash) {
-    let mut salt = [0; SALT_BYTES];
-    rng.fill(&mut salt);
-    let hash = hash_code(&salt, code);
-    (salt, hash)
 }

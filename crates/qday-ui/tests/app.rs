@@ -18,14 +18,16 @@ use qday_wallet::flash::layout;
 use qday_wallet::frame::{Action, CHAIN_ID, FrameTx, MlFrameTx, StealthNote};
 use qday_wallet::hex;
 use qday_wallet::keystore::KeyStore;
+use qday_wallet::lockdown::{Fuses, HMAC_UP};
 use qday_wallet::mlkey::MlKeyStore;
 use qday_wallet::passcode::{Attempt, Code, Passcode};
 use qday_wallet::protocol::{Line, Request, Response, parse_response, request_line};
+use qday_wallet::seal::{SealError, Sealer};
 use qday_wallet::settings::{CROSSES, Calibration, Scheme, Settings};
 use qday_wallet::stealth::{CIPHERTEXT_BYTES, StealthSpend, pay_to, view_seed_for};
 use qday_wallet::tokens;
 use qday_wallet::wallet::{MAIN_ACCOUNT, Wallet, WalletError};
-use qday_xmss::{PublicKey, keccak256, verify};
+use qday_xmss::{Hash, PublicKey, keccak256, verify};
 
 const CODE: Code = [1, 2, 3, 4, 5, 6];
 const OTHER: Code = [6, 5, 4, 3, 2, 1];
@@ -47,9 +49,14 @@ struct FakeHost {
     capture: bool,
     frame: Vec<u16>,
     at_last_send: Option<Vec<u16>>,
+    fuses: Fuses,
 }
 
 impl Host for FakeHost {
+    fn fuses(&mut self) -> Fuses {
+        self.fuses
+    }
+
     fn now_ms(&mut self) -> u64 {
         self.now
     }
@@ -597,6 +604,108 @@ fn ml_rig() -> Rig {
         .expect("the flash is healthy");
     let (host, app) = boot(&flash, 11, false);
     Rig { flash, host, app }
+}
+
+/// Stands in for the chip's HMAC.
+#[derive(Clone, Copy)]
+struct ChipKey;
+
+impl Sealer for ChipKey {
+    fn keyed_hash(&mut self, message: &[u8]) -> Result<Hash, SealError> {
+        Ok(keccak256(&[b"chip", message]))
+    }
+}
+
+fn boot_sealed(flash: &SimFlash) -> Rig {
+    let mut host = FakeHost {
+        fuses: Fuses {
+            key_purposes: [0, 0, HMAC_UP, 0, 0, 0],
+            ..Fuses::default()
+        },
+        ..FakeHost::default()
+    };
+    let wallet = Wallet::open(
+        KeyStore::new(flash.clone()).sealed_by(Box::new(ChipKey)),
+        Passcode::new(flash.clone(), layout::PASSCODE).sealed_by(Box::new(ChipKey)),
+        FlashCounter::new(flash.clone(), layout::COUNTER),
+        Settings::new(flash.clone()),
+        MlKeyStore::new(flash.clone()),
+        0,
+    )
+    .expect("the flash is healthy");
+    let settings = Settings::new(flash.clone());
+    let app = App::start(
+        wallet,
+        settings,
+        Framebuffer::new(),
+        TestRng(3),
+        false,
+        &mut host,
+    );
+    Rig {
+        flash: flash.clone(),
+        host,
+        app,
+    }
+}
+
+/// A flash that has only been calibrated.
+fn calibrated() -> SimFlash {
+    let flash = SimFlash::new();
+    Settings::new(flash.clone())
+        .set_calibration(&Calibration::factory())
+        .expect("the flash is healthy");
+    flash
+}
+
+#[test]
+fn a_sealed_device_asks_for_the_passcode_before_it_makes_keys() {
+    let flash = calibrated();
+    let mut rig = boot_sealed(&flash);
+    assert_eq!(rig.host.restarts, 0);
+    assert_eq!(rig.app.screen_name(), "passcode");
+
+    rig.enter(CODE);
+    rig.enter(CODE);
+    assert_eq!(rig.host.restarts, 1);
+
+    let rig = boot_sealed(&flash);
+    assert_eq!(rig.app.screen_name(), "wallet");
+    assert_ne!(rig.app.shown_key(), &[0; 32]);
+}
+
+#[test]
+fn an_unsealed_device_still_makes_keys_first() {
+    let flash = calibrated();
+    let (host, _app) = boot(&flash, 3, false);
+    assert_eq!(host.restarts, 1);
+}
+
+#[test]
+fn lockdown_reports_the_fuses_and_the_seal() {
+    let mut rig = boot_sealed(&calibrated());
+    let fuses = rig.host.fuses;
+    rig.request(&Request::Lockdown);
+    assert_eq!(
+        rig.last_response(),
+        Response::Lockdown {
+            fuses,
+            sealed: true
+        }
+    );
+}
+
+#[test]
+fn lockdown_reports_an_unsealed_wallet() {
+    let mut rig = rig();
+    rig.request(&Request::Lockdown);
+    assert_eq!(
+        rig.last_response(),
+        Response::Lockdown {
+            fuses: Fuses::default(),
+            sealed: false
+        }
+    );
 }
 
 #[test]

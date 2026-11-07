@@ -152,11 +152,23 @@ impl<F: Flash, C: OneWayCounter> Wallet<F, C> {
         }
         wallet.passcode.on_boot(now_ms)?;
         wallet.scheme = wallet.settings.scheme()?;
+        // Keys with no passcode can only be a setup that never finished or an erased passcode. On
+        // a sealed wallet the passcode always comes first, so here it can only be the second.
+        // Whoever erased it must not get to choose a new one and use these keys.
+        if wallet.is_sealed() && !wallet.passcode.exists()? && !wallet.keys.is_blank()? {
+            wallet.erase()?;
+        }
         wallet.slots = wallet.keys.scan()?;
         if let (None, Some(prepared)) = (wallet.slots.active, wallet.slots.prepared) {
             wallet.switch_to(prepared.slot)?;
         }
         Ok(wallet)
+    }
+
+    /// Whether the seed and the passcode are sealed with a key in the chip.
+    #[must_use]
+    pub fn is_sealed(&self) -> bool {
+        self.keys.is_sealed()
     }
 
     /// Whether a key is ready to use.

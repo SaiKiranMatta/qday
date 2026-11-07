@@ -9,6 +9,7 @@ use qday_wallet::counter::OneWayCounter;
 use qday_wallet::flash::Flash;
 use qday_wallet::frame::{Action as TxAction, Address, CHAIN_ID, FrameTx, MlFrameTx};
 use qday_wallet::input::{APPROVAL_TIMEOUT_MS, Approval, Debouncer, Decision, KeyState, Role};
+use qday_wallet::lockdown::Fuses;
 use qday_wallet::passcode::{Attempt, CODE_DIGITS, Code, MAX_FAILURES, Proof, shuffled_digits};
 use qday_wallet::protocol::{Line, NextKey, Request, Response, parse_request, response_line};
 use qday_wallet::rng::Rng;
@@ -71,6 +72,10 @@ pub trait Host {
     fn pause(&mut self, ms: u32);
     /// Restarts the device. On hardware this doesn't return.
     fn restart(&mut self);
+    /// Reads the chip's security fuses. Hardware with none to read reports a new chip.
+    fn fuses(&mut self) -> Fuses {
+        Fuses::default()
+    }
 }
 
 const RESULT_MS: u64 = 2500;
@@ -746,6 +751,12 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
 
     /// Continues the first boot, or goes to the wallet.
     fn after_calibration(&mut self, host: &mut impl Host) {
+        // On a sealed device the passcode comes first, so keys with no passcode can't be normal.
+        if self.wallet.is_sealed() && self.wallet.passcode().exists() == Ok(false) {
+            let now = host.now_ms();
+            self.ask_passcode(Purpose::Create, None, now);
+            return;
+        }
         if !self.wallet.has_key() {
             let lines = [
                 "Building your 1,024 keys.",
@@ -943,7 +954,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             Purpose::CreateConfirm(first) if first == code => {
                 let created = self.wallet.passcode().create(&code, &mut self.rng);
                 if created.is_ok() {
-                    self.go_home(Tab::Home);
+                    self.after_calibration(host);
                 } else {
                     self.show_notice("Device error", "Saving the passcode failed.");
                 }
@@ -1625,6 +1636,13 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
             Some(Ok(Request::Scheme)) => {
                 Self::respond(host, &Response::Scheme(self.wallet.scheme()));
             }
+            Some(Ok(Request::Lockdown)) => {
+                let response = Response::Lockdown {
+                    fuses: host.fuses(),
+                    sealed: self.wallet.is_sealed(),
+                };
+                Self::respond(host, &response);
+            }
             Some(Ok(Request::MlPubKey)) => {
                 let response = self
                     .wallet
@@ -1662,7 +1680,7 @@ impl<F: Flash, C: OneWayCounter, R: Rng> App<F, C, R> {
     fn handle(&mut self, host: &mut impl Host, request: Request) {
         let now_ms = host.now_ms();
         match request {
-            Request::PubKey | Request::Scheme | Request::MlPubKey => {}
+            Request::PubKey | Request::Scheme | Request::MlPubKey | Request::Lockdown => {}
             Request::StealthAddress => self.ask_to_share(host, Sharing::Address, now_ms),
             Request::ViewKey => self.ask_to_share(host, Sharing::ViewKey, now_ms),
             Request::SpendStealth(spend) => {
