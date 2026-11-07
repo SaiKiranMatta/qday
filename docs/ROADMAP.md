@@ -59,7 +59,9 @@ hold real funds. Everything under **Built** runs now; each line points at where 
 
 ### The web wallet
 
-- **Live at [qday.unitlabs.xyz](https://qday.unitlabs.xyz)**, against QDay's own hosted devnet
+- **A landing page at [qday.unitlabs.xyz](https://qday.unitlabs.xyz)** that assembles the device from the repo's
+  real case files in 3D, walks through how it signs, and links to the wallet (`web/src/landing`).
+- **Live at [qday.unitlabs.xyz/app](https://qday.unitlabs.xyz/app)**, against QDay's own hosted devnet
   (`web/`).
 - **Connects over Web Serial**: no browser extension, no key in the browser.
 - **Account setup in two clicks**: get test ETH, then create the account from the device.

@@ -35,7 +35,7 @@ Built at ETHGlobal Mumbai (November 2026). A prototype: not audited, not for rea
 | Private payments: a one-time key per payment from X-Wing; the view key finds payments and can't spend them | `crates/qday-wallet/src/stealth.rs`, `crates/qday-mldsa/src/stealth.rs` | `cargo test -p qday-mldsa --test stealth`, `cargo test -p qday-wallet --test stealth --test stealth_pay` |
 | The pool pays a note once, for the whole note, to the address the device signed for | `contracts/src/QDayLatticePool.sol`, its verifier `contracts/mldsa/src/MLDSA44InlineVerifier.sol` | `forge test --match-contract QDayLatticePoolTest` |
 | Anyone can try it without a device: a demo signer in the browser that never signs below the chain's `nextIndex` | `packages/frame/src/demo.ts` (`DemoSigner`), `web/src/lib/demo.ts`, `crates/qday-wasm` | `pnpm --filter @qday/frame test` (`test/demo.test.ts`) |
-| It works end to end on a real chain | Hosted devnet (`deploy/coolify`), wallet (`web/`), demos (`scripts/mldsa-demo.sh`, `scripts/stealth-demo.sh`) | Open [qday.unitlabs.xyz](https://qday.unitlabs.xyz); measured transactions are in `docs/devnet.md` |
+| It works end to end on a real chain | Hosted devnet (`deploy/coolify`), wallet (`web/`), demos (`scripts/mldsa-demo.sh`, `scripts/stealth-demo.sh`) | Open the wallet at [qday.unitlabs.xyz/app](https://qday.unitlabs.xyz/app); measured transactions are in `docs/devnet.md` |
 
 ## Map
 
