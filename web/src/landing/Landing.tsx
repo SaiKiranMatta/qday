@@ -15,7 +15,7 @@ const APP = "/app";
 const PARTS = [
   { id: "bezel", n: "01", name: "Bezel" },
   { id: "tray", n: "02", name: "Tray" },
-  { id: "esp32", n: "03", name: "ESP32-S3" },
+  { id: "esp32", n: "03", name: "ESP32-S3 chip" },
   { id: "screen", n: "04", name: "2.8-inch screen" },
   { id: "keys", n: "05", name: "Keys" },
   { id: "breadboard", n: "06", name: "Breadboard" },

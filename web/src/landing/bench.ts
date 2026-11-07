@@ -87,6 +87,72 @@ async function loadStl(url: string): Promise<THREE.BufferGeometry> {
   return geometry;
 }
 
+/** The laser marking on the module's shield, as a transparent texture. */
+function markingTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 512;
+  const g = canvas.getContext("2d")!;
+  g.fillStyle = "rgb(36 41 46 / 0.82)";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.font = "600 50px ui-monospace, Menlo, monospace";
+  g.fillText("ESP32-S3", 256, 196);
+  g.font = "500 34px ui-monospace, Menlo, monospace";
+  g.fillText("WROOM-1", 256, 262);
+  g.fillText("N16R8", 256, 318);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/**
+ * The YD-ESP32-S3 board. The chip that holds the keys and signs is the ESP32-S3 under the
+ * WROOM-1 module's shield, at the far end from the two USB-C ports, its PCB antenna outward.
+ */
+function esp32Board(): THREE.Group {
+  const group = new THREE.Group();
+  group.add(box(-6.1, 22.5, 16.08, 80.48, 11, 12.6, COLOURS.board, 0.6));
+  // The two USB-C ports, inside the case model's envelope for them.
+  group.add(box(-0.6, 7, 73.5, 81.5, 12.6, 15.8, COLOURS.shield, 0.35));
+  group.add(box(8.4, 16, 73.5, 81.5, 12.6, 15.8, COLOURS.shield, 0.35));
+  // The module: 18 x 25.5 x 3.1 mm, its shield can and the meandered antenna on its bare end.
+  group.add(box(-0.8, 17.2, 16.6, 42.1, 12.6, 13.4, COLOURS.pcb, 0.55));
+  group.add(box(-0.1, 16.5, 23.2, 41.5, 13.4, 15.7, COLOURS.shield, 0.3));
+  for (let i = 0; i < 7; i++) {
+    const x = 1.2 + i * 2.2;
+    group.add(box(x, x + 0.6, 17.8, 21.6, 13.4, 13.48, COLOURS.shield, 0.4));
+    const y = i % 2 ? 17.8 : 21;
+    if (i < 6) group.add(box(x, x + 2.8, y, y + 0.6, 13.4, 13.48, COLOURS.shield, 0.4));
+  }
+  const marking = new THREE.Mesh(
+    new THREE.PlaneGeometry(15, 15),
+    new THREE.MeshStandardMaterial({ map: markingTexture(), transparent: true, roughness: 0.5 }),
+  );
+  marking.position.set(8.2, 32.35, 15.72);
+  group.add(marking);
+  // BOOT and RST beside the ports.
+  for (const x of [1.2, 11.2]) {
+    group.add(box(x, x + 4, 66, 69.6, 12.6, 14.1, COLOURS.switch, 0.5));
+    group.add(box(x + 1.1, x + 2.9, 66.9, 68.7, 14.1, 14.6, COLOURS.shield, 0.4));
+  }
+  // The two header rows' solder joints, 22 pins each at 2.54 mm.
+  const joints = new THREE.InstancedMesh(
+    new THREE.CylinderGeometry(0.55, 0.7, 0.7, 10),
+    new THREE.MeshStandardMaterial({ color: COLOURS.shield, roughness: 0.35, metalness: 0.1 }),
+    44,
+  );
+  const place = new THREE.Object3D();
+  place.rotation.x = Math.PI / 2;
+  for (let i = 0; i < 44; i++) {
+    place.position.set(i < 22 ? -3.23 : 19.63, 21.6 + (i % 22) * 2.54, 12.95);
+    place.updateMatrix();
+    joints.setMatrixAt(i, place.matrix);
+  }
+  joints.castShadow = true;
+  group.add(joints);
+  return group;
+}
+
 /** The parts, in assembly order, with their places on the bench. */
 function partSpecs(): PartSpec[] {
   return [
@@ -119,13 +185,8 @@ function partSpecs(): PartSpec[] {
     },
     {
       id: "esp32",
-      build: () => {
-        const group = new THREE.Group();
-        group.add(box(-6.1, 22.5, 16.08, 80.48, 11, 12.6, COLOURS.board, 0.6));
-        group.add(box(-0.6, 16, 72, 81.5, 12.6, 15.8, COLOURS.shield, 0.35));
-        return group;
-      },
-      bench: { x: -50, y: 22, turn: 0 },
+      build: esp32Board,
+      bench: { x: -47, y: 22, turn: 0 },
       window: [0.21, 0.29],
       lift: 50,
     },
@@ -466,7 +527,10 @@ export function createBench(options: BenchOptions): Bench {
         if (object instanceof THREE.Mesh) {
           object.geometry.dispose();
           const materials = Array.isArray(object.material) ? object.material : [object.material];
-          for (const material of materials) material.dispose();
+          for (const material of materials) {
+            (material as THREE.MeshStandardMaterial).map?.dispose();
+            material.dispose();
+          }
         }
       });
       for (const texture of textures) texture.dispose();
