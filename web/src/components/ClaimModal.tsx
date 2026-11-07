@@ -63,7 +63,7 @@ export function ClaimModal({
           />
           <p className="mt-2 min-h-5 text-xs text-muted">
             {!valid
-              ? "Enter a full 0x address, 42 characters."
+              ? "Enter a full 0x address of 42 characters, with its capitals unchanged."
               : !enough
                 ? "This payment is too small to cover the fee."
                 : toOwn

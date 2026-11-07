@@ -1,6 +1,7 @@
 import ethLogo from "cryptocurrency-icons/svg/color/eth.svg";
 import usdcLogo from "cryptocurrency-icons/svg/color/usdc.svg";
 import wbtcLogo from "cryptocurrency-icons/svg/color/wbtc.svg";
+import { isAddress as isValidAddress } from "viem";
 
 export type Address = `0x${string}`;
 
@@ -44,6 +45,7 @@ export const KNOWN_TOKENS: Token[] = [
   },
 ];
 
+/** Checks the checksum too, because viem refuses a bad one later, after the device has already signed. */
 export function isAddress(text: string): text is Address {
-  return /^0x[0-9a-fA-F]{40}$/.test(text);
+  return isValidAddress(text);
 }

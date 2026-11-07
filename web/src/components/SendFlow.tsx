@@ -235,7 +235,7 @@ function DetailsForm({
       </div>
       <div className="mt-2 min-h-5 font-mono text-xs" aria-live="polite">
         {to && !validTo && (
-          <span className="font-sans text-bad">Enter a full 0x address of 42 characters, or a private address.</span>
+          <span className="font-sans text-bad">Enter a full 0x address of 42 characters with its capitals unchanged, or a private address.</span>
         )}
         {toSelf && <span className="font-sans text-warn">That's this account. Send to a different address.</span>}
         {stealthToken && <span className="font-sans text-bad">Private payments can only send ETH.</span>}

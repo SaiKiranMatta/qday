@@ -77,7 +77,7 @@ export function ManageTokens({ tokens, onClose }: { tokens: TokenList; onClose: 
             className="mt-1.5 w-full rounded-xl bg-surface-2 px-3 py-2.5 font-mono text-xs outline-none placeholder:text-muted focus:ring-1 focus:ring-alabaster/25"
           />
           {address && !isAddress(address) && (
-            <div className="mt-1.5 text-xs text-bad">Enter a full 0x address, 42 characters.</div>
+            <div className="mt-1.5 text-xs text-bad">Enter a full 0x address of 42 characters, with its capitals unchanged.</div>
           )}
           <div className="mt-3 flex gap-2">
             <div className="min-w-0 flex-1">
