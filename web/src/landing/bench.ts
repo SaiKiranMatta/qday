@@ -87,22 +87,33 @@ async function loadStl(url: string): Promise<THREE.BufferGeometry> {
   return geometry;
 }
 
-/** The laser marking on the module's shield, as a transparent texture. */
-function markingTexture(): THREE.CanvasTexture {
+/** A part's laser marking, drawn on a transparent canvas: [text, font size, y] per line, centred. */
+function marking(
+  width: number,
+  height: number,
+  colour: string,
+  lines: [string, number, number][],
+  extra?: (g: CanvasRenderingContext2D) => void,
+): THREE.Mesh {
+  const scale = 512 / width;
   const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = 512;
+  canvas.width = 512;
+  canvas.height = Math.round(height * scale);
   const g = canvas.getContext("2d")!;
-  g.fillStyle = "rgb(36 41 46 / 0.82)";
+  g.fillStyle = colour;
   g.textAlign = "center";
   g.textBaseline = "middle";
-  g.font = "600 50px ui-monospace, Menlo, monospace";
-  g.fillText("ESP32-S3", 256, 196);
-  g.font = "500 34px ui-monospace, Menlo, monospace";
-  g.fillText("WROOM-1", 256, 262);
-  g.fillText("N16R8", 256, 318);
+  for (const [i, [text, size, y]] of lines.entries()) {
+    g.font = `${i ? 500 : 600} ${size}px ui-monospace, Menlo, monospace`;
+    g.fillText(text, 256, y);
+  }
+  extra?.(g);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
+  return new THREE.Mesh(
+    new THREE.PlaneGeometry(width, height),
+    new THREE.MeshStandardMaterial({ map: texture, transparent: true, roughness: 0.5 }),
+  );
 }
 
 /**
@@ -124,16 +135,17 @@ function esp32Board(): THREE.Group {
     const y = i % 2 ? 17.8 : 21;
     if (i < 6) group.add(box(x, x + 2.8, y, y + 0.6, 13.4, 13.48, COLOURS.shield, 0.4));
   }
-  const marking = new THREE.Mesh(
-    new THREE.PlaneGeometry(15, 15),
-    new THREE.MeshStandardMaterial({ map: markingTexture(), transparent: true, roughness: 0.5 }),
-  );
-  marking.position.set(8.2, 32.35, 15.72);
-  group.add(marking);
-  // BOOT and RST beside the ports.
-  for (const x of [1.2, 11.2]) {
-    group.add(box(x, x + 4, 66, 69.6, 12.6, 14.1, COLOURS.switch, 0.5));
-    group.add(box(x + 1.1, x + 2.9, 66.9, 68.7, 14.1, 14.6, COLOURS.shield, 0.4));
+  const label = marking(15, 15, "rgb(36 41 46 / 0.82)", [
+    ["ESP32-S3", 50, 196],
+    ["WROOM-1", 34, 262],
+    ["N16R8", 34, 318],
+  ]);
+  label.position.set(8.2, 32.35, 15.72);
+  group.add(label);
+  // RST under the bezel's pinhole, BOOT beside it.
+  for (const x of [5.4, 11]) {
+    group.add(box(x - 2, x + 2, 45.8, 49.4, 12.6, 14.1, COLOURS.switch, 0.5));
+    group.add(box(x - 0.9, x + 0.9, 46.7, 48.5, 14.1, 14.6, COLOURS.shield, 0.4));
   }
   // The two header rows' solder joints, 22 pins each at 2.54 mm.
   const joints = new THREE.InstancedMesh(
@@ -150,6 +162,32 @@ function esp32Board(): THREE.Group {
   }
   joints.castShadow = true;
   group.add(joints);
+  return group;
+}
+
+/**
+ * The ATECC608A on a small breakout, plugged into the free breadboard strips between the ESP32-S3
+ * module's antenna end and the tray wall: an SOIC-8 package and a 4-pin header.
+ */
+function ateccBoard(): THREE.Group {
+  const group = new THREE.Group();
+  group.add(box(1.7, 14.7, 2, 14.6, 11, 12.6, COLOURS.pcb, 0.6));
+  // The header runs along the strips, one pin per strip, down into the breadboard.
+  group.add(box(2, 4.54, 3.22, 13.38, 8.5, 11, COLOURS.switch, 0.6));
+  for (const y of [4.49, 7.03, 9.57, 12.11]) group.add(cylinder(3.27, y, 1.3, 12.6, 13.3, COLOURS.shield));
+  // SOIC-8: 4.9 x 3.9 mm, four leads on each long side at 1.27 mm.
+  group.add(box(7.75, 12.65, 6.35, 10.25, 12.6, 14.05, COLOURS.switch, 0.45));
+  for (const x of [8.295, 9.565, 10.835, 12.105]) {
+    group.add(box(x - 0.21, x + 0.21, 5.35, 6.35, 12.6, 13, COLOURS.shield, 0.35));
+    group.add(box(x - 0.21, x + 0.21, 10.25, 11.25, 12.6, 13, COLOURS.shield, 0.35));
+  }
+  const label = marking(4.9, 3.9, "rgb(200 204 208 / 0.8)", [["ATECC608A", 78, 200]], (g) => {
+    g.beginPath();
+    g.arc(44, 360, 18, 0, Math.PI * 2);
+    g.fill();
+  });
+  label.position.set(10.2, 8.3, 14.06);
+  group.add(label);
   return group;
 }
 
@@ -188,6 +226,13 @@ function partSpecs(): PartSpec[] {
       build: esp32Board,
       bench: { x: -47, y: 22, turn: 0 },
       window: [0.21, 0.29],
+      lift: 50,
+    },
+    {
+      id: "atecc",
+      build: ateccBoard,
+      bench: { x: -47, y: -40, turn: 0 },
+      window: [0.23, 0.31],
       lift: 50,
     },
     {
