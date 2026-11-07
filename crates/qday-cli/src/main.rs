@@ -128,7 +128,7 @@ enum LockdownCommand {
         #[arg(long)]
         fuses: std::path::PathBuf,
     },
-    /// Lock a real chip for good. There is no way back
+    /// Prototype: don't run this unless you explicitly mean to. Locks a real chip for good
     LockdownBurn {
         #[command(flatten)]
         inputs: lockdown::Inputs,

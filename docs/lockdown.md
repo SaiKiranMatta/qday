@@ -1,5 +1,9 @@
 # Locking the chip
 
+> **Prototype. Don't run any of this unless you explicitly want to lock a board.** It's disabled:
+> nothing here happens on its own, and the normal build and flash steps never use it. It has never
+> run on a chip.
+
 This is the plan for locking the ESP32-S3, and the code that carries it out. **No board has been
 locked.** A board with no seal key in its fuses runs exactly as it did before this code existed.
 

@@ -11,6 +11,9 @@ use anyhow::{Context, Result, bail};
 use clap::Args;
 use qday_wallet::lockdown::{Check, Fuses};
 
+/// Printed ahead of the plan, and so ahead of any real burn.
+const WARNING: &str = "PROTOTYPE: this has never run on a chip. Don't run it unless you \
+                       explicitly mean to lock this board for good.\n\n";
 const CHIP: &str = "esp32s3";
 /// Where the partition table starts, so also the most room the bootloader can have.
 const TABLE_AT: u64 = 0x8000;
@@ -433,7 +436,7 @@ fn write_steps(out: &mut String, title: &str, steps: &[Step], target: &Target) {
 #[must_use]
 pub fn plan(inputs: &Inputs, port: &str) -> String {
     let target = Target::Chip(port.to_string());
-    let mut out = String::new();
+    let mut out = String::from(WARNING);
     write_steps(&mut out, "On the laptop", &prepare_steps(inputs), &target);
     write_steps(&mut out, "On the chip", &burn_steps(inputs), &target);
     out
@@ -715,6 +718,11 @@ mod tests {
     fn the_chip_must_match_whatever_the_case() {
         assert!(names_chip("MAC: AA:BB:CC:DD:EE:FF\n", "aa:bb:cc:dd:ee:ff"));
         assert!(!names_chip("MAC: AA:BB:CC:DD:EE:00\n", "aa:bb:cc:dd:ee:ff"));
+    }
+
+    #[test]
+    fn the_plan_opens_with_the_warning() {
+        assert!(plan(&inputs(), "/dev/port").starts_with(WARNING));
     }
 
     #[test]

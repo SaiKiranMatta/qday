@@ -1,3 +1,6 @@
+# PROTOTYPE: don't flash this bootloader unless you explicitly want to lock the board. On an open
+# chip it burns fuses by itself on first boot, and that can't be undone. See docs/lockdown.md.
+
 CONFIG_IDF_TARGET="esp32s3"
 
 # Checks the app's signature. The stock bootloader doesn't, so a locked chip must use this one.
