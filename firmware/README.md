@@ -92,6 +92,9 @@ partition table in `partitions.csv` is used.
 The `qday` partition at 0x310000 holds the keys, the counter and the passcode. Reflashing the app
 leaves it alone.
 
+To lock the chip for good, with signed firmware and encrypted flash, see
+[`docs/lockdown.md`](../docs/lockdown.md). Nothing here turns that on.
+
 ## First start
 
 1. Touch the three crosses to calibrate the screen. Hold K1 at start to do this again later.

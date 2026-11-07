@@ -6,6 +6,8 @@
 
 extern crate alloc;
 
+use alloc::boxed::Box;
+
 mod hardware;
 #[cfg(feature = "measure")]
 mod measure;
@@ -18,6 +20,7 @@ use esp_hal::{
     clock::CpuClock,
     delay::Delay,
     gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull},
+    hmac::Hmac,
     main,
     psram::{Psram, PsramConfig, PsramMode, SpiRamFreq},
     rmt::{Rmt, TxChannelConfig, TxChannelCreator},
@@ -47,7 +50,10 @@ use qday_wallet::protocol::LineBuffer;
 use qday_wallet::settings::Settings;
 use qday_wallet::wallet::Wallet;
 
-use hardware::{Board, HardwareRng, PartitionFlash, StatusLight, Touch, UsbWatch, now_ms};
+use hardware::{
+    Board, ChipSealer, HardwareRng, PartitionFlash, StatusLight, Touch, UsbWatch, now_ms,
+    read_fuses,
+};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -150,9 +156,23 @@ fn main() -> ! {
         storage: FlashStorage::new(peripherals.FLASH),
         psram: psram_range,
     }));
+    // With no seal key in the fuses this is `None`, and the wallet runs exactly as it always has.
+    let sealer = read_fuses().seal_key().map(|block| {
+        ChipSealer::new(Hmac::new(peripherals.HMAC), block).expect("the block number is real")
+    });
+    let (key_store, passcode) = match sealer {
+        Some(sealer) => (
+            KeyStore::new(&flash).sealed_by(Box::new(sealer.clone())),
+            Passcode::new(&flash, layout::PASSCODE).sealed_by(Box::new(sealer)),
+        ),
+        None => (
+            KeyStore::new(&flash),
+            Passcode::new(&flash, layout::PASSCODE),
+        ),
+    };
     let wallet = Wallet::open(
-        KeyStore::new(&flash),
-        Passcode::new(&flash, layout::PASSCODE),
+        key_store,
+        passcode,
         FlashCounter::new(&flash, layout::COUNTER),
         Settings::new(&flash),
         MlKeyStore::new(&flash),

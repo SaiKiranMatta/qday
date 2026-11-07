@@ -1,5 +1,7 @@
 //! The hardware behind `qday-ui`'s traits.
 
+use alloc::rc::Rc;
+use core::cell::RefCell;
 use core::ops::Range;
 
 use embedded_graphics::{pixelcolor::Rgb565, pixelcolor::raw::RawU16};
@@ -7,7 +9,9 @@ use embedded_hal::digital::OutputPin;
 use esp_hal::{
     Blocking,
     delay::Delay,
+    efuse::{self, EfuseField},
     gpio::{Level, Output},
+    hmac::{Hmac, HmacPurpose, KeyId},
     peripherals::USB_DEVICE,
     rmt::{Channel, PulseCode, Tx},
     rng::Trng,
@@ -21,7 +25,10 @@ use qday_ui::app::{Host, Light};
 use qday_ui::canvas::WIDTH;
 use qday_ui::fb::Framebuffer;
 use qday_wallet::flash::{FlashError, SECTOR, WordFlash, touches};
+use qday_wallet::lockdown::Fuses;
 use qday_wallet::rng::Rng;
+use qday_wallet::seal::{SealError, Sealer};
+use qday_xmss::Hash;
 
 /// Where the `qday` partition starts in flash.
 const PARTITION: u32 = 0x31_0000;
@@ -47,6 +54,73 @@ const USB_STALL_MS: u64 = 1000;
 
 /// How often to look for USB start-of-frame packets, which only arrive from a live host.
 const USB_CHECK_MS: u64 = 500;
+
+/// Reads the security fuses. This changes nothing on the chip.
+pub fn read_fuses() -> Fuses {
+    let purpose = |field: EfuseField| efuse::read_field_le::<u8>(field);
+    Fuses {
+        crypt_count: efuse::read_field_le(efuse::SPI_BOOT_CRYPT_CNT),
+        secure_boot: efuse::read_bit(efuse::SECURE_BOOT_EN),
+        pad_jtag_off: efuse::read_bit(efuse::DIS_PAD_JTAG),
+        usb_jtag_off: efuse::read_bit(efuse::DIS_USB_JTAG),
+        soft_jtag: efuse::read_field_le(efuse::SOFT_DIS_JTAG),
+        direct_boot_off: efuse::read_bit(efuse::DIS_DIRECT_BOOT),
+        manual_encrypt_off: efuse::read_bit(efuse::DIS_DOWNLOAD_MANUAL_ENCRYPT),
+        download_icache_off: efuse::read_bit(efuse::DIS_DOWNLOAD_ICACHE),
+        download_dcache_off: efuse::read_bit(efuse::DIS_DOWNLOAD_DCACHE),
+        secure_download: efuse::read_bit(efuse::ENABLE_SECURITY_DOWNLOAD),
+        key_purposes: [
+            purpose(efuse::KEY_PURPOSE_0),
+            purpose(efuse::KEY_PURPOSE_1),
+            purpose(efuse::KEY_PURPOSE_2),
+            purpose(efuse::KEY_PURPOSE_3),
+            purpose(efuse::KEY_PURPOSE_4),
+            purpose(efuse::KEY_PURPOSE_5),
+        ],
+    }
+}
+
+/// The chip's HMAC, run with a key in a fuse that software can use but never read. The key store
+/// and the passcode share this one peripheral.
+#[derive(Clone)]
+pub struct ChipSealer {
+    hmac: Rc<RefCell<Hmac<'static>>>,
+    key: KeyId,
+}
+
+impl ChipSealer {
+    /// The sealer for the key in fuse block `block`, if the block number is real.
+    pub fn new(hmac: Hmac<'static>, block: u8) -> Option<Self> {
+        let key = match block {
+            0 => KeyId::Key0,
+            1 => KeyId::Key1,
+            2 => KeyId::Key2,
+            3 => KeyId::Key3,
+            4 => KeyId::Key4,
+            5 => KeyId::Key5,
+            _ => return None,
+        };
+        Some(Self {
+            hmac: Rc::new(RefCell::new(hmac)),
+            key,
+        })
+    }
+}
+
+impl Sealer for ChipSealer {
+    fn keyed_hash(&mut self, message: &[u8]) -> Result<Hash, SealError> {
+        let mut hmac = self.hmac.borrow_mut();
+        hmac.init();
+        nb::block!(hmac.configure(HmacPurpose::ToUser, self.key)).map_err(|_| SealError)?;
+        let mut rest = message;
+        while !rest.is_empty() {
+            rest = nb::block!(hmac.update(rest)).map_err(|_| SealError)?;
+        }
+        let mut hash = [0; 32];
+        nb::block!(hmac.finalize(&mut hash)).map_err(|_| SealError)?;
+        Ok(hash)
+    }
+}
 
 /// Milliseconds since start.
 pub fn now_ms() -> u64 {
@@ -227,6 +301,10 @@ where
 {
     fn now_ms(&mut self) -> u64 {
         now_ms()
+    }
+
+    fn fuses(&mut self) -> Fuses {
+        read_fuses()
     }
 
     fn present(&mut self, fb: &mut Framebuffer) {
