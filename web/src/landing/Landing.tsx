@@ -15,12 +15,13 @@ const APP = "/app";
 const PARTS = [
   { id: "bezel", n: "01", name: "Bezel" },
   { id: "tray", n: "02", name: "Tray" },
-  { id: "esp32", n: "03", name: "ESP32-S3" },
-  { id: "screen", n: "04", name: "2.8-inch screen" },
-  { id: "keys", n: "05", name: "Keys" },
-  { id: "breadboard", n: "06", name: "Breadboard" },
-  { id: "spacer", n: "07", name: "Key spacer" },
-  { id: "stylus", n: "08", name: "Stylus" },
+  { id: "esp32", n: "03", name: "ESP32-S3 chip" },
+  { id: "atecc", n: "04", name: "ATECC608A" },
+  { id: "screen", n: "05", name: "2.8-inch screen" },
+  { id: "keys", n: "06", name: "Keys" },
+  { id: "breadboard", n: "07", name: "Breadboard" },
+  { id: "spacer", n: "08", name: "Key spacer" },
+  { id: "stylus", n: "09", name: "Stylus" },
 ] as const;
 
 /** How it works, told on the bench as the page scrolls; each step owns a slice of the progress. */

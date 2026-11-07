@@ -87,6 +87,110 @@ async function loadStl(url: string): Promise<THREE.BufferGeometry> {
   return geometry;
 }
 
+/** A part's laser marking, drawn on a transparent canvas: [text, font size, y] per line, centred. */
+function marking(
+  width: number,
+  height: number,
+  colour: string,
+  lines: [string, number, number][],
+  extra?: (g: CanvasRenderingContext2D) => void,
+): THREE.Mesh {
+  const scale = 512 / width;
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = Math.round(height * scale);
+  const g = canvas.getContext("2d")!;
+  g.fillStyle = colour;
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  for (const [i, [text, size, y]] of lines.entries()) {
+    g.font = `${i ? 500 : 600} ${size}px ui-monospace, Menlo, monospace`;
+    g.fillText(text, 256, y);
+  }
+  extra?.(g);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return new THREE.Mesh(
+    new THREE.PlaneGeometry(width, height),
+    new THREE.MeshStandardMaterial({ map: texture, transparent: true, roughness: 0.5 }),
+  );
+}
+
+/**
+ * The YD-ESP32-S3 board. The chip that holds the keys and signs is the ESP32-S3 under the
+ * WROOM-1 module's shield, at the far end from the two USB-C ports, its PCB antenna outward.
+ */
+function esp32Board(): THREE.Group {
+  const group = new THREE.Group();
+  group.add(box(-6.1, 22.5, 16.08, 80.48, 11, 12.6, COLOURS.board, 0.6));
+  // The two USB-C ports, inside the case model's envelope for them.
+  group.add(box(-0.6, 7, 73.5, 81.5, 12.6, 15.8, COLOURS.shield, 0.35));
+  group.add(box(8.4, 16, 73.5, 81.5, 12.6, 15.8, COLOURS.shield, 0.35));
+  // The module: 18 x 25.5 x 3.1 mm, its shield can and the meandered antenna on its bare end.
+  group.add(box(-0.8, 17.2, 16.6, 42.1, 12.6, 13.4, COLOURS.pcb, 0.55));
+  group.add(box(-0.1, 16.5, 23.2, 41.5, 13.4, 15.7, COLOURS.shield, 0.3));
+  for (let i = 0; i < 7; i++) {
+    const x = 1.2 + i * 2.2;
+    group.add(box(x, x + 0.6, 17.8, 21.6, 13.4, 13.48, COLOURS.shield, 0.4));
+    const y = i % 2 ? 17.8 : 21;
+    if (i < 6) group.add(box(x, x + 2.8, y, y + 0.6, 13.4, 13.48, COLOURS.shield, 0.4));
+  }
+  const label = marking(15, 15, "rgb(36 41 46 / 0.82)", [
+    ["ESP32-S3", 50, 196],
+    ["WROOM-1", 34, 262],
+    ["N16R8", 34, 318],
+  ]);
+  label.position.set(8.2, 32.35, 15.72);
+  group.add(label);
+  // RST under the bezel's pinhole, BOOT beside it.
+  for (const x of [5.4, 11]) {
+    group.add(box(x - 2, x + 2, 45.8, 49.4, 12.6, 14.1, COLOURS.switch, 0.5));
+    group.add(box(x - 0.9, x + 0.9, 46.7, 48.5, 14.1, 14.6, COLOURS.shield, 0.4));
+  }
+  // The two header rows' solder joints, 22 pins each at 2.54 mm.
+  const joints = new THREE.InstancedMesh(
+    new THREE.CylinderGeometry(0.55, 0.7, 0.7, 10),
+    new THREE.MeshStandardMaterial({ color: COLOURS.shield, roughness: 0.35, metalness: 0.1 }),
+    44,
+  );
+  const place = new THREE.Object3D();
+  place.rotation.x = Math.PI / 2;
+  for (let i = 0; i < 44; i++) {
+    place.position.set(i < 22 ? -3.23 : 19.63, 21.6 + (i % 22) * 2.54, 12.95);
+    place.updateMatrix();
+    joints.setMatrixAt(i, place.matrix);
+  }
+  joints.castShadow = true;
+  group.add(joints);
+  return group;
+}
+
+/**
+ * The ATECC608A on a small breakout, plugged into the free breadboard strips between the ESP32-S3
+ * module's antenna end and the tray wall: an SOIC-8 package and a 4-pin header.
+ */
+function ateccBoard(): THREE.Group {
+  const group = new THREE.Group();
+  group.add(box(1.7, 14.7, 2, 14.6, 11, 12.6, COLOURS.pcb, 0.6));
+  // The header runs along the strips, one pin per strip, down into the breadboard.
+  group.add(box(2, 4.54, 3.22, 13.38, 8.5, 11, COLOURS.switch, 0.6));
+  for (const y of [4.49, 7.03, 9.57, 12.11]) group.add(cylinder(3.27, y, 1.3, 12.6, 13.3, COLOURS.shield));
+  // SOIC-8: 4.9 x 3.9 mm, four leads on each long side at 1.27 mm.
+  group.add(box(7.75, 12.65, 6.35, 10.25, 12.6, 14.05, COLOURS.switch, 0.45));
+  for (const x of [8.295, 9.565, 10.835, 12.105]) {
+    group.add(box(x - 0.21, x + 0.21, 5.35, 6.35, 12.6, 13, COLOURS.shield, 0.35));
+    group.add(box(x - 0.21, x + 0.21, 10.25, 11.25, 12.6, 13, COLOURS.shield, 0.35));
+  }
+  const label = marking(4.9, 3.9, "rgb(200 204 208 / 0.8)", [["ATECC608A", 78, 200]], (g) => {
+    g.beginPath();
+    g.arc(44, 360, 18, 0, Math.PI * 2);
+    g.fill();
+  });
+  label.position.set(10.2, 8.3, 14.06);
+  group.add(label);
+  return group;
+}
+
 /** The parts, in assembly order, with their places on the bench. */
 function partSpecs(): PartSpec[] {
   return [
@@ -119,14 +223,16 @@ function partSpecs(): PartSpec[] {
     },
     {
       id: "esp32",
-      build: () => {
-        const group = new THREE.Group();
-        group.add(box(-6.1, 22.5, 16.08, 80.48, 11, 12.6, COLOURS.board, 0.6));
-        group.add(box(-0.6, 16, 72, 81.5, 12.6, 15.8, COLOURS.shield, 0.35));
-        return group;
-      },
-      bench: { x: -50, y: 22, turn: 0 },
+      build: esp32Board,
+      bench: { x: -47, y: 22, turn: 0 },
       window: [0.21, 0.29],
+      lift: 50,
+    },
+    {
+      id: "atecc",
+      build: ateccBoard,
+      bench: { x: -47, y: -40, turn: 0 },
+      window: [0.23, 0.31],
       lift: 50,
     },
     {
@@ -466,7 +572,10 @@ export function createBench(options: BenchOptions): Bench {
         if (object instanceof THREE.Mesh) {
           object.geometry.dispose();
           const materials = Array.isArray(object.material) ? object.material : [object.material];
-          for (const material of materials) material.dispose();
+          for (const material of materials) {
+            (material as THREE.MeshStandardMaterial).map?.dispose();
+            material.dispose();
+          }
         }
       });
       for (const texture of textures) texture.dispose();
